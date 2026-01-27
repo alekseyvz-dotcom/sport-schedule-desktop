@@ -24,19 +24,19 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Show project tree (debug)
+      - name: Debug list app/services
+        shell: pwsh
         run: |
-          dir
-          dir app
-          dir app\services
-          dir app\ui
+          Get-ChildItem -Recurse -File app/services | ForEach-Object { $_.FullName }
+          if (Test-Path "app/services/tenants_service.py") { "FOUND tenants_service.py" } else { "NOT FOUND tenants_service.py" }
 
       - name: Clean build folders
+        shell: pwsh
         run: |
           if (Test-Path build) { Remove-Item build -Recurse -Force }
           if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 
-      - name: Build one-file exe
+      - name: Build one-file exe (spec)
         run: |
           pyinstaller --noconfirm --clean SportSchedule.spec
 
