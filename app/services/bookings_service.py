@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta
-from typing import List, Optional, Iterable, Dict, Tuple
+from typing import List, Iterable
 
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
@@ -14,12 +14,12 @@ from app.db import get_conn, put_conn
 class Booking:
     id: int
     venue_id: int
-    tenant_id: int
+    tenant_id: int | None
     title: str
-    kind: str          # 'PD' или 'GZ'
+    kind: str          # 'PD' или 'GZ' (в БД это bookings.activity)
     starts_at: datetime
     ends_at: datetime
-    status: str        # 'active' / 'cancelled'
+    status: str        # planned/cancelled/done
     tenant_name: str
 
 
@@ -40,10 +40,18 @@ def list_bookings_for_day(
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             sql = """
-                SELECT b.id, b.venue_id, b.tenant_id, b.title, b.kind, b.starts_at, b.ends_at, b.status,
-                       t.name AS tenant_name
+                SELECT
+                    b.id,
+                    b.venue_id,
+                    b.tenant_id,
+                    b.title,
+                    b.activity AS kind,
+                    b.starts_at,
+                    b.ends_at,
+                    b.status,
+                    COALESCE(t.name, '') AS tenant_name
                 FROM public.bookings b
-                JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.tenants t ON t.id = b.tenant_id
                 WHERE b.venue_id = ANY(%s)
                   AND b.starts_at < %s
                   AND b.ends_at   > %s
@@ -57,16 +65,17 @@ def list_bookings_for_day(
 
             cur.execute(sql, params)
             rows = cur.fetchall()
+
             return [
                 Booking(
                     id=int(r["id"]),
                     venue_id=int(r["venue_id"]),
-                    tenant_id=int(r["tenant_id"]),
+                    tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
                     title=str(r.get("title") or ""),
                     kind=str(r.get("kind") or ""),
                     starts_at=r["starts_at"],
                     ends_at=r["ends_at"],
-                    status=str(r.get("status") or "active"),
+                    status=str(r.get("status") or "planned"),
                     tenant_name=str(r.get("tenant_name") or ""),
                 )
                 for r in rows
@@ -78,7 +87,7 @@ def list_bookings_for_day(
 
 def create_booking(
     venue_id: int,
-    tenant_id: int,
+    tenant_id: int | None,
     title: str,
     kind: str,
     starts_at: datetime,
@@ -97,23 +106,32 @@ def create_booking(
     conn = None
     try:
         conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO public.bookings(venue_id, tenant_id, title, kind, starts_at, ends_at, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'active')
-                    RETURNING id
-                    """,
-                    (int(venue_id), int(tenant_id), title, kind, starts_at, ends_at),
-                )
-                return int(cur.fetchone()[0])
-    except errors.RaiseException as e:
-        # если триггер пересечения делает RAISE EXCEPTION с текстом
-        msg = str(e).lower()
-        if "overlap" in msg or "пересеч" in msg or "conflict" in msg:
-            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.bookings(venue_id, tenant_id, title, activity, starts_at, ends_at, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'planned')
+                RETURNING id
+                """,
+                (int(venue_id), (int(tenant_id) if tenant_id is not None else None), title, kind, starts_at, ends_at),
+            )
+            new_id = int(cur.fetchone()[0])
+
+        # явный commit (важно при работе с пулом)
+        conn.commit()
+        return new_id
+
+    except errors.ExclusionViolation as e:
+        # это как раз ваш EXCLUDE no_overlap_per_venue
+        if conn:
+            conn.rollback()
+        raise RuntimeError("Площадка занята в выбранный интервал.") from e
+
+    except Exception:
+        if conn:
+            conn.rollback()
         raise
+
     finally:
         if conn:
             put_conn(conn)
