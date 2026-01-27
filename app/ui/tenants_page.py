@@ -2,12 +2,26 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QTableWidget, QTableWidgetItem, QMessageBox, QCheckBox
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QCheckBox,
 )
 
-from app.services.tenants_service import list_tenants, create_tenant, update_tenant, set_tenant_active, Tenant
+from app.services.tenants_service import (
+    Tenant,
+    list_tenants,
+    create_tenant,
+    update_tenant,
+    set_tenant_active,
+)
 from app.ui.tenant_dialog import TenantDialog
+
 
 class TenantsPage(QWidget):
     def __init__(self, parent=None):
@@ -36,9 +50,11 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_archive)
 
         self.tbl = QTableWidget(0, 7)
-        self.tbl.setHorizontalHeaderLabels(["ID", "Название", "ИНН", "Телефон", "Email", "Активен", "Комментарий"])
-        self.tbl.setSelectionBehavior(self.tbl.SelectionBehavior.SelectRows)
-        self.tbl.setEditTriggers(self.tbl.EditTrigger.NoEditTriggers)
+        self.tbl.setHorizontalHeaderLabels(
+            ["ID", "Название", "ИНН", "Телефон", "Email", "Активен", "Комментарий"]
+        )
+        self.tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tbl.doubleClicked.connect(self._on_edit)
 
         root = QVBoxLayout(self)
@@ -51,8 +67,11 @@ class TenantsPage(QWidget):
         row = self.tbl.currentRow()
         if row < 0:
             return None
-        t = self.tbl.item(row, 0).data(Qt.UserRole)
-        return t
+        item = self.tbl.item(row, 0)
+        if not item:
+            return None
+        t = item.data(Qt.UserRole)
+        return t if isinstance(t, Tenant) else None
 
     def reload(self):
         try:
@@ -84,22 +103,23 @@ class TenantsPage(QWidget):
 
     def _on_add(self):
         dlg = TenantDialog(self, title="Создать арендатора")
-        res = dlg.exec()
-        QMessageBox.information(self, "DEBUG", f"Dialog result={res} (Accepted={dlg.Accepted})")
-        if res != dlg.Accepted:
+        if dlg.exec() != TenantDialog.Accepted:
             return
-    
+
         data = dlg.values()
-        QMessageBox.information(self, "DEBUG", f"values={data}")
-    
+
         try:
             new_id = create_tenant(**data)
         except Exception as e:
-            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e!r}")
+            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e}")
             return
-    
-        QMessageBox.information(self, "DEBUG", f"Inserted tenant id={new_id}")
+
+        # Чётко показываем результат и сразу обновляем список
+        QMessageBox.information(self, "Арендаторы", f"Создан арендатор (id={new_id}).")
         self.reload()
+
+        # Опционально: выделить добавленную строку, если она попала в текущий фильтр
+        self._select_row_by_id(new_id)
 
     def _on_edit(self):
         t = self._selected_tenant()
@@ -118,7 +138,7 @@ class TenantsPage(QWidget):
                 "comment": t.comment,
             },
         )
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != TenantDialog.Accepted:
             return
 
         data = dlg.values()
@@ -127,7 +147,9 @@ class TenantsPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Редактировать арендатора", f"Ошибка:\n{e}")
             return
+
         self.reload()
+        self._select_row_by_id(t.id)
 
     def _on_toggle_active(self):
         t = self._selected_tenant()
@@ -135,9 +157,33 @@ class TenantsPage(QWidget):
             QMessageBox.information(self, "Архив", "Выберите арендатора в списке.")
             return
 
+        new_state = not t.is_active
+        action = "восстановить" if new_state else "архивировать"
+        if (
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Вы действительно хотите {action} арендатора «{t.name}»?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
         try:
-            set_tenant_active(t.id, not t.is_active)
+            set_tenant_active(t.id, new_state)
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
+
         self.reload()
+        # после архивации запись может скрыться, если архив не показываем
+
+    def _select_row_by_id(self, tenant_id: int) -> None:
+        for r in range(self.tbl.rowCount()):
+            item = self.tbl.item(r, 0)
+            if not item:
+                continue
+            if item.text() == str(tenant_id):
+                self.tbl.setCurrentCell(r, 0)
+                self.tbl.scrollToItem(item)
+                return
