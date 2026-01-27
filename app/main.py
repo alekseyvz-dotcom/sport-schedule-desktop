@@ -1,17 +1,30 @@
 import sys
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel
+from PySide6.QtWidgets import QApplication
 
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Sport Schedule")
-        self.setCentralWidget(QLabel("OK: build from GitHub Actions works"))
+from app.db import init_pool
+from app.ui.login_window import LoginWindow
+from app.ui.main_window import MainWindow
 
 def main():
     app = QApplication(sys.argv)
-    w = MainWindow()
-    w.resize(900, 600)
-    w.show()
+
+    # пул соединений (dsn берётся из settings.dat)
+    init_pool(minconn=1, maxconn=5)
+
+    login = LoginWindow()
+    login.show()
+
+    state = {"main": None}
+
+    def on_logged_in(user):
+        mw = MainWindow(user)
+        state["main"] = mw
+        mw.resize(1100, 700)
+        mw.show()
+        login.close()
+
+    login.logged_in.connect(on_logged_in)
+
     sys.exit(app.exec())
 
 if __name__ == "__main__":
