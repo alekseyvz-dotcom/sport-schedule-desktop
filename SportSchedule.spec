@@ -1,28 +1,50 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
+block_cipher = None
+
+hiddenimports = []
+hiddenimports += collect_submodules("app.services")
+hiddenimports += collect_submodules("app.ui")
+# на всякий случай можно и весь app:
+hiddenimports += collect_submodules("app")
+
 a = Analysis(
     ["app/main.py"],
     pathex=["."],
-    hiddenimports=[
-        "app.services.tenants_service",
-        "app.services.orgs_service",
-        "app.services.venues_service",
-        "app.services.bookings_service",
-        "app.services.users_service",
-        "app.services.ref_service",
-        "app.services.diagnostics_service",
-    ],
+    binaries=[],
+    datas=[],
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
 )
 
-pyz = PYZ(a.pure)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.datas,
-    a.zipfiles,
-    a.hiddenimports,
+    [],
     name="SportSchedule",
-    console=True,  # временно включите консоль для диагностики
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
 )
