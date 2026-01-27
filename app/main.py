@@ -1,4 +1,8 @@
 import sys
+# FORCE включить модуль в сборку PyInstaller
+import app.services.tenants_service  # noqa: F401
+import app.services.orgs_service     # noqa: F401
+
 from PySide6.QtWidgets import QApplication
 
 from app.db import init_pool
