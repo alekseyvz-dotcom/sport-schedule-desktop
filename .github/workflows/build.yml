@@ -22,10 +22,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Show project tree (debug)
+        run: |
+          dir
+          dir app
+          dir app\services
+          dir app\ui
+
+      - name: Clean build folders
+        run: |
+          if (Test-Path build) { Remove-Item build -Recurse -Force }
+          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 
       - name: Build one-file exe
         run: |
-          pyinstaller --onefile --noconsole --name SportSchedule app/main.py
+          pyinstaller --noconfirm --clean --onefile --noconsole --name SportSchedule `
+            --collect-submodules app `
+            --collect-submodules app.services `
+            --collect-submodules app.ui `
+            app/main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
