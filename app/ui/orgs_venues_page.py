@@ -2,12 +2,32 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QPushButton, QCheckBox,
-    QTableWidget, QTableWidgetItem, QMessageBox, QLabel
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QLabel,
 )
 
-from app.services.orgs_service import list_orgs, create_org, update_org, set_org_active, SportOrg
-from app.services.venues_service import list_venues, create_venue, update_venue, set_venue_active, Venue
+from app.services.orgs_service import (
+    list_orgs,
+    create_org,
+    update_org,
+    set_org_active,
+    SportOrg,
+)
+from app.services.venues_service import (
+    list_venues,
+    create_venue,
+    update_venue,
+    set_venue_active,
+    Venue,
+)
 from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
@@ -26,7 +46,7 @@ class OrgsVenuesPage(QWidget):
 
         self.btn_org_add = QPushButton("Создать")
         self.btn_org_edit = QPushButton("Редактировать")
-        self.btn_org_archive = QPushButton("Архив/восст.")
+        self.btn_org_archive = QPushButton("Архивировать/восстановить")
 
         self.btn_org_add.clicked.connect(self._org_add)
         self.btn_org_edit.clicked.connect(self._org_edit)
@@ -41,8 +61,8 @@ class OrgsVenuesPage(QWidget):
 
         self.tbl_orgs = QTableWidget(0, 4)
         self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Активен"])
-        self.tbl_orgs.setSelectionBehavior(self.tbl_orgs.SelectionBehavior.SelectRows)
-        self.tbl_orgs.setEditTriggers(self.tbl_orgs.EditTrigger.NoEditTriggers)
+        self.tbl_orgs.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tbl_orgs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tbl_orgs.itemSelectionChanged.connect(self.reload_venues)
 
         left = QVBoxLayout()
@@ -57,7 +77,7 @@ class OrgsVenuesPage(QWidget):
 
         self.btn_venue_add = QPushButton("Создать")
         self.btn_venue_edit = QPushButton("Редактировать")
-        self.btn_venue_archive = QPushButton("Архив/восст.")
+        self.btn_venue_archive = QPushButton("Архивировать/восстановить")
 
         self.btn_venue_add.clicked.connect(self._venue_add)
         self.btn_venue_edit.clicked.connect(self._venue_edit)
@@ -71,9 +91,11 @@ class OrgsVenuesPage(QWidget):
         venue_top.addWidget(self.btn_venue_archive)
 
         self.tbl_venues = QTableWidget(0, 6)
-        self.tbl_venues.setHorizontalHeaderLabels(["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"])
-        self.tbl_venues.setSelectionBehavior(self.tbl_venues.SelectionBehavior.SelectRows)
-        self.tbl_venues.setEditTriggers(self.tbl_venues.EditTrigger.NoEditTriggers)
+        self.tbl_venues.setHorizontalHeaderLabels(
+            ["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"]
+        )
+        self.tbl_venues.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tbl_venues.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         right = QVBoxLayout()
         right.addLayout(venue_top)
@@ -86,21 +108,37 @@ class OrgsVenuesPage(QWidget):
 
         self.reload_orgs()
 
+    # -------- selection helpers
     def _selected_org(self) -> SportOrg | None:
         row = self.tbl_orgs.currentRow()
         if row < 0:
             return None
-        return self.tbl_orgs.item(row, 0).data(Qt.UserRole)
+        item = self.tbl_orgs.item(row, 0)
+        if not item:
+            return None
+        obj = item.data(Qt.UserRole)
+        return obj if isinstance(obj, SportOrg) else None
 
     def _selected_venue(self) -> Venue | None:
         row = self.tbl_venues.currentRow()
         if row < 0:
             return None
-        return self.tbl_venues.item(row, 0).data(Qt.UserRole)
+        item = self.tbl_venues.item(row, 0)
+        if not item:
+            return None
+        obj = item.data(Qt.UserRole)
+        return obj if isinstance(obj, Venue) else None
 
+    # -------- reloaders
     def reload_orgs(self):
+        selected = self._selected_org()
+        selected_id = selected.id if selected else None
+
         try:
-            orgs = list_orgs(self.ed_org_search.text(), include_inactive=self.cb_org_inactive.isChecked())
+            orgs = list_orgs(
+                self.ed_org_search.text(),
+                include_inactive=self.cb_org_inactive.isChecked(),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Учреждения", f"Ошибка загрузки:\n{e}")
             return
@@ -119,6 +157,11 @@ class OrgsVenuesPage(QWidget):
             self.tbl_orgs.setItem(r, 3, QTableWidgetItem("Да" if o.is_active else "Нет"))
 
         self.tbl_orgs.resizeColumnsToContents()
+
+        # по возможности восстановим выделение, чтобы venues не "прыгали"
+        if selected_id is not None:
+            self._select_org_row_by_id(selected_id)
+
         self.reload_venues()
 
     def reload_venues(self):
@@ -129,6 +172,9 @@ class OrgsVenuesPage(QWidget):
             return
 
         self.lbl_venues.setText(f"Площадки: {org.name}")
+
+        selected = self._selected_venue()
+        selected_id = selected.id if selected else None
 
         try:
             venues = list_venues(org.id, include_inactive=self.cb_venue_inactive.isChecked())
@@ -153,17 +199,24 @@ class OrgsVenuesPage(QWidget):
 
         self.tbl_venues.resizeColumnsToContents()
 
-    # --- Orgs actions
+        if selected_id is not None:
+            self._select_venue_row_by_id(selected_id)
+
+    # -------- org actions
     def _org_add(self):
         dlg = OrgDialog(self, title="Создать учреждение")
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != OrgDialog.Accepted:
             return
+
         try:
-            create_org(**dlg.values())
+            new_id = create_org(**dlg.values())
         except Exception as e:
             QMessageBox.critical(self, "Создать учреждение", f"Ошибка:\n{e}")
             return
+
+        QMessageBox.information(self, "Учреждения", f"Создано учреждение (id={new_id}).")
         self.reload_orgs()
+        self._select_org_row_by_id(new_id)
 
     def _org_edit(self):
         org = self._selected_org()
@@ -171,8 +224,12 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.information(self, "Редактировать", "Выберите учреждение.")
             return
 
-        dlg = OrgDialog(self, title=f"Редактировать: {org.name}", data={"name": org.name, "address": org.address, "comment": org.comment})
-        if dlg.exec() != dlg.Accepted:
+        dlg = OrgDialog(
+            self,
+            title=f"Редактировать: {org.name}",
+            data={"name": org.name, "address": org.address, "comment": org.comment},
+        )
+        if dlg.exec() != OrgDialog.Accepted:
             return
 
         try:
@@ -180,21 +237,38 @@ class OrgsVenuesPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Редактировать учреждение", f"Ошибка:\n{e}")
             return
+
         self.reload_orgs()
+        self._select_org_row_by_id(org.id)
 
     def _org_toggle(self):
         org = self._selected_org()
         if not org:
             QMessageBox.information(self, "Архив", "Выберите учреждение.")
             return
+
+        new_state = not org.is_active
+        action = "восстановить" if new_state else "архивировать"
+        if (
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Вы действительно хотите {action} учреждение «{org.name}»?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
         try:
-            set_org_active(org.id, not org.is_active)
+            set_org_active(org.id, new_state)
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
-        self.reload_orgs()
 
-    # --- Venues actions
+        self.reload_orgs()
+        # если архив не показываем, запись может исчезнуть — это нормально
+
+    # -------- venue actions
     def _venue_add(self):
         org = self._selected_org()
         if not org:
@@ -202,15 +276,18 @@ class OrgsVenuesPage(QWidget):
             return
 
         dlg = VenueDialog(self, title=f"Создать площадку — {org.name}")
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != VenueDialog.Accepted:
             return
 
         try:
-            create_venue(org.id, **dlg.values())
+            new_id = create_venue(org.id, **dlg.values())
         except Exception as e:
             QMessageBox.critical(self, "Создать площадку", f"Ошибка:\n{e}")
             return
+
+        QMessageBox.information(self, "Площадки", f"Создана площадка (id={new_id}).")
         self.reload_venues()
+        self._select_venue_row_by_id(new_id)
 
     def _venue_edit(self):
         v = self._selected_venue()
@@ -221,9 +298,14 @@ class OrgsVenuesPage(QWidget):
         dlg = VenueDialog(
             self,
             title=f"Редактировать площадку: {v.name}",
-            data={"name": v.name, "sport_type": v.sport_type, "capacity": v.capacity, "comment": v.comment},
+            data={
+                "name": v.name,
+                "sport_type": v.sport_type,
+                "capacity": v.capacity,
+                "comment": v.comment,
+            },
         )
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != VenueDialog.Accepted:
             return
 
         try:
@@ -231,7 +313,9 @@ class OrgsVenuesPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Редактировать площадку", f"Ошибка:\n{e}")
             return
+
         self.reload_venues()
+        self._select_venue_row_by_id(v.id)
 
     def _venue_toggle(self):
         v = self._selected_venue()
@@ -239,9 +323,39 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.information(self, "Архив", "Выберите площадку.")
             return
 
+        new_state = not v.is_active
+        action = "восстановить" if new_state else "архивировать"
+        if (
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Вы действительно хотите {action} площадку «{v.name}»?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
         try:
-            set_venue_active(v.id, not v.is_active)
+            set_venue_active(v.id, new_state)
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
+
         self.reload_venues()
+
+    # -------- selection by id
+    def _select_org_row_by_id(self, org_id: int) -> None:
+        for r in range(self.tbl_orgs.rowCount()):
+            item = self.tbl_orgs.item(r, 0)
+            if item and item.text() == str(org_id):
+                self.tbl_orgs.setCurrentCell(r, 0)
+                self.tbl_orgs.scrollToItem(item)
+                return
+
+    def _select_venue_row_by_id(self, venue_id: int) -> None:
+        for r in range(self.tbl_venues.rowCount()):
+            item = self.tbl_venues.item(r, 0)
+            if item and item.text() == str(venue_id):
+                self.tbl_venues.setCurrentCell(r, 0)
+                self.tbl_venues.scrollToItem(item)
+                return
