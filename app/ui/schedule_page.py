@@ -6,8 +6,18 @@ from typing import Dict, List, Tuple, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QDateEdit, QCheckBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QLabel
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QComboBox,
+    QDateEdit,
+    QCheckBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QLabel,
+    QAbstractItemView,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -56,16 +66,19 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_refresh)
 
         self.tbl = QTableWidget()
-        self.tbl.setEditTriggers(self.tbl.EditTrigger.NoEditTriggers)
-        self.tbl.setSelectionMode(self.tbl.SelectionMode.ExtendedSelection)
-        self.tbl.setSelectionBehavior(self.tbl.SelectionBehavior.SelectItems)
+
+        # ВАЖНО: чтобы можно было выделять "пустые" ячейки,
+        # они должны существовать. Мы заполним их в _setup_table().
+        self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
 
         root = QVBoxLayout(self)
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
         # caches
-        self._venues: List[Tuple[int, str]] = []   # [(id, name)]
+        self._venues: List[Tuple[int, str]] = []  # [(id, name)]
         self._tenants: List[Dict] = []            # [{id, name}]
 
         self._load_refs()
@@ -92,12 +105,14 @@ class SchedulePage(QWidget):
             self._venues = []
             self._setup_table()
             return
+
         try:
             venues = list_active_venues(int(org_id))
             self._venues = [(v.id, v.name) for v in venues]
         except Exception as e:
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки площадок:\n{e}")
             self._venues = []
+
         self._setup_table()
         self.reload()
 
@@ -122,16 +137,26 @@ class SchedulePage(QWidget):
         headers = ["Время"] + [name for (_, name) in self._venues]
         self.tbl.setHorizontalHeaderLabels(headers)
 
+        # Колонка времени
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
-            it.setFlags(it.flags() & ~Qt.ItemIsSelectable)  # время не выделяем
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)  # время не выделяем
             self.tbl.setItem(r, 0, it)
+
+        # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
+        # Создаём item для КАЖДОЙ ячейки площадок, иначе Qt не даст её выделить,
+        # и selectedItems() будет пустым.
+        for r in range(len(times)):
+            for c in range(1, 1 + venue_count):
+                it = QTableWidgetItem("")
+                it.setData(Qt.ItemDataRole.UserRole, None)
+                self.tbl.setItem(r, c, it)
 
         self.tbl.resizeColumnsToContents()
         self.tbl.setColumnWidth(0, 70)
 
     def _selected_range(self) -> Optional[Tuple[int, int, int]]:
-        # Возвращает (col, row_min, row_max) если выделение в одной колонке площадки
+        # (col, row_min, row_max) если выделение в одной колонке площадки
         items = self.tbl.selectedItems()
         if not items:
             return None
@@ -154,11 +179,13 @@ class SchedulePage(QWidget):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
                 if it is None:
+                    # на всякий случай, но после _setup_table такого быть не должно
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
+
                 it.setText("")
-                it.setBackground(Qt.white)
-                it.setData(Qt.UserRole, None)
+                it.setBackground(Qt.GlobalColor.white)
+                it.setData(Qt.ItemDataRole.UserRole, None)
 
         if not self._venues:
             return
@@ -173,11 +200,7 @@ class SchedulePage(QWidget):
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
 
-        # индекс venue_id -> column
         venue_col: Dict[int, int] = {vid: i + 1 for i, (vid, _) in enumerate(self._venues)}
-
-        # для каждой брони красим слоты
-        step = timedelta(minutes=self.SLOT_MINUTES)
         day_start = datetime.combine(day, self.WORK_START)
         day_end = datetime.combine(day, self.WORK_END)
 
@@ -186,23 +209,20 @@ class SchedulePage(QWidget):
             if not col:
                 continue
 
-            # ограничим отрисовку рабочими часами
             start = max(b.starts_at, day_start)
             end = min(b.ends_at, day_end)
             if end <= start:
                 continue
 
-            # округление по слотам (у вас всё кратно 30 минутам)
             r0 = int((start - day_start).total_seconds() // (self.SLOT_MINUTES * 60))
             r1 = int(((end - day_start).total_seconds() - 1) // (self.SLOT_MINUTES * 60))
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
 
-            # цвета по типу
             if b.status == "cancelled":
-                color = Qt.lightGray
+                color = Qt.GlobalColor.lightGray
             else:
-                color = Qt.cyan if b.kind == "PD" else Qt.green
+                color = Qt.GlobalColor.cyan if b.kind == "PD" else Qt.GlobalColor.green
 
             for r in range(r0, r1 + 1):
                 it = self.tbl.item(r, col)
@@ -210,9 +230,8 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, col, it)
                 it.setBackground(color)
-                it.setData(Qt.UserRole, b)  # в каждом слоте лежит ссылка на Booking
+                it.setData(Qt.ItemDataRole.UserRole, b)
 
-            # текст только в первом слоте
             it0 = self.tbl.item(r0, col)
             if it0:
                 it0.setText(f"{b.kind} | {b.tenant_name}\n{b.title}")
