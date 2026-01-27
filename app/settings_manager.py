@@ -123,7 +123,7 @@ def _decrypt_dict(blob: bytes) -> Dict[str, Any]:
 _defaults: Dict[str, Dict[str, Any]] = {
     "DB": {
         "provider": "postgres",
-        "database_url": "postgresql://sport_app_user:CHANGE_ME@127.0.0.1:5432/sport_schedule?sslmode=disable",
+        "database_url": "postgresql://sport_app_user:K0j1ma095@185.55.58.31:5432/sport_schedule?sslmode=disable",
         "sslmode": "disable",
     }
 }
