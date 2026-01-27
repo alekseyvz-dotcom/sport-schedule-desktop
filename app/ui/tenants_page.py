@@ -95,7 +95,7 @@ class TenantsPage(QWidget):
         try:
             new_id = create_tenant(**data)
         except Exception as e:
-            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{repr(e)}")
+            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e!r}")
             return
     
         QMessageBox.information(self, "DEBUG", f"Inserted tenant id={new_id}")
