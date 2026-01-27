@@ -38,11 +38,7 @@ jobs:
 
       - name: Build one-file exe
         run: |
-          pyinstaller --noconfirm --clean --onefile --noconsole --name SportSchedule `
-            --collect-submodules app `
-            --collect-submodules app.services `
-            --collect-submodules app.ui `
-            app/main.py
+          pyinstaller --noconfirm --clean SportSchedule.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
