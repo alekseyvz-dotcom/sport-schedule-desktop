@@ -84,24 +84,21 @@ class TenantsPage(QWidget):
 
     def _on_add(self):
         dlg = TenantDialog(self, title="Создать арендатора")
-        if dlg.exec() != dlg.Accepted:
+        res = dlg.exec()
+        QMessageBox.information(self, "DEBUG", f"Dialog result={res} (Accepted={dlg.Accepted})")
+        if res != dlg.Accepted:
             return
     
         data = dlg.values()
+        QMessageBox.information(self, "DEBUG", f"values={data}")
     
         try:
             new_id = create_tenant(**data)
         except Exception as e:
-            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{repr(e)}")
             return
     
-        # Диагностика после успеха
-        QMessageBox.information(
-            self,
-            "Диагностика",
-            f"Создан арендатор id={new_id}\n\n{connection_report()}",
-        )
-    
+        QMessageBox.information(self, "DEBUG", f"Inserted tenant id={new_id}")
         self.reload()
 
     def _on_edit(self):
