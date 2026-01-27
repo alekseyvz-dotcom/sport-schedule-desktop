@@ -86,12 +86,22 @@ class TenantsPage(QWidget):
         dlg = TenantDialog(self, title="Создать арендатора")
         if dlg.exec() != dlg.Accepted:
             return
+    
         data = dlg.values()
+    
         try:
-            create_tenant(**data)
+            new_id = create_tenant(**data)
         except Exception as e:
             QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e}")
             return
+    
+        # Диагностика после успеха
+        QMessageBox.information(
+            self,
+            "Диагностика",
+            f"Создан арендатор id={new_id}\n\n{connection_report()}",
+        )
+    
         self.reload()
 
     def _on_edit(self):
