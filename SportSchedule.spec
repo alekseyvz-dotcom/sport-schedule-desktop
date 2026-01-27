@@ -1,15 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
-
-hiddenimports = []
-hiddenimports += collect_submodules("app")
-hiddenimports += collect_submodules("app.services")
-hiddenimports += collect_submodules("app.ui")
 
 a = Analysis(
     ["app/main.py"],
-    pathex=["."],          # КЛЮЧЕВО: корень проекта в путях
-    hiddenimports=hiddenimports,
+    pathex=["."],
+    hiddenimports=[
+        "app.services.tenants_service",
+        "app.services.orgs_service",
+        "app.services.venues_service",
+        "app.services.bookings_service",
+        "app.services.users_service",
+        "app.services.ref_service",
+        "app.services.diagnostics_service",
+    ],
 )
 
 pyz = PYZ(a.pure)
@@ -22,5 +24,5 @@ exe = EXE(
     a.zipfiles,
     a.hiddenimports,
     name="SportSchedule",
-    console=False,
+    console=True,  # временно включите консоль для диагностики
 )
