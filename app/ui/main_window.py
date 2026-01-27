@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 from app.services.users_service import AuthUser
 from app.ui.tenants_page import TenantsPage
+from app.ui.orgs_venues_page import OrgsVenuesPage
 
 class MainWindow(QMainWindow):
     def __init__(self, user: AuthUser):
@@ -9,5 +10,6 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(TenantsPage(), "Арендаторы")
+        tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
 
         self.setCentralWidget(tabs)
