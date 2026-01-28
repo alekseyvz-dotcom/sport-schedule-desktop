@@ -255,10 +255,7 @@ def update_tenant(tenant_id: int, **data) -> None:
             )
 
             if cur.rowcount != 1:
-                raise RuntimeError(
-                    f"UPDATE tenants затронул {cur.rowcount} строк(и). "
-                    f"Проверьте tenant_id={tenant_id}."
-                )
+                raise RuntimeError(f"Контрагент id={tenant_id} не найден (rowcount={cur.rowcount}).")
 
         conn.commit()
 
@@ -266,7 +263,6 @@ def update_tenant(tenant_id: int, **data) -> None:
         if conn:
             conn.rollback()
         raise
-
     finally:
         if conn:
             put_conn(conn)
