@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QLabel,
     QAbstractItemView,
+    QDialog,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -282,9 +283,9 @@ class SchedulePage(QWidget):
             )
 
             res = dlg.exec()
-            _uilog(f"dlg.exec()={res}, Accepted={dlg.Accepted}")
-
-            if res != dlg.Accepted:
+            _uilog(f"dlg.exec()={res}, Accepted={int(QDialog.DialogCode.Accepted)}")
+            
+            if res != QDialog.DialogCode.Accepted:
                 _uilog("dialog rejected")
                 return
 
