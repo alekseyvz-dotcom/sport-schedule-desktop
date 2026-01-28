@@ -49,9 +49,23 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        self.tbl = QTableWidget(0, 7)
+        # Расширили таблицу, чтобы было видно часть полей карточки
+        self.tbl = QTableWidget(0, 12)
         self.tbl.setHorizontalHeaderLabels(
-            ["ID", "Название", "ИНН", "Телефон", "Email", "Активен", "Комментарий"]
+            [
+                "ID",
+                "Название",
+                "ИНН",
+                "Телефон",
+                "Email",
+                "Контакт",
+                "№ договора",
+                "Срок с",
+                "Срок по",
+                "Статус",
+                "Активен",
+                "Комментарий",
+            ]
         )
         self.tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -80,7 +94,7 @@ class TenantsPage(QWidget):
                 include_inactive=self.cb_inactive.isChecked(),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Арендаторы", f"Ошибка загрузки:\n{e}")
+            QMessageBox.critical(self, "Контрагенты", f"Ошибка загрузки:\n{e}")
             return
 
         self.tbl.setRowCount(0)
@@ -96,14 +110,19 @@ class TenantsPage(QWidget):
             self.tbl.setItem(r, 2, QTableWidgetItem(t.inn or ""))
             self.tbl.setItem(r, 3, QTableWidgetItem(t.phone or ""))
             self.tbl.setItem(r, 4, QTableWidgetItem(t.email or ""))
-            self.tbl.setItem(r, 5, QTableWidgetItem("Да" if t.is_active else "Нет"))
-            self.tbl.setItem(r, 6, QTableWidgetItem(t.comment or ""))
+            self.tbl.setItem(r, 5, QTableWidgetItem(t.contact_name or ""))
+            self.tbl.setItem(r, 6, QTableWidgetItem(t.contract_no or ""))
+            self.tbl.setItem(r, 7, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
+            self.tbl.setItem(r, 8, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
+            self.tbl.setItem(r, 9, QTableWidgetItem(t.status or ""))
+            self.tbl.setItem(r, 10, QTableWidgetItem("Да" if t.is_active else "Нет"))
+            self.tbl.setItem(r, 11, QTableWidgetItem(t.comment or ""))
 
         self.tbl.resizeColumnsToContents()
 
     def _on_add(self):
-        dlg = TenantDialog(self, title="Создать арендатора")
-        if dlg.exec() != TenantDialog.Accepted:
+        dlg = TenantDialog(self, title="Создать контрагента")
+        if dlg.exec() != dlg.Accepted:
             return
 
         data = dlg.values()
@@ -111,20 +130,17 @@ class TenantsPage(QWidget):
         try:
             new_id = create_tenant(**data)
         except Exception as e:
-            QMessageBox.critical(self, "Создать арендатора", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Создать контрагента", f"Ошибка:\n{e}")
             return
 
-        # Чётко показываем результат и сразу обновляем список
-        QMessageBox.information(self, "Арендаторы", f"Создан арендатор (id={new_id}).")
+        QMessageBox.information(self, "Контрагенты", f"Создан контрагент (id={new_id}).")
         self.reload()
-
-        # Опционально: выделить добавленную строку, если она попала в текущий фильтр
         self._select_row_by_id(new_id)
 
     def _on_edit(self):
         t = self._selected_tenant()
         if not t:
-            QMessageBox.information(self, "Редактировать", "Выберите арендатора в списке.")
+            QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
             return
 
         dlg = TenantDialog(
@@ -136,16 +152,28 @@ class TenantsPage(QWidget):
                 "phone": t.phone,
                 "email": t.email,
                 "comment": t.comment,
+                "contact_name": t.contact_name,
+                "obligation_kind": t.obligation_kind,
+                "contract_no": t.contract_no,
+                "contract_date": t.contract_date,
+                "contract_valid_from": t.contract_valid_from,
+                "contract_valid_to": t.contract_valid_to,
+                "docs_delivery_method": t.docs_delivery_method,
+                "status": t.status,
+                "contract_signed": t.contract_signed,
+                "attached_in_1c": t.attached_in_1c,
+                "has_ds": t.has_ds,
+                "notes": t.notes,
             },
         )
-        if dlg.exec() != TenantDialog.Accepted:
+        if dlg.exec() != dlg.Accepted:
             return
 
         data = dlg.values()
         try:
             update_tenant(t.id, **data)
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать арендатора", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Редактировать контрагента", f"Ошибка:\n{e}")
             return
 
         self.reload()
@@ -154,7 +182,7 @@ class TenantsPage(QWidget):
     def _on_toggle_active(self):
         t = self._selected_tenant()
         if not t:
-            QMessageBox.information(self, "Архив", "Выберите арендатора в списке.")
+            QMessageBox.information(self, "Архив", "Выберите контрагента в списке.")
             return
 
         new_state = not t.is_active
@@ -163,7 +191,7 @@ class TenantsPage(QWidget):
             QMessageBox.question(
                 self,
                 "Подтверждение",
-                f"Вы действительно хотите {action} арендатора «{t.name}»?",
+                f"Вы действительно хотите {action} контрагента «{t.name}»?",
             )
             != QMessageBox.StandardButton.Yes
         ):
@@ -176,7 +204,6 @@ class TenantsPage(QWidget):
             return
 
         self.reload()
-        # после архивации запись может скрыться, если архив не показываем
 
     def _select_row_by_id(self, tenant_id: int) -> None:
         for r in range(self.tbl.rowCount()):
