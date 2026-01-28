@@ -9,9 +9,17 @@ from psycopg2.extras import RealDictCursor
 from app.db import get_conn, put_conn
 
 def _tlog(msg: str) -> None:
-    path = os.path.join(tempfile.gettempdir(), "tenant_debug.log")
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(f"{_dt.now().isoformat()} {msg}\n")
+    try:
+        import os
+        import tempfile
+        from datetime import datetime
+        path = os.path.join(tempfile.gettempdir(), "tenant_debug.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} {msg}\n")
+    except Exception:
+        # НИКОГДА не ломаем импорт/работу приложения из-за лога
+        pass
+
 
 @dataclass(frozen=True)
 class Tenant:
@@ -214,6 +222,11 @@ def update_tenant(tenant_id: int, **data) -> None:
     conn = None
     try:
         conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("select current_database(), current_user, inet_server_addr(), inet_server_port();")
+            _tlog("DBINFO: " + str(cur.fetchone()))
+            cur.execute("show transaction_read_only;")
+            _tlog("READ_ONLY: " + str(cur.fetchone()))
 
         with conn.cursor() as cur:
             cur.execute(
@@ -286,12 +299,16 @@ def set_tenant_active(tenant_id: int, is_active: bool):
     conn = None
     try:
         conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE public.tenants SET is_active=%s WHERE id=%s",
-                    (bool(is_active), int(tenant_id)),
-                )
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.tenants SET is_active=%s WHERE id=%s",
+                (bool(is_active), int(tenant_id)),
+            )
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
     finally:
         if conn:
             put_conn(conn)
