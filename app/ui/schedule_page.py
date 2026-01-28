@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 
 import os
 import tempfile
 import traceback
-from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -32,7 +31,6 @@ from app.ui.booking_dialog import BookingDialog
 
 
 def _uilog(msg: str) -> None:
-    """Пишем в TEMP, чтобы видеть, где обрывается логика (в exe/без консоли тоже)."""
     path = os.path.join(tempfile.gettempdir(), "schedule_debug.log")
     with open(path, "a", encoding="utf-8") as f:
         f.write(f"{datetime.now().isoformat()} {msg}\n")
@@ -49,8 +47,10 @@ class SchedulePage(QWidget):
     WORK_END = time(22, 0)
     SLOT_MINUTES = 30
 
-    # ВАЖНО: приведём всё к TZ-aware datetime, т.к. Postgres TIMESTAMPTZ возвращает aware
-    TZ = ZoneInfo("Europe/Moscow")  # при необходимости замените на вашу таймзону
+    # ВАЖНО: Postgres TIMESTAMPTZ -> aware datetime. Делаем UI-дату тоже aware.
+    # Москва = UTC+3. Если другой регион — поменяйте значение.
+    TZ_OFFSET_HOURS = 3
+    TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -90,8 +90,8 @@ class SchedulePage(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
-        self._venues: List[Tuple[int, str]] = []  # [(id, name)]
-        self._tenants: List[Dict] = []  # [{id, name}]
+        self._venues: List[Tuple[int, str]] = []
+        self._tenants: List[Dict] = []
 
         self._load_refs()
 
@@ -149,13 +149,12 @@ class SchedulePage(QWidget):
         headers = ["Время"] + [name for (_, name) in self._venues]
         self.tbl.setHorizontalHeaderLabels(headers)
 
-        # Колонка времени
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.tbl.setItem(r, 0, it)
 
-        # Создаём item для КАЖДОЙ ячейки площадок (иначе Qt не выделяет "пустые" ячейки)
+        # создаём item в каждой ячейке площадок
         for r in range(len(times)):
             for c in range(1, 1 + venue_count):
                 it = QTableWidgetItem("")
@@ -182,18 +181,15 @@ class SchedulePage(QWidget):
 
     def _row_to_datetime(self, day: date, row: int) -> datetime:
         tm = self._time_slots()[row]
-        # делаем aware, чтобы совпадало с TIMESTAMPTZ из БД
         return datetime.combine(day, tm, tzinfo=self.TZ)
 
     def reload(self):
-        # очищаем раскраску/тексты (кроме колонки времени)
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
                 if it is None:
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
-
                 it.setText("")
                 it.setBackground(Qt.GlobalColor.white)
                 it.setData(Qt.ItemDataRole.UserRole, None)
