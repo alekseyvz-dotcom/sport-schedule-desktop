@@ -208,56 +208,68 @@ def update_tenant(tenant_id: int, **data) -> None:
     conn = None
     try:
         conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE public.tenants
-                    SET
-                        name=%(name)s,
-                        inn=%(inn)s,
-                        phone=%(phone)s,
-                        email=%(email)s,
-                        comment=%(comment)s,
-                        contact_name=%(contact_name)s,
-                        obligation_kind=%(obligation_kind)s,
-                        contract_no=%(contract_no)s,
-                        contract_date=%(contract_date)s,
-                        contract_valid_from=%(contract_valid_from)s,
-                        contract_valid_to=%(contract_valid_to)s,
-                        docs_delivery_method=%(docs_delivery_method)s,
-                        status=%(status)s,
-                        contract_signed=%(contract_signed)s,
-                        attached_in_1c=%(attached_in_1c)s,
-                        has_ds=%(has_ds)s,
-                        notes=%(notes)s
-                    WHERE id=%(id)s
-                    """,
-                    {
-                        "id": int(tenant_id),
-                        "name": name,
-                        "inn": (data.get("inn") or "").strip() or None,
-                        "phone": (data.get("phone") or "").strip() or None,
-                        "email": (data.get("email") or "").strip() or None,
-                        "comment": (data.get("comment") or "").strip() or None,
-                        "contact_name": (data.get("contact_name") or "").strip() or None,
-                        "obligation_kind": (data.get("obligation_kind") or "").strip() or None,
-                        "contract_no": (data.get("contract_no") or "").strip() or None,
-                        "contract_date": data.get("contract_date"),
-                        "contract_valid_from": data.get("contract_valid_from"),
-                        "contract_valid_to": data.get("contract_valid_to"),
-                        "docs_delivery_method": (data.get("docs_delivery_method") or "").strip() or None,
-                        "status": (data.get("status") or "active").strip() or None,
-                        "contract_signed": bool(data.get("contract_signed") or False),
-                        "attached_in_1c": bool(data.get("attached_in_1c") or False),
-                        "has_ds": bool(data.get("has_ds") or False),
-                        "notes": (data.get("notes") or "").strip() or None,
-                    },
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.tenants
+                SET
+                    name=%(name)s,
+                    inn=%(inn)s,
+                    phone=%(phone)s,
+                    email=%(email)s,
+                    comment=%(comment)s,
+                    contact_name=%(contact_name)s,
+                    obligation_kind=%(obligation_kind)s,
+                    contract_no=%(contract_no)s,
+                    contract_date=%(contract_date)s,
+                    contract_valid_from=%(contract_valid_from)s,
+                    contract_valid_to=%(contract_valid_to)s,
+                    docs_delivery_method=%(docs_delivery_method)s,
+                    status=%(status)s,
+                    contract_signed=%(contract_signed)s,
+                    attached_in_1c=%(attached_in_1c)s,
+                    has_ds=%(has_ds)s,
+                    notes=%(notes)s
+                WHERE id=%(id)s
+                """,
+                {
+                    "id": int(tenant_id),
+                    "name": name,
+                    "inn": (data.get("inn") or "").strip() or None,
+                    "phone": (data.get("phone") or "").strip() or None,
+                    "email": (data.get("email") or "").strip() or None,
+                    "comment": (data.get("comment") or "").strip() or None,
+                    "contact_name": (data.get("contact_name") or "").strip() or None,
+                    "obligation_kind": (data.get("obligation_kind") or "").strip() or None,
+                    "contract_no": (data.get("contract_no") or "").strip() or None,
+                    "contract_date": data.get("contract_date"),
+                    "contract_valid_from": data.get("contract_valid_from"),
+                    "contract_valid_to": data.get("contract_valid_to"),
+                    "docs_delivery_method": (data.get("docs_delivery_method") or "").strip() or None,
+                    "status": (data.get("status") or "active").strip() or None,
+                    "contract_signed": bool(data.get("contract_signed") or False),
+                    "attached_in_1c": bool(data.get("attached_in_1c") or False),
+                    "has_ds": bool(data.get("has_ds") or False),
+                    "notes": (data.get("notes") or "").strip() or None,
+                },
+            )
+
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    f"UPDATE tenants затронул {cur.rowcount} строк(и). "
+                    f"Проверьте tenant_id={tenant_id}."
                 )
+
+        conn.commit()
+
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+
     finally:
         if conn:
             put_conn(conn)
-
 
 def set_tenant_active(tenant_id: int, is_active: bool):
     conn = None
