@@ -273,7 +273,7 @@ class SchedulePage(QWidget):
 
         data = dlg.values()
         try:
-            create_booking(
+            new_id = create_booking(
                 venue_id=venue_id,
                 tenant_id=data["tenant_id"],
                 title=data["title"],
@@ -282,7 +282,8 @@ class SchedulePage(QWidget):
                 ends_at=ends_at,
             )
         except Exception as e:
-            QMessageBox.critical(self, "Создать бронь", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Создать бронь", f"Ошибка:\n{repr(e)}")
             return
-
+        
+        QMessageBox.information(self, "Расписание", f"Бронь создана (id={new_id}).")
         self.reload()
