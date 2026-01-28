@@ -8,7 +8,7 @@ import os
 import tempfile
 import traceback
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor, QBrush
 from PySide6.QtWidgets import (
     QWidget,
@@ -207,7 +207,7 @@ class SchedulePage(QWidget):
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
-        self._load_refs()
+        QTimer.singleShot(0, self._load_refs)
 
     # --------- Небольшие помощники для “аккуратной” заливки ---------
 
@@ -532,7 +532,7 @@ class SchedulePage(QWidget):
                 rsrc = self._resources[col - 1]
                 new_id = create_booking(
                     venue_id=int(rsrc.venue_id),
-                    venue_unit_id=int(rsrc.venue_unit_id),
+                    venue_unit_id=(int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None),
                     tenant_id=data["tenant_id"],
                     title=data["title"],
                     kind=data["kind"],
