@@ -298,7 +298,7 @@ class SchedulePage(QWidget):
                 venue_id=venue_id,
                 tenant_id=data["tenant_id"],
                 title=data["title"],
-                kind=data["kind"],
+                kind="PD",
                 starts_at=starts_at,
                 ends_at=ends_at,
             )
