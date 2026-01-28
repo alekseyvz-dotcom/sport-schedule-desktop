@@ -1,39 +1,55 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime, date, time, timedelta, timezone
+from typing import Dict, List, Tuple, Optional
+
+import os
+import tempfile
+import traceback
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
-    QLineEdit,
-    QPushButton,
+    QHBoxLayout,
+    QComboBox,
+    QDateEdit,
     QCheckBox,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QMessageBox,
     QLabel,
-    QHeaderView,
     QAbstractItemView,
+    QDialog,
+    QHeaderView,
 )
 
-from app.services.orgs_service import (
-    list_orgs,
-    create_org,
-    update_org,
-    set_org_active,
-    SportOrg,
+from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
+from app.services.venue_units_service import list_venue_units
+from app.services.bookings_service import (
+    list_bookings_for_day,
+    create_booking,
+    update_booking,
+    cancel_booking,
 )
-from app.services.venues_service import (
-    list_venues,
-    create_venue,
-    update_venue,
-    set_venue_active,
-    Venue,
-)
-from app.services.venue_units_manage_service import apply_units_scheme
-from app.ui.org_dialog import OrgDialog
-from app.ui.venue_dialog import VenueDialog
+from app.ui.booking_dialog import BookingDialog
+
+
+def _uilog(msg: str) -> None:
+    path = os.path.join(tempfile.gettempdir(), "schedule_debug.log")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().isoformat()} {msg}\n")
+
+
+@dataclass(frozen=True)
+class Resource:
+    venue_id: int
+    venue_name: str
+    venue_unit_id: int | None
+    resource_name: str
 
 
 _TABLE_QSS = """
@@ -54,7 +70,7 @@ QHeaderView::section {
     font-weight: 600;
 }
 QTableWidget::item {
-    padding: 6px 10px;
+    padding: 4px 8px;
     border: none;
 }
 QTableWidget::item:selected {
@@ -67,13 +83,14 @@ _PAGE_QSS = """
 QWidget {
     background: #fbfbfc;
 }
-QLineEdit {
+QComboBox, QDateEdit {
     background: #ffffff;
     border: 1px solid #e6e6e6;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 6px 10px;
+    min-height: 22px;
 }
-QLineEdit:focus {
+QComboBox:focus, QDateEdit:focus {
     border: 1px solid #7fb3ff;
 }
 QPushButton {
@@ -82,6 +99,7 @@ QPushButton {
     border-radius: 10px;
     padding: 8px 12px;
     font-weight: 600;
+    min-height: 34px;
 }
 QPushButton:hover {
     border: 1px solid #cfd6df;
@@ -101,417 +119,436 @@ QLabel#sectionTitle {
 """
 
 
-class OrgsVenuesPage(QWidget):
+class SchedulePage(QWidget):
+    WORK_START = time(8, 0)
+    WORK_END = time(22, 0)
+    SLOT_MINUTES = 30
+
+    TZ_OFFSET_HOURS = 3
+    TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(_PAGE_QSS)
 
-        # ---------- Orgs (left)
-        self.lbl_orgs = QLabel("Учреждения")
-        self.lbl_orgs.setObjectName("sectionTitle")
+        self.lbl_title = QLabel("Расписание")
+        self.lbl_title.setObjectName("sectionTitle")
 
-        self.ed_org_search = QLineEdit()
-        self.ed_org_search.setPlaceholderText("Поиск учреждений: имя/адрес")
-        self.ed_org_search.setClearButtonEnabled(True)
-        self.ed_org_search.returnPressed.connect(self.reload_orgs)
+        self.cmb_org = QComboBox()
+        self.cmb_org.currentIndexChanged.connect(self._on_org_changed)
 
-        self.cb_org_inactive = QCheckBox("Архив")
-        self.cb_org_inactive.stateChanged.connect(lambda *_: self.reload_orgs())
+        self.dt_day = QDateEdit()
+        self.dt_day.setCalendarPopup(True)
+        self.dt_day.setDate(date.today())
+        self.dt_day.dateChanged.connect(lambda *_: self.reload())
 
-        self.btn_org_add = QPushButton("Создать")
-        self.btn_org_edit = QPushButton("Редактировать")
-        self.btn_org_archive = QPushButton("Архивировать/восстановить")
+        self.cb_cancelled = QCheckBox("Отменённые")
+        self.cb_cancelled.setChecked(False)
+        self.cb_cancelled.stateChanged.connect(lambda *_: self.reload())
 
-        self.btn_org_add.clicked.connect(self._org_add)
-        self.btn_org_edit.clicked.connect(self._org_edit)
-        self.btn_org_archive.clicked.connect(self._org_toggle)
+        self.btn_create = QPushButton("Создать")
+        self.btn_edit = QPushButton("Редактировать")
+        self.btn_cancel = QPushButton("Отменить")
+        self.btn_refresh = QPushButton("Обновить")
 
-        for b in (self.btn_org_add, self.btn_org_edit, self.btn_org_archive):
-            b.setMinimumHeight(34)
+        self.btn_create.clicked.connect(self._on_create)
+        self.btn_edit.clicked.connect(self._on_edit)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_refresh.clicked.connect(self.reload)
 
-        org_top = QHBoxLayout()
-        org_top.setContentsMargins(12, 12, 12, 8)
-        org_top.setSpacing(10)
-        org_top.addWidget(self.lbl_orgs)
-        org_top.addWidget(self.ed_org_search, 1)
-        org_top.addWidget(self.cb_org_inactive)
-        org_top.addWidget(self.btn_org_add)
-        org_top.addWidget(self.btn_org_edit)
-        org_top.addWidget(self.btn_org_archive)
+        top = QHBoxLayout()
+        top.setContentsMargins(12, 12, 12, 8)
+        top.setSpacing(10)
+        top.addWidget(self.lbl_title)
+        top.addWidget(QLabel("Учреждение:"))
+        top.addWidget(self.cmb_org, 1)
+        top.addWidget(QLabel("Дата:"))
+        top.addWidget(self.dt_day)
+        top.addWidget(self.cb_cancelled)
+        top.addWidget(self.btn_create)
+        top.addWidget(self.btn_edit)
+        top.addWidget(self.btn_cancel)
+        top.addWidget(self.btn_refresh)
 
-        self.tbl_orgs = QTableWidget(0, 4)
-        self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Активен"])
-        self._style_table(self.tbl_orgs)
-        self.tbl_orgs.itemSelectionChanged.connect(self.reload_venues)
-        self.tbl_orgs.doubleClicked.connect(self._org_edit)
+        self.tbl = QTableWidget()
+        self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
+        self.tbl.setStyleSheet(_TABLE_QSS)
 
-        left = QVBoxLayout()
-        left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(10)
-        left.addLayout(org_top)
-        left.addWidget(self.tbl_orgs, 1)
-
-        # ---------- Venues (right)
-        self.lbl_venues = QLabel("Площадки: (выберите учреждение слева)")
-        self.lbl_venues.setObjectName("sectionTitle")
-
-        self.cb_venue_inactive = QCheckBox("Архив")
-        self.cb_venue_inactive.stateChanged.connect(lambda *_: self.reload_venues())
-
-        self.btn_venue_add = QPushButton("Создать")
-        self.btn_venue_edit = QPushButton("Редактировать")
-        self.btn_venue_archive = QPushButton("Архивировать/восстановить")
-
-        self.btn_venue_add.clicked.connect(self._venue_add)
-        self.btn_venue_edit.clicked.connect(self._venue_edit)
-        self.btn_venue_archive.clicked.connect(self._venue_toggle)
-
-        for b in (self.btn_venue_add, self.btn_venue_edit, self.btn_venue_archive):
-            b.setMinimumHeight(34)
-
-        venue_top = QHBoxLayout()
-        venue_top.setContentsMargins(12, 12, 12, 8)
-        venue_top.setSpacing(10)
-        venue_top.addWidget(self.lbl_venues, 1)
-        venue_top.addWidget(self.cb_venue_inactive)
-        venue_top.addWidget(self.btn_venue_add)
-        venue_top.addWidget(self.btn_venue_edit)
-        venue_top.addWidget(self.btn_venue_archive)
-
-        self.tbl_venues = QTableWidget(0, 6)
-        self.tbl_venues.setHorizontalHeaderLabels(["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"])
-        self._style_table(self.tbl_venues)
-        self.tbl_venues.doubleClicked.connect(self._venue_edit)
-
-        right = QVBoxLayout()
-        right.setContentsMargins(0, 0, 0, 0)
-        right.setSpacing(10)
-        right.addLayout(venue_top)
-        right.addWidget(self.tbl_venues, 1)
-
-        # ---------- Root
-        root = QHBoxLayout(self)
-        root.setContentsMargins(12, 8, 12, 12)
-        root.setSpacing(12)
-        root.addLayout(left, 1)
-        root.addLayout(right, 1)
-
-        self.reload_orgs()
-
-    def _style_table(self, tbl: QTableWidget) -> None:
-        tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        tbl.setAlternatingRowColors(True)
-        tbl.setSortingEnabled(True)
-        tbl.setShowGrid(False)
-        tbl.verticalHeader().setVisible(False)
-        tbl.setStyleSheet(_TABLE_QSS)
-
-        header = tbl.horizontalHeader()
+        header = self.tbl.horizontalHeader()
         header.setStretchLastSection(True)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
-        tbl.setFont(f)
+        self.tbl.setFont(f)
 
-        # дефолт: почти всё по содержимому, последний столбец тянется
-        for c in range(tbl.columnCount()):
-            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(tbl.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(10)
+        root.addLayout(top)
+        root.addWidget(self.tbl, 1)
 
-    # -------- selection helpers
-    def _selected_org(self) -> SportOrg | None:
-        row = self.tbl_orgs.currentRow()
-        if row < 0:
-            return None
-        item = self.tbl_orgs.item(row, 0)
-        if not item:
-            return None
-        obj = item.data(Qt.UserRole)
-        return obj if isinstance(obj, SportOrg) else None
+        self._resources: List[Resource] = []
+        self._tenants: List[Dict] = []
 
-    def _selected_venue(self) -> Venue | None:
-        row = self.tbl_venues.currentRow()
-        if row < 0:
-            return None
-        item = self.tbl_venues.item(row, 0)
-        if not item:
-            return None
-        obj = item.data(Qt.UserRole)
-        return obj if isinstance(obj, Venue) else None
+        self._load_refs()
 
-    # -------- reloaders
-    def reload_orgs(self):
-        selected = self._selected_org()
-        selected_id = selected.id if selected else None
-
+    def _load_refs(self):
         try:
-            orgs = list_orgs(
-                self.ed_org_search.text(),
-                include_inactive=self.cb_org_inactive.isChecked(),
-            )
+            orgs = list_active_orgs()
+            self.cmb_org.blockSignals(True)
+            self.cmb_org.clear()
+            for o in orgs:
+                self.cmb_org.addItem(o.name, o.id)
+            self.cmb_org.blockSignals(False)
+
+            self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
         except Exception as e:
-            QMessageBox.critical(self, "Учреждения", f"Ошибка загрузки:\n{e}")
+            QMessageBox.critical(self, "Справочники", f"Ошибка загрузки справочников:\n{e}")
             return
 
-        self.tbl_orgs.setSortingEnabled(False)
-        self.tbl_orgs.setRowCount(0)
+        self._on_org_changed()
 
-        for o in orgs:
-            r = self.tbl_orgs.rowCount()
-            self.tbl_orgs.insertRow(r)
-
-            it_id = QTableWidgetItem(str(o.id))
-            it_id.setData(Qt.UserRole, o)
-            it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            it_active = QTableWidgetItem("Да" if o.is_active else "Нет")
-            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            self.tbl_orgs.setItem(r, 0, it_id)
-            self.tbl_orgs.setItem(r, 1, QTableWidgetItem(o.name))
-            self.tbl_orgs.setItem(r, 2, QTableWidgetItem(o.address or ""))
-            self.tbl_orgs.setItem(r, 3, it_active)
-
-            if not o.is_active:
-                for c in range(self.tbl_orgs.columnCount()):
-                    it = self.tbl_orgs.item(r, c)
-                    if it:
-                        it.setForeground(Qt.GlobalColor.darkGray)
-
-        self.tbl_orgs.setSortingEnabled(True)
-
-        if selected_id is not None:
-            self._select_org_row_by_id(selected_id)
-
-        self.reload_venues()
-
-    def reload_venues(self):
-        org = self._selected_org()
-        if not org:
-            self.lbl_venues.setText("Площадки: (выберите учреждение слева)")
-            self.tbl_venues.setRowCount(0)
-            return
-
-        self.lbl_venues.setText(f"Площадки: {org.name}")
-
-        selected = self._selected_venue()
-        selected_id = selected.id if selected else None
-
-        try:
-            venues = list_venues(org.id, include_inactive=self.cb_venue_inactive.isChecked())
-        except Exception as e:
-            QMessageBox.critical(self, "Площадки", f"Ошибка загрузки:\n{e}")
-            return
-
-        self.tbl_venues.setSortingEnabled(False)
-        self.tbl_venues.setRowCount(0)
-
-        for v in venues:
-            r = self.tbl_venues.rowCount()
-            self.tbl_venues.insertRow(r)
-
-            it_id = QTableWidgetItem(str(v.id))
-            it_id.setData(Qt.UserRole, v)
-            it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            it_cap = QTableWidgetItem("" if v.capacity is None else str(v.capacity))
-            it_cap.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            it_active = QTableWidgetItem("Да" if v.is_active else "Нет")
-            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            self.tbl_venues.setItem(r, 0, it_id)
-            self.tbl_venues.setItem(r, 1, QTableWidgetItem(v.name))
-            self.tbl_venues.setItem(r, 2, QTableWidgetItem(v.sport_type or ""))
-            self.tbl_venues.setItem(r, 3, it_cap)
-            self.tbl_venues.setItem(r, 4, it_active)
-            self.tbl_venues.setItem(r, 5, QTableWidgetItem(v.comment or ""))
-
-            if not v.is_active:
-                for c in range(self.tbl_venues.columnCount()):
-                    it = self.tbl_venues.item(r, c)
-                    if it:
-                        it.setForeground(Qt.GlobalColor.darkGray)
-
-        self.tbl_venues.setSortingEnabled(True)
-
-        if selected_id is not None:
-            self._select_venue_row_by_id(selected_id)
-
-    # -------- org actions
-    def _org_add(self):
-        dlg = OrgDialog(self, title="Создать учреждение")
-        if dlg.exec() != OrgDialog.Accepted:
+    def _on_org_changed(self):
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            self._resources = []
+            self._setup_table()
             return
 
         try:
-            new_id = create_org(**dlg.values())
+            venues = list_active_venues(int(org_id))
+
+            resources: List[Resource] = []
+            for v in venues:
+                units = list_venue_units(v.id, include_inactive=False)
+                if units:
+                    for u in units:
+                        resources.append(
+                            Resource(
+                                venue_id=v.id,
+                                venue_name=v.name,
+                                venue_unit_id=u.id,
+                                resource_name=f"{v.name} — {u.name}",
+                            )
+                        )
+                else:
+                    resources.append(
+                        Resource(
+                            venue_id=v.id,
+                            venue_name=v.name,
+                            venue_unit_id=None,
+                            resource_name=v.name,
+                        )
+                    )
+
+            self._resources = resources
+
         except Exception as e:
-            QMessageBox.critical(self, "Создать учреждение", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Площадки", f"Ошибка загрузки площадок:\n{e}")
+            self._resources = []
+
+        self._setup_table()
+        self.reload()
+
+    def _time_slots(self) -> List[time]:
+        out: List[time] = []
+        cur = datetime.combine(date.today(), self.WORK_START)
+        end = datetime.combine(date.today(), self.WORK_END)
+        step = timedelta(minutes=self.SLOT_MINUTES)
+        while cur < end:
+            out.append(cur.time())
+            cur += step
+        return out
+
+    def _setup_table(self):
+        times = self._time_slots()
+        resource_count = len(self._resources)
+
+        self.tbl.clear()
+        self.tbl.setRowCount(len(times))
+        self.tbl.setColumnCount(1 + resource_count)
+
+        headers = ["Время"] + [r.resource_name for r in self._resources]
+        self.tbl.setHorizontalHeaderLabels(headers)
+
+        # фиксируем ширину времени, остальные — более “управляемо”
+        header = self.tbl.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for c in range(1, 1 + resource_count):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+
+        for r, tm in enumerate(times):
+            it = QTableWidgetItem(tm.strftime("%H:%M"))
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tbl.setItem(r, 0, it)
+
+        for r in range(len(times)):
+            for c in range(1, 1 + resource_count):
+                it = QTableWidgetItem("")
+                it.setData(Qt.ItemDataRole.UserRole, None)
+                self.tbl.setItem(r, c, it)
+
+        self.tbl.setColumnWidth(0, 70)
+        self.tbl.resizeRowsToContents()
+
+    def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int]]:
+        items = self.tbl.selectedItems()
+        if not items:
+            return None
+
+        cols = sorted({i.column() for i in items if i.column() != 0})
+        if not cols:
+            return None
+
+        venue_ids = set()
+        for col in cols:
+            rsrc = self._resources[col - 1]
+            venue_ids.add(int(rsrc.venue_id))
+            if rsrc.venue_unit_id is None:
+                QMessageBox.information(self, "Выделение", "Можно выбирать несколько колонок только для зон одной площадки.")
+                return None
+
+        if len(venue_ids) != 1:
+            QMessageBox.information(self, "Выделение", "Можно бронировать несколько зон только в рамках одной площадки.")
+            return None
+
+        rows = sorted({i.row() for i in items})
+        return cols, rows[0], rows[-1]
+
+    def _row_to_datetime(self, day: date, row: int) -> datetime:
+        tm = self._time_slots()[row]
+        return datetime.combine(day, tm, tzinfo=self.TZ)
+
+    def _selected_booking(self):
+        it = self.tbl.currentItem()
+        if not it:
+            return None
+        return it.data(Qt.ItemDataRole.UserRole)
+
+    def reload(self):
+        for r in range(self.tbl.rowCount()):
+            for c in range(1, self.tbl.columnCount()):
+                it = self.tbl.item(r, c)
+                if it is None:
+                    it = QTableWidgetItem("")
+                    self.tbl.setItem(r, c, it)
+                it.setText("")
+                it.setBackground(Qt.GlobalColor.white)
+                it.setData(Qt.ItemDataRole.UserRole, None)
+
+        if not self._resources:
             return
 
-        QMessageBox.information(self, "Учреждения", f"Создано учреждение (id={new_id}).")
-        self.reload_orgs()
-        self._select_org_row_by_id(new_id)
-
-    def _org_edit(self):
-        org = self._selected_org()
-        if not org:
-            QMessageBox.information(self, "Редактировать", "Выберите учреждение.")
-            return
-
-        dlg = OrgDialog(
-            self,
-            title=f"Редактировать: {org.name}",
-            data={"name": org.name, "address": org.address, "comment": org.comment},
-        )
-        if dlg.exec() != OrgDialog.Accepted:
-            return
+        day = self.dt_day.date().toPython()
+        include_cancelled = self.cb_cancelled.isChecked()
+        venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
 
         try:
-            update_org(org.id, **dlg.values())
+            bookings = list_bookings_for_day(venue_ids, day, include_cancelled=include_cancelled)
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать учреждение", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
 
-        self.reload_orgs()
-        self._select_org_row_by_id(org.id)
+        unit_col: Dict[int, int] = {}
+        venue_fallback_col: Dict[int, int] = {}
+        for i, rsrc in enumerate(self._resources):
+            col = i + 1
+            if rsrc.venue_unit_id is not None:
+                unit_col[int(rsrc.venue_unit_id)] = col
+            else:
+                venue_fallback_col[int(rsrc.venue_id)] = col
 
-    def _org_toggle(self):
-        org = self._selected_org()
-        if not org:
-            QMessageBox.information(self, "Архив", "Выберите учреждение.")
-            return
+        day_start = datetime.combine(day, self.WORK_START, tzinfo=self.TZ)
+        day_end = datetime.combine(day, self.WORK_END, tzinfo=self.TZ)
 
-        new_state = not org.is_active
-        action = "восстановить" if new_state else "архивировать"
-        if (
-            QMessageBox.question(
+        for b in bookings:
+            col = None
+            if getattr(b, "venue_unit_id", None) is not None:
+                col = unit_col.get(int(b.venue_unit_id))
+            if col is None:
+                col = venue_fallback_col.get(int(b.venue_id))
+            if not col:
+                continue
+
+            start = max(b.starts_at, day_start)
+            end = min(b.ends_at, day_end)
+            if end <= start:
+                continue
+
+            r0 = int((start - day_start).total_seconds() // (self.SLOT_MINUTES * 60))
+            r1 = int(((end - day_start).total_seconds() - 1) // (self.SLOT_MINUTES * 60))
+            r0 = max(0, r0)
+            r1 = min(self.tbl.rowCount() - 1, r1)
+
+            if b.status == "cancelled":
+                color = Qt.GlobalColor.lightGray
+            else:
+                color = Qt.GlobalColor.cyan if b.kind == "PD" else Qt.GlobalColor.green
+
+            for r in range(r0, r1 + 1):
+                it = self.tbl.item(r, col)
+                if it is None:
+                    it = QTableWidgetItem("")
+                    self.tbl.setItem(r, col, it)
+                it.setBackground(color)
+                it.setData(Qt.ItemDataRole.UserRole, b)
+
+            it0 = self.tbl.item(r0, col)
+            if it0:
+                unit_suffix = f" [{b.venue_unit_name}]" if getattr(b, "venue_unit_name", "") else ""
+                title = (b.title or "").strip()
+                if title:
+                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}\n{title}")
+                else:
+                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}")
+
+        self.tbl.resizeRowsToContents()
+
+    def _on_create(self):
+        try:
+            sel = self._selected_multi_units()
+            if not sel:
+                QMessageBox.information(
+                    self,
+                    "Создать бронь",
+                    "Выделите диапазон времени и 1+ колонок зон ОДНОЙ площадки (не колонку 'Время').",
+                )
+                return
+
+            cols, rmin, rmax = sel
+            day = self.dt_day.date().toPython()
+
+            starts_at = self._row_to_datetime(day, rmin)
+            ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
+
+            if not self._tenants:
+                QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
+                return
+
+            venue_name = self._resources[cols[0] - 1].venue_name
+
+            dlg = BookingDialog(
                 self,
-                "Подтверждение",
-                f"Вы действительно хотите {action} учреждение «{org.name}»?",
+                starts_at=starts_at,
+                ends_at=ends_at,
+                tenants=self._tenants,
+                venue_name=venue_name,
+                venue_units=None,
             )
-            != QMessageBox.StandardButton.Yes
-        ):
-            return
 
-        try:
-            set_org_active(org.id, new_state)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            data = dlg.values()
+
+            created_ids: List[int] = []
+            for col in cols:
+                rsrc = self._resources[col - 1]
+                new_id = create_booking(
+                    venue_id=int(rsrc.venue_id),
+                    venue_unit_id=int(rsrc.venue_unit_id),
+                    tenant_id=data["tenant_id"],
+                    title=data["title"],
+                    kind=data["kind"],
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                )
+                created_ids.append(new_id)
+
+            QMessageBox.information(self, "Расписание", f"Создано бронирований: {len(created_ids)}")
+            self.reload()
+
         except Exception as e:
-            QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
-            return
-
-        self.reload_orgs()
-
-    # -------- venue actions
-    def _venue_add(self):
-        org = self._selected_org()
-        if not org:
-            QMessageBox.information(self, "Площадки", "Сначала выберите учреждение слева.")
-            return
-
-        dlg = VenueDialog(self, title=f"Создать площадку — {org.name}")
-        if dlg.exec() != VenueDialog.Accepted:
-            return
-
-        data = dlg.values()
-        try:
-            new_id = create_venue(
-                org_id=org.id,
-                name=data["name"],
-                sport_type=data["sport_type"],
-                capacity=data["capacity"],
-                comment=data["comment"],
+            _uilog("UNHANDLED ERROR in _on_create: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Создать бронь",
+                "Непредвиденная ошибка. Смотрите лог:\n"
+                f"{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n"
+                f"{repr(e)}",
             )
-            apply_units_scheme(new_id, data["units_scheme"])
-        except Exception as e:
-            QMessageBox.critical(self, "Создать площадку", f"Ошибка:\n{e}")
+
+    def _on_edit(self):
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Редактировать", "Выберите ячейку с бронью.")
+            return
+        if getattr(b, "status", "") == "cancelled":
+            QMessageBox.information(self, "Редактировать", "Отменённую бронь редактировать нельзя.")
             return
 
-        QMessageBox.information(self, "Площадки", f"Создана площадка (id={new_id}).")
-        self.reload_venues()
-        self._select_venue_row_by_id(new_id)
+        rsrc = next((r for r in self._resources if r.venue_id == b.venue_id and r.venue_unit_id == b.venue_unit_id), None)
+        venue_name = rsrc.resource_name if rsrc else f"Площадка {b.venue_id}"
 
-    def _venue_edit(self):
-        v = self._selected_venue()
-        if not v:
-            QMessageBox.information(self, "Редактировать", "Выберите площадку.")
-            return
+        units = [{"id": u.id, "name": u.name} for u in list_venue_units(int(b.venue_id), include_inactive=False)]
 
-        dlg = VenueDialog(
+        dlg = BookingDialog(
             self,
-            title=f"Редактировать площадку: {v.name}",
-            data={
-                "id": v.id,  # чтобы dialog подтянул текущую схему зон
-                "name": v.name,
-                "sport_type": v.sport_type,
-                "capacity": v.capacity,
-                "comment": v.comment,
+            title="Редактировать бронирование",
+            starts_at=b.starts_at,
+            ends_at=b.ends_at,
+            tenants=self._tenants,
+            venue_name=venue_name,
+            venue_units=units,
+            initial={
+                "kind": getattr(b, "kind", "PD"),
+                "tenant_id": getattr(b, "tenant_id", None),
+                "venue_unit_id": getattr(b, "venue_unit_id", None),
+                "title": getattr(b, "title", ""),
             },
         )
-        if dlg.exec() != VenueDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
         try:
-            update_venue(
-                venue_id=v.id,
-                name=data["name"],
-                sport_type=data["sport_type"],
-                capacity=data["capacity"],
-                comment=data["comment"],
+            update_booking(
+                int(b.id),
+                tenant_id=data["tenant_id"],
+                title=data["title"],
+                kind=data["kind"],
+                venue_unit_id=data["venue_unit_id"],
             )
-            apply_units_scheme(v.id, data["units_scheme"])
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать площадку", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Редактировать бронирование", f"Ошибка:\n{e}")
             return
 
-        self.reload_venues()
-        self._select_venue_row_by_id(v.id)
+        self.reload()
 
-    def _venue_toggle(self):
-        v = self._selected_venue()
-        if not v:
-            QMessageBox.information(self, "Архив", "Выберите площадку.")
+    def _on_cancel(self):
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Отмена", "Выберите ячейку с бронью.")
+            return
+        if getattr(b, "status", "") == "cancelled":
+            QMessageBox.information(self, "Отмена", "Бронь уже отменена.")
             return
 
-        new_state = not v.is_active
-        action = "восстановить" if new_state else "архивировать"
         if (
             QMessageBox.question(
                 self,
                 "Подтверждение",
-                f"Вы действительно хотите {action} площадку «{v.name}»?",
+                f"Отменить бронь:\n{getattr(b, 'tenant_name', '')}\n{getattr(b, 'title', '')}\n"
+                f"{b.starts_at:%d.%m.%Y %H:%M} – {b.ends_at:%H:%M} ?",
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
 
         try:
-            set_venue_active(v.id, new_state)
+            cancel_booking(int(b.id))
         except Exception as e:
-            QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Отмена брони", f"Ошибка:\n{e}")
             return
 
-        self.reload_venues()
-
-    # -------- selection by id
-    def _select_org_row_by_id(self, org_id: int) -> None:
-        for r in range(self.tbl_orgs.rowCount()):
-            item = self.tbl_orgs.item(r, 0)
-            if item and item.text() == str(org_id):
-                self.tbl_orgs.setCurrentCell(r, 0)
-                self.tbl_orgs.scrollToItem(item)
-                return
-
-    def _select_venue_row_by_id(self, venue_id: int) -> None:
-        for r in range(self.tbl_venues.rowCount()):
-            item = self.tbl_venues.item(r, 0)
-            if item and item.text() == str(venue_id):
-                self.tbl_venues.setCurrentCell(r, 0)
-                self.tbl_venues.scrollToItem(item)
-                return
+        self.reload()
