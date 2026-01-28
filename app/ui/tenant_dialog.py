@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QCheckBox,
     QComboBox,
+    QMessageBox,
 )
 
 
 def _pydate_to_qdate(d: Optional[date]) -> QDate:
     if not d:
-        return QDate()
+        return QDate()  # invalid
     return QDate(d.year, d.month, d.day)
 
 
@@ -30,6 +31,12 @@ def _qdate_to_pydate(qd: QDate) -> Optional[date]:
 
 
 class TenantDialog(QDialog):
+    """
+    Карточка контрагента (только поля tenants).
+    Расписание/учреждение/площадка/часть площадки — НЕ здесь, а отдельной вкладкой/формой
+    (через tenant_recurring_rules).
+    """
+
     def __init__(self, parent=None, title: str = "Контрагент", data: Optional[Dict] = None):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -37,34 +44,37 @@ class TenantDialog(QDialog):
         self._data_in = data or {}
 
         # базовые
-        self.ed_name = QLineEdit(self._data_in.get("name", ""))
+        self.ed_name = QLineEdit(self._data_in.get("name", "") or "")
         self.ed_inn = QLineEdit(self._data_in.get("inn", "") or "")
         self.ed_phone = QLineEdit(self._data_in.get("phone", "") or "")
         self.ed_email = QLineEdit(self._data_in.get("email", "") or "")
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
 
-        # доп поля
+        # доп поля (из вашей таблицы tenants)
         self.ed_contact_name = QLineEdit(self._data_in.get("contact_name", "") or "")
         self.ed_obligation_kind = QLineEdit(self._data_in.get("obligation_kind", "") or "")
         self.ed_contract_no = QLineEdit(self._data_in.get("contract_no", "") or "")
 
         self.dt_contract_date = QDateEdit()
         self.dt_contract_date.setCalendarPopup(True)
+        self.dt_contract_date.setDisplayFormat("dd.MM.yyyy")
         self.dt_contract_date.setSpecialValueText("—")
-        self.dt_contract_date.setDate(_pydate_to_qdate(self._data_in.get("contract_date")))
         self.dt_contract_date.setMinimumDate(QDate(1900, 1, 1))
+        self.dt_contract_date.setDate(_pydate_to_qdate(self._data_in.get("contract_date")))
 
         self.dt_valid_from = QDateEdit()
         self.dt_valid_from.setCalendarPopup(True)
+        self.dt_valid_from.setDisplayFormat("dd.MM.yyyy")
         self.dt_valid_from.setSpecialValueText("—")
-        self.dt_valid_from.setDate(_pydate_to_qdate(self._data_in.get("contract_valid_from")))
         self.dt_valid_from.setMinimumDate(QDate(1900, 1, 1))
+        self.dt_valid_from.setDate(_pydate_to_qdate(self._data_in.get("contract_valid_from")))
 
         self.dt_valid_to = QDateEdit()
         self.dt_valid_to.setCalendarPopup(True)
+        self.dt_valid_to.setDisplayFormat("dd.MM.yyyy")
         self.dt_valid_to.setSpecialValueText("—")
-        self.dt_valid_to.setDate(_pydate_to_qdate(self._data_in.get("contract_valid_to")))
         self.dt_valid_to.setMinimumDate(QDate(1900, 1, 1))
+        self.dt_valid_to.setDate(_pydate_to_qdate(self._data_in.get("contract_valid_to")))
 
         self.ed_docs_delivery = QLineEdit(self._data_in.get("docs_delivery_method", "") or "")
 
@@ -107,13 +117,28 @@ class TenantDialog(QDialog):
         form.addRow("", self.cb_has_ds)
         form.addRow("Примечания:", self.ed_notes)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
         root.addLayout(form)
         root.addWidget(buttons)
+
+    def _on_accept(self):
+        name = self.ed_name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Контрагент", "Введите название.")
+            self.ed_name.setFocus()
+            return
+
+        d_from = _qdate_to_pydate(self.dt_valid_from.date())
+        d_to = _qdate_to_pydate(self.dt_valid_to.date())
+        if d_from and d_to and d_to < d_from:
+            QMessageBox.warning(self, "Контрагент", "Срок действия: дата 'по' не может быть раньше даты 'с'.")
+            return
+
+        self.accept()
 
     def values(self) -> Dict:
         return {
