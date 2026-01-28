@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox,
-    QDialogButtonBox, QLabel
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QLineEdit,
+    QComboBox,
+    QDialogButtonBox,
+    QLabel,
+    QMessageBox,
 )
+
 
 class BookingDialog(QDialog):
     def __init__(
@@ -16,15 +23,17 @@ class BookingDialog(QDialog):
         title: str = "Создать бронирование",
         starts_at: datetime,
         ends_at: datetime,
-        tenants: List[Dict],          # [{id, name}]
+        tenants: List[Dict],  # [{id, name}]
         venue_name: str,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
 
-        self.lbl_info = QLabel(f"Площадка: <b>{venue_name}</b><br>"
-                               f"Время: <b>{starts_at:%d.%m.%Y %H:%M}</b> – <b>{ends_at:%H:%M}</b>")
+        self.lbl_info = QLabel(
+            f"Площадка: <b>{venue_name}</b><br>"
+            f"Время: <b>{starts_at:%d.%m.%Y %H:%M}</b> – <b>{ends_at:%H:%M}</b>"
+        )
         self.lbl_info.setWordWrap(True)
 
         self.cmb_kind = QComboBox()
@@ -43,14 +52,29 @@ class BookingDialog(QDialog):
         form.addRow("Контрагент:", self.cmb_tenant)
         form.addRow("Название *:", self.ed_title)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+
+        # Enter = OK
+        ok_btn = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setDefault(True)
+            ok_btn.setAutoDefault(True)
+
+        self.buttons.accepted.connect(self._on_accept)
+        self.buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
         root.addWidget(self.lbl_info)
         root.addLayout(form)
-        root.addWidget(buttons)
+        root.addWidget(self.buttons)
+
+    def _on_accept(self):
+        title = self.ed_title.text().strip()
+        if not title:
+            QMessageBox.warning(self, "Создать бронирование", "Введите название.")
+            self.ed_title.setFocus()
+            return
+        self.accept()
 
     def values(self) -> Dict:
         return {
