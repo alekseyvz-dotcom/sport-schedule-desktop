@@ -258,7 +258,7 @@ class SchedulePage(QWidget):
         ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
 
         if not self._tenants:
-            QMessageBox.warning(self, "Арендаторы", "Нет активных арендаторов. Сначала создайте арендатора.")
+            QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте арендатора.")
             return
 
         dlg = BookingDialog(
