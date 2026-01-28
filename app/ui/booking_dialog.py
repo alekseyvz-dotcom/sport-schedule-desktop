@@ -40,7 +40,7 @@ class BookingDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Тип занятости:", self.cmb_kind)
-        form.addRow("Арендатор:", self.cmb_tenant)
+        form.addRow("Контрагент:", self.cmb_tenant)
         form.addRow("Название *:", self.ed_title)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
