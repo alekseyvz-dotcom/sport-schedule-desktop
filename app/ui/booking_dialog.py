@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialogButtonBox,
     QLabel,
-    QMessageBox,
 )
 
 
@@ -58,7 +57,7 @@ class BookingDialog(QDialog):
             self.cmb_unit.setEnabled(False)
 
         self.ed_title = QLineEdit()
-        self.ed_title.setPlaceholderText("Например: Тренировка / Секция / Аренда")
+        self.ed_title.setPlaceholderText("Необязательно. Например: Тренировка / Секция / Аренда")
 
         # --- apply initial values (for edit mode) ---
         k = (initial.get("kind") or "PD").upper()
@@ -85,7 +84,7 @@ class BookingDialog(QDialog):
         form.addRow("Контрагент:", self.cmb_tenant)
         if self._venue_units:
             form.addRow("Зона:", self.cmb_unit)
-        form.addRow("Название *:", self.ed_title)
+        form.addRow("Название:", self.ed_title)  # больше не обязательное
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -96,21 +95,14 @@ class BookingDialog(QDialog):
             ok_btn.setDefault(True)
             ok_btn.setAutoDefault(True)
 
-        self.buttons.accepted.connect(self._on_accept)
+        # больше не валидируем title
+        self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
         root.addWidget(self.lbl_info)
         root.addLayout(form)
         root.addWidget(self.buttons)
-
-    def _on_accept(self):
-        title = self.ed_title.text().strip()
-        if not title:
-            QMessageBox.warning(self, "Бронирование", "Введите название.")
-            self.ed_title.setFocus()
-            return
-        self.accept()
 
     def values(self) -> Dict:
         unit_id = self.cmb_unit.currentData()
