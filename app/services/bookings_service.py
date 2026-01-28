@@ -85,6 +85,11 @@ def list_bookings_for_day(
             put_conn(conn)
 
 
+def _log(msg: str) -> None:
+    with open("booking_debug.log", "a", encoding="utf-8") as f:
+        f.write(msg + "\n")
+
+
 def create_booking(
     venue_id: int,
     tenant_id: int | None,
@@ -96,6 +101,9 @@ def create_booking(
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
+    _log(f"create_booking called: venue_id={venue_id}, tenant_id={tenant_id}, kind={kind}, "
+         f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}")
+
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
     if not title:
@@ -106,6 +114,14 @@ def create_booking(
     conn = None
     try:
         conn = get_conn()
+
+        # ЛОГ: куда подключились (чтобы исключить "не та база")
+        with conn.cursor() as cur:
+            cur.execute("select current_database(), current_user, inet_server_addr(), inet_server_port(), now();")
+            _log("db session: " + str(cur.fetchone()))
+            cur.execute("show transaction_read_only;")
+            _log("transaction_read_only: " + str(cur.fetchone()))
+
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -125,34 +141,24 @@ def create_booking(
             new_id = int(cur.fetchone()[0])
 
         conn.commit()
-
-        # Самопроверка: запись точно видна в этой же БД
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM public.bookings WHERE id=%s", (new_id,))
-            ok = cur.fetchone()
-        if not ok:
-            raise RuntimeError("INSERT выполнен, но запись не найдена после commit (проверьте подключение/транзакции).")
+        _log(f"commit ok, new_id={new_id}")
 
         return new_id
 
-    except errors.ExclusionViolation as e:
+    except Exception as e:
         if conn:
             conn.rollback()
-        raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
-    except errors.IntegrityError as e:
-        # на случай если ExclusionViolation завернули как IntegrityError
-        if conn:
-            conn.rollback()
-        if getattr(e, "pgcode", None) == "23P01":  # exclusion_violation
+        pgcode = getattr(e, "pgcode", None)
+        _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
+
+        # нормальное сообщение для пересечения
+        if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
-        raise
 
-    except Exception:
-        if conn:
-            conn.rollback()
         raise
 
     finally:
         if conn:
             put_conn(conn)
+
