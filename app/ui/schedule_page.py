@@ -51,11 +51,6 @@ class Resource:
     venue_unit_id: int | None
     resource_name: str
 
-
-# Более “аккуратная” таблица:
-# - видимая дорогая сетка
-# - мягкая подсветка выделения (без убийства ваших цветов брони)
-# - чуть аккуратнее padding/line-height
 _TABLE_QSS = """
 QTableWidget {
     background: #ffffff;
@@ -63,7 +58,7 @@ QTableWidget {
     border-radius: 10px;
 
     gridline-color: #e9edf3;
-    selection-background-color: #00000000; /* прозрачно: не перекрывает setBackground */
+    selection-background-color: transparent;
     selection-color: #111111;
 }
 QHeaderView::section {
@@ -76,10 +71,11 @@ QHeaderView::section {
 }
 QTableWidget::item {
     padding: 6px 10px;
-    border: none;
+    border: 1px solid transparent; /* база под рамку выделения */
 }
 QTableWidget::item:selected {
-    background: #00000000; /* важно: не затираем цвет слота */
+    background: transparent;       /* не перекрывает цвет брони */
+    border: 1px solid #7fb3ff;     /* аккуратная рамка */
 }
 """
 
@@ -180,7 +176,7 @@ class SchedulePage(QWidget):
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
 
-        # ВАЖНО: без “зебры”, с сеткой
+        # без “зебры”, с сеткой
         self.tbl.setAlternatingRowColors(False)
         self.tbl.setShowGrid(True)
         self.tbl.setGridStyle(Qt.PenStyle.SolidLine)
@@ -207,65 +203,31 @@ class SchedulePage(QWidget):
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
+        # грузим справочники чуть позже, чтобы не ломать вход/создание окна
         QTimer.singleShot(0, self._load_refs)
 
-    # --------- Небольшие помощники для “аккуратной” заливки ---------
+    # ---------- helpers for “аккуратная” заливка ----------
 
     def _base_color_for_booking(self, b) -> QColor:
         if getattr(b, "status", "") == "cancelled":
             return QColor("#cfd6df")  # мягкий серый
-        # PD/прочее — более приятные пастельные тона
         if getattr(b, "kind", "") == "PD":
             return QColor("#7cc7ff")  # голубой
         return QColor("#7fe0a3")  # зелёный
 
     def _shade(self, c: QColor, factor: float) -> QColor:
-        """
-        factor > 1  -> светлее
-        factor < 1  -> темнее
-        """
         r = max(0, min(255, int(c.red() * factor)))
         g = max(0, min(255, int(c.green() * factor)))
         b = max(0, min(255, int(c.blue() * factor)))
         return QColor(r, g, b)
 
     def _apply_booking_cell_style(self, it: QTableWidgetItem, b, *, is_edge: bool) -> None:
-        """
-        Более аккуратная заливка:
-        - внутри брони: ровный пастельный цвет
-        - на границах брони (первый/последний слот): чуть темнее, чтобы читалась “полоса”
-        - текст: тёмный
-        """
         base = self._base_color_for_booking(b)
         fill = self._shade(base, 0.92 if is_edge else 1.05)  # границы чуть плотнее
         it.setBackground(QBrush(fill))
         it.setForeground(QBrush(QColor("#0f172a")))
 
-    def _apply_selection_overlay(self) -> None:
-        """
-        “Красивое” выделение без QSS-перекраски:
-        мы не меняем background (чтобы не убить booking color),
-        а слегка подсвечиваем текст выбранных ячеек.
-        """
-        selected = set(self.tbl.selectedItems())
-        for r in range(self.tbl.rowCount()):
-            for c in range(self.tbl.columnCount()):
-                it = self.tbl.item(r, c)
-                if not it:
-                    continue
-                # не трогаем колонку времени
-                if c == 0:
-                    continue
-                # если выбранно — делаем текст чуть темнее/жирнее
-                f = it.font()
-                if it in selected:
-                    f.setBold(True)
-                    it.setFont(f)
-                else:
-                    f.setBold(False)
-                    it.setFont(f)
-
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------
 
     def _load_refs(self):
         try:
@@ -277,7 +239,10 @@ class SchedulePage(QWidget):
             self.cmb_org.blockSignals(False)
 
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
+
         except Exception as e:
+            _uilog("ERROR _load_refs: " + repr(e))
+            _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Справочники", f"Ошибка загрузки справочников:\n{e}")
             return
 
@@ -319,6 +284,8 @@ class SchedulePage(QWidget):
             self._resources = resources
 
         except Exception as e:
+            _uilog("ERROR _on_org_changed: " + repr(e))
+            _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки площадок:\n{e}")
             self._resources = []
 
@@ -419,9 +386,6 @@ class SchedulePage(QWidget):
                 it.setText("")
                 it.setBackground(QBrush(QColor("#ffffff")))
                 it.setForeground(QBrush(QColor("#111111")))
-                f = it.font()
-                f.setBold(False)
-                it.setFont(f)
                 it.setData(Qt.ItemDataRole.UserRole, None)
 
         if not self._resources:
@@ -434,6 +398,8 @@ class SchedulePage(QWidget):
         try:
             bookings = list_bookings_for_day(venue_ids, day, include_cancelled=include_cancelled)
         except Exception as e:
+            _uilog("ERROR list_bookings_for_day: " + repr(e))
+            _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
 
@@ -458,8 +424,16 @@ class SchedulePage(QWidget):
             if not col:
                 continue
 
-            start = max(b.starts_at, day_start)
-            end = min(b.ends_at, day_end)
+            # если сервис отдаёт naive datetime, это место может падать.
+            # тут не “лечим”, но логируем чтобы вы увидели точную причину.
+            try:
+                start = max(b.starts_at, day_start)
+                end = min(b.ends_at, day_end)
+            except Exception as e:
+                _uilog(f"ERROR datetime compare: {repr(e)} b.starts_at={repr(getattr(b,'starts_at',None))} "
+                       f"b.ends_at={repr(getattr(b,'ends_at',None))} day_start={repr(day_start)}")
+                continue
+
             if end <= start:
                 continue
 
@@ -488,7 +462,6 @@ class SchedulePage(QWidget):
                     it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}")
 
         self.tbl.resizeRowsToContents()
-        self._apply_selection_overlay()
 
     def _on_create(self):
         try:
