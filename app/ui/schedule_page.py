@@ -9,7 +9,7 @@ import tempfile
 import traceback
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QColor, QBrush
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -52,6 +52,7 @@ class Resource:
     resource_name: str
 
 
+# ВАЖНО: здесь НЕТ border/background у QTableWidget::item — чтобы не ломать setBackground().
 _TABLE_QSS = """
 QTableWidget {
     background: #ffffff;
@@ -59,7 +60,7 @@ QTableWidget {
     border-radius: 10px;
 
     gridline-color: #e9edf3;
-    selection-background-color: transparent;
+    selection-background-color: rgba(127, 179, 255, 60); /* лёгкая подсветка */
     selection-color: #111111;
 }
 QHeaderView::section {
@@ -72,11 +73,9 @@ QHeaderView::section {
 }
 QTableWidget::item {
     padding: 6px 10px;
-    border: 1px solid transparent; /* база для рамки выделения */
 }
 QTableWidget::item:selected {
-    background: transparent;       /* не перекрывает цвет брони */
-    border: 1px solid #7fb3ff;     /* аккуратная рамка */
+    /* не задаём background, чтобы Qt корректно смешивал selection и наш setBackground */
 }
 """
 
@@ -142,8 +141,8 @@ class SchedulePage(QWidget):
         self.dt_day = QDateEdit()
         self.dt_day.setCalendarPopup(True)
         self.dt_day.setDate(date.today())
-        self.dt_day.setDisplayFormat("dd.MM.yyyy")   # чтобы дата была полностью
-        self.dt_day.setFixedWidth(130)               # аккуратная ширина под dd.MM.yyyy
+        self.dt_day.setDisplayFormat("dd.MM.yyyy")
+        self.dt_day.setFixedWidth(130)
         self.dt_day.dateChanged.connect(lambda *_: self.reload())
 
         self.cb_cancelled = QCheckBox("Отменённые")
@@ -207,14 +206,14 @@ class SchedulePage(QWidget):
 
         QTimer.singleShot(0, self._load_refs)
 
-    # ---------- colors helpers ----------
+    # -------- colors --------
 
     def _base_color_for_booking(self, b) -> QColor:
         if getattr(b, "status", "") == "cancelled":
-            return QColor("#cfd6df")
+            return QColor("#d5dbe3")  # мягкий серый
         if getattr(b, "kind", "") == "PD":
-            return QColor("#7cc7ff")
-        return QColor("#7fe0a3")
+            return QColor("#9bd7ff")  # пастельный голубой
+        return QColor("#a7efc0")  # пастельный зелёный
 
     def _shade(self, c: QColor, factor: float) -> QColor:
         r = max(0, min(255, int(c.red() * factor)))
@@ -222,15 +221,7 @@ class SchedulePage(QWidget):
         b = max(0, min(255, int(c.blue() * factor)))
         return QColor(r, g, b)
 
-    def _apply_booking_cell_style(self, it: QTableWidgetItem, b, *, is_edge: bool) -> None:
-        base = self._base_color_for_booking(b)
-        fill = self._shade(base, 0.92 if is_edge else 1.05)
-
-        # ВАЖНО: красим через BackgroundRole (стабильно с QSS)
-        it.setData(Qt.ItemDataRole.BackgroundRole, QBrush(fill))
-        it.setData(Qt.ItemDataRole.ForegroundRole, QBrush(QColor("#0f172a")))
-
-    # -----------------------------------
+    # -----------------------
 
     def _load_refs(self):
         try:
@@ -349,19 +340,11 @@ class SchedulePage(QWidget):
             rsrc = self._resources[col - 1]
             venue_ids.add(int(rsrc.venue_id))
             if rsrc.venue_unit_id is None:
-                QMessageBox.information(
-                    self,
-                    "Выделение",
-                    "Можно выбирать несколько колонок только для зон одной площадки.",
-                )
+                QMessageBox.information(self, "Выделение", "Можно выбирать несколько колонок только для зон одной площадки.")
                 return None
 
         if len(venue_ids) != 1:
-            QMessageBox.information(
-                self,
-                "Выделение",
-                "Можно бронировать несколько зон только в рамках одной площадки.",
-            )
+            QMessageBox.information(self, "Выделение", "Можно бронировать несколько зон только в рамках одной площадки.")
             return None
 
         rows = sorted({i.row() for i in items})
@@ -386,8 +369,7 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                it.setData(Qt.ItemDataRole.BackgroundRole, QBrush(QColor("#ffffff")))
-                it.setData(Qt.ItemDataRole.ForegroundRole, QBrush(QColor("#111111")))
+                it.setBackground(QColor("#ffffff"))
                 it.setData(Qt.ItemDataRole.UserRole, None)
 
         if not self._resources:
@@ -436,6 +418,8 @@ class SchedulePage(QWidget):
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
 
+            base = self._base_color_for_booking(b)
+
             for r in range(r0, r1 + 1):
                 it = self.tbl.item(r, col)
                 if it is None:
@@ -443,7 +427,8 @@ class SchedulePage(QWidget):
                     self.tbl.setItem(r, col, it)
 
                 is_edge = (r == r0) or (r == r1)
-                self._apply_booking_cell_style(it, b, is_edge=is_edge)
+                fill = self._shade(base, 0.92 if is_edge else 1.05)
+                it.setBackground(fill)
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
             it0 = self.tbl.item(r0, col)
