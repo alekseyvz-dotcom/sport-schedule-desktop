@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Tuple, Optional
 
+import os
+import tempfile
+import traceback
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
@@ -23,6 +27,13 @@ from PySide6.QtWidgets import (
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
 from app.services.bookings_service import list_bookings_for_day, create_booking, Booking
 from app.ui.booking_dialog import BookingDialog
+
+
+def _uilog(msg: str) -> None:
+    """Пишем в TEMP, чтобы видеть, где обрывается логика (в exe/без консоли тоже)."""
+    path = os.path.join(tempfile.gettempdir(), "schedule_debug.log")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().isoformat()} {msg}\n")
 
 
 @dataclass(frozen=True)
@@ -66,9 +77,6 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_refresh)
 
         self.tbl = QTableWidget()
-
-        # ВАЖНО: чтобы можно было выделять "пустые" ячейки,
-        # они должны существовать. Мы заполним их в _setup_table().
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
@@ -77,9 +85,8 @@ class SchedulePage(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
-        # caches
         self._venues: List[Tuple[int, str]] = []  # [(id, name)]
-        self._tenants: List[Dict] = []            # [{id, name}]
+        self._tenants: List[Dict] = []  # [{id, name}]
 
         self._load_refs()
 
@@ -140,12 +147,10 @@ class SchedulePage(QWidget):
         # Колонка времени
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
-            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)  # время не выделяем
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.tbl.setItem(r, 0, it)
 
-        # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
-        # Создаём item для КАЖДОЙ ячейки площадок, иначе Qt не даст её выделить,
-        # и selectedItems() будет пустым.
+        # Создаём item для КАЖДОЙ ячейки площадок (иначе Qt не выделяет "пустые" ячейки)
         for r in range(len(times)):
             for c in range(1, 1 + venue_count):
                 it = QTableWidgetItem("")
@@ -159,14 +164,14 @@ class SchedulePage(QWidget):
         items = self.tbl.selectedItems()
         if not items:
             return None
-    
+
         cols_all = sorted({i.column() for i in items})
         cols = {i.column() for i in items if i.column() != 0}
         if len(cols) != 1:
             QMessageBox.information(self, "DEBUG", f"Выделены колонки: {cols_all} (нужно ровно 1 площадку)")
             return None
-        col = next(iter(cols))
 
+        col = next(iter(cols))
         rows = sorted({i.row() for i in items})
         return col, rows[0], rows[-1]
 
@@ -180,7 +185,6 @@ class SchedulePage(QWidget):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
                 if it is None:
-                    # на всякий случай, но после _setup_table такого быть не должно
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
 
@@ -240,48 +244,54 @@ class SchedulePage(QWidget):
         self.tbl.resizeRowsToContents()
 
     def _on_create(self):
-        QMessageBox.information(self, "DEBUG", "Нажали 'Создать бронь' (вошли в _on_create)")
-        sel = self._selected_range()
-        if not sel:
-            QMessageBox.information(
-                self,
-                "Создать бронь",
-                "Выделите диапазон слотов в одной колонке площадки (не в колонке 'Время').",
-            )
-            return
-
-        col, rmin, rmax = sel
-        day = self.dt_day.date().toPython()
-
-        venue_idx = col - 1
-        venue_id, venue_name = self._venues[venue_idx]
-
-        starts_at = self._row_to_datetime(day, rmin)
-        ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
-
-        if not self._tenants:
-            QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте арендатора.")
-            return
-
-        dlg = BookingDialog(
-            self,
-            starts_at=starts_at,
-            ends_at=ends_at,
-            tenants=self._tenants,
-            venue_name=venue_name,
-        )
-        
-        res = dlg.exec()
-        QMessageBox.information(self, "DEBUG", f"BookingDialog.exec() вернул: {res}, Accepted={dlg.Accepted}")
-        
-        if res != dlg.Accepted:
-            QMessageBox.information(self, "DEBUG", "Диалог закрыт без OK (не Accepted)")
-            return
-        
-        data = dlg.values()
-
         try:
-            QMessageBox.information(self, "DEBUG", f"Будем создавать: venue_id={venue_id}, starts_at={starts_at}, ends_at={ends_at}")
+            _uilog("entered _on_create")
+
+            sel = self._selected_range()
+            if not sel:
+                _uilog("no selection range")
+                QMessageBox.information(
+                    self,
+                    "Создать бронь",
+                    "Выделите диапазон слотов в одной колонке площадки (не в колонке 'Время').",
+                )
+                return
+
+            col, rmin, rmax = sel
+            day = self.dt_day.date().toPython()
+
+            venue_idx = col - 1
+            venue_id, venue_name = self._venues[venue_idx]
+
+            starts_at = self._row_to_datetime(day, rmin)
+            ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
+
+            _uilog(f"selection: venue_id={venue_id}, starts_at={starts_at!r}, ends_at={ends_at!r}")
+
+            if not self._tenants:
+                _uilog("no tenants")
+                QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте арендатора.")
+                return
+
+            dlg = BookingDialog(
+                self,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                tenants=self._tenants,
+                venue_name=venue_name,
+            )
+
+            res = dlg.exec()
+            _uilog(f"dlg.exec()={res}, Accepted={dlg.Accepted}")
+
+            if res != dlg.Accepted:
+                _uilog("dialog rejected")
+                return
+
+            data = dlg.values()
+            _uilog(f"dialog values: {data!r}")
+
+            _uilog("calling create_booking()")
             new_id = create_booking(
                 venue_id=venue_id,
                 tenant_id=data["tenant_id"],
@@ -290,9 +300,19 @@ class SchedulePage(QWidget):
                 starts_at=starts_at,
                 ends_at=ends_at,
             )
+            _uilog(f"create_booking OK id={new_id}")
+
+            QMessageBox.information(self, "Расписание", f"Бронь создана (id={new_id}).")
+            self.reload()
+
         except Exception as e:
-            QMessageBox.critical(self, "Создать бронь", f"Ошибка:\n{repr(e)}")
-            return
-        
-        QMessageBox.information(self, "Расписание", f"Бронь создана (id={new_id}).")
-        self.reload()
+            # если “ничего не происходит”, это место поймает неожиданные исключения в UI-логике
+            _uilog("UNHANDLED ERROR in _on_create: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Создать бронь",
+                "Непредвиденная ошибка. Смотрите лог:\n"
+                f"{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n"
+                f"{repr(e)}",
+            )
