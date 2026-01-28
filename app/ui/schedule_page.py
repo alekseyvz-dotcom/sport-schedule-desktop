@@ -205,35 +205,37 @@ class SchedulePage(QWidget):
         self.tbl.resizeColumnsToContents()
         self.tbl.setColumnWidth(0, 70)
 
-    def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int, int]]:
+    def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int]]:
+        """
+        Возвращает (cols, rmin, rmax) для выделения:
+        - cols: список колонок ресурсов (>=1), можно несколько зон
+        - rmin/rmax: диапазон строк (время)
+        Ограничения:
+        - все cols должны относиться к одному venue_id
+        - все cols должны быть зонами (venue_unit_id != None)
+        """
         items = self.tbl.selectedItems()
         if not items:
             return None
-    
+
         cols = sorted({i.column() for i in items if i.column() != 0})
         if not cols:
             return None
-    
-        # проверим, что это всё одна площадка (venue_id)
+
         venue_ids = set()
         for col in cols:
             rsrc = self._resources[col - 1]
             venue_ids.add(int(rsrc.venue_id))
+            if rsrc.venue_unit_id is None:
+                QMessageBox.information(self, "Выделение", "Можно выбирать несколько колонок только для зон одной площадки.")
+                return None
+
         if len(venue_ids) != 1:
             QMessageBox.information(self, "Выделение", "Можно бронировать несколько зон только в рамках одной площадки.")
             return None
-    
-        # и что во всех выбранных колонках есть unit (зона)
-        # (если у вас бывают площадки без unit — для них мульти-режим не подходит)
-        for col in cols:
-            rsrc = self._resources[col - 1]
-            if rsrc.venue_unit_id is None:
-                QMessageBox.information(self, "Выделение", "Эта площадка без зон. Выберите колонки зон одной площадки.")
-                return None
-    
+
         rows = sorted({i.row() for i in items})
-        venue_id = next(iter(venue_ids))
-        return cols, rows[0], rows[-1], venue_id
+        return cols, rows[0], rows[-1]
 
     def _row_to_datetime(self, day: date, row: int) -> datetime:
         tm = self._time_slots()[row]
@@ -324,51 +326,50 @@ class SchedulePage(QWidget):
     def _on_create(self):
         try:
             _uilog("entered _on_create")
-    
+
             sel = self._selected_multi_units()
             if not sel:
                 _uilog("no selection")
                 QMessageBox.information(
                     self,
                     "Создать бронь",
-                    "Выделите диапазон слотов и 1+ колонок зон ОДНОЙ площадки (не колонку 'Время').",
+                    "Выделите диапазон времени и 1+ колонок зон ОДНОЙ площадки (не колонку 'Время').",
                 )
                 return
-    
-            cols, rmin, rmax, venue_id = sel
+
+            cols, rmin, rmax = sel
             day = self.dt_day.date().toPython()
-    
+
             starts_at = self._row_to_datetime(day, rmin)
             ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
-    
+
             if not self._tenants:
                 QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
                 return
-    
-            # название площадки для диалога (без зоны)
+
+            # Показываем в диалоге только площадку (зоны выбраны в таблице)
             venue_name = self._resources[cols[0] - 1].venue_name
-    
-            # ВАЖНО: не передаём venue_units, чтобы не выбирать зону в диалоге
+
             dlg = BookingDialog(
                 self,
                 starts_at=starts_at,
                 ends_at=ends_at,
                 tenants=self._tenants,
                 venue_name=venue_name,
-                venue_units=None,
+                venue_units=None,  # отключаем выбор зоны в диалоге
             )
-    
+
             if dlg.exec() != QDialog.DialogCode.Accepted:
                 return
-    
+
             data = dlg.values()
-    
+
             created_ids: List[int] = []
             for col in cols:
                 rsrc = self._resources[col - 1]
                 new_id = create_booking(
                     venue_id=int(rsrc.venue_id),
-                    venue_unit_id=int(rsrc.venue_unit_id),   # зона берётся из колонки
+                    venue_unit_id=int(rsrc.venue_unit_id),  # зона берётся из выделенной колонки
                     tenant_id=data["tenant_id"],
                     title=data["title"],
                     kind=data["kind"],
@@ -376,10 +377,10 @@ class SchedulePage(QWidget):
                     ends_at=ends_at,
                 )
                 created_ids.append(new_id)
-    
+
             QMessageBox.information(self, "Расписание", f"Создано бронирований: {len(created_ids)}")
             self.reload()
-    
+
         except Exception as e:
             _uilog("UNHANDLED ERROR in _on_create: " + repr(e))
             _uilog(traceback.format_exc())
@@ -400,11 +401,9 @@ class SchedulePage(QWidget):
             QMessageBox.information(self, "Редактировать", "Отменённую бронь редактировать нельзя.")
             return
 
-        # название ресурса для шапки
         rsrc = next((r for r in self._resources if r.venue_id == b.venue_id and r.venue_unit_id == b.venue_unit_id), None)
         venue_name = rsrc.resource_name if rsrc else f"Площадка {b.venue_id}"
 
-        # unit'ы площадки
         units = [{"id": u.id, "name": u.name} for u in list_venue_units(int(b.venue_id), include_inactive=False)]
 
         dlg = BookingDialog(
