@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta
-from typing import List, Iterable
+from typing import List, Iterable, Optional
 
 import os
 import tempfile
@@ -17,13 +17,15 @@ from app.db import get_conn, put_conn
 class Booking:
     id: int
     venue_id: int
-    tenant_id: int | None
+    venue_unit_id: Optional[int]
+    tenant_id: Optional[int]
     title: str
     kind: str          # 'PD' или 'GZ' (в БД это bookings.activity)
     starts_at: datetime
     ends_at: datetime
     status: str        # planned/cancelled/done
     tenant_name: str
+    venue_unit_name: str
 
 
 def list_bookings_for_day(
@@ -46,15 +48,18 @@ def list_bookings_for_day(
                 SELECT
                     b.id,
                     b.venue_id,
+                    b.venue_unit_id,
                     b.tenant_id,
                     b.title,
                     b.activity AS kind,
                     b.starts_at,
                     b.ends_at,
                     b.status,
-                    COALESCE(t.name, '') AS tenant_name
+                    COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(vu.name, '') AS venue_unit_name
                 FROM public.bookings b
                 LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
                 WHERE b.venue_id = ANY(%s)
                   AND b.starts_at < %s
                   AND b.ends_at   > %s
@@ -73,6 +78,7 @@ def list_bookings_for_day(
                 Booking(
                     id=int(r["id"]),
                     venue_id=int(r["venue_id"]),
+                    venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
                     tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
                     title=str(r.get("title") or ""),
                     kind=str(r.get("kind") or ""),
@@ -80,6 +86,7 @@ def list_bookings_for_day(
                     ends_at=r["ends_at"],
                     status=str(r.get("status") or "planned"),
                     tenant_name=str(r.get("tenant_name") or ""),
+                    venue_unit_name=str(r.get("venue_unit_name") or ""),
                 )
                 for r in rows
             ]
@@ -95,18 +102,21 @@ def _log(msg: str) -> None:
 
 
 def create_booking(
+    *,
     venue_id: int,
     tenant_id: int | None,
     title: str,
     kind: str,
     starts_at: datetime,
     ends_at: datetime,
+    venue_unit_id: int | None = None,
 ) -> int:
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
     _log(
-        f"create_booking called: venue_id={venue_id}, tenant_id={tenant_id}, kind={kind}, "
+        "create_booking called: "
+        f"venue_id={venue_id}, venue_unit_id={venue_unit_id}, tenant_id={tenant_id}, kind={kind}, "
         f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}"
     )
 
@@ -127,15 +137,28 @@ def create_booking(
             cur.execute("show transaction_read_only;")
             _log("transaction_read_only: " + str(cur.fetchone()))
 
+        # (не обязательно, но полезно) валидация: unit должен принадлежать venue
+        if venue_unit_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM public.venue_units WHERE id=%s AND venue_id=%s",
+                    (int(venue_unit_id), int(venue_id)),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError("Выбранная часть площадки (unit) не принадлежит указанной площадке")
+
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO public.bookings(venue_id, tenant_id, title, activity, starts_at, ends_at, status)
-                VALUES (%s, %s, %s, %s, %s, %s, 'planned')
+                INSERT INTO public.bookings(
+                    venue_id, venue_unit_id, tenant_id, title, activity, starts_at, ends_at, status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'planned')
                 RETURNING id
                 """,
                 (
                     int(venue_id),
+                    int(venue_unit_id) if venue_unit_id is not None else None,
                     int(tenant_id) if tenant_id is not None else None,
                     title,
                     kind,
@@ -157,6 +180,8 @@ def create_booking(
         _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
 
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
+            # пока триггер проверяет пересечения по venue_id (не по unit),
+            # но для пользователя сообщение нормальное.
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
         raise
