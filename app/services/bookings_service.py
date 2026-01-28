@@ -113,19 +113,40 @@ def create_booking(
                 VALUES (%s, %s, %s, %s, %s, %s, 'planned')
                 RETURNING id
                 """,
-                (int(venue_id), (int(tenant_id) if tenant_id is not None else None), title, kind, starts_at, ends_at),
+                (
+                    int(venue_id),
+                    int(tenant_id) if tenant_id is not None else None,
+                    title,
+                    kind,
+                    starts_at,
+                    ends_at,
+                ),
             )
             new_id = int(cur.fetchone()[0])
 
-        # явный commit (важно при работе с пулом)
         conn.commit()
+
+        # Самопроверка: запись точно видна в этой же БД
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM public.bookings WHERE id=%s", (new_id,))
+            ok = cur.fetchone()
+        if not ok:
+            raise RuntimeError("INSERT выполнен, но запись не найдена после commit (проверьте подключение/транзакции).")
+
         return new_id
 
     except errors.ExclusionViolation as e:
-        # это как раз ваш EXCLUDE no_overlap_per_venue
         if conn:
             conn.rollback()
         raise RuntimeError("Площадка занята в выбранный интервал.") from e
+
+    except errors.IntegrityError as e:
+        # на случай если ExclusionViolation завернули как IntegrityError
+        if conn:
+            conn.rollback()
+        if getattr(e, "pgcode", None) == "23P01":  # exclusion_violation
+            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+        raise
 
     except Exception:
         if conn:
