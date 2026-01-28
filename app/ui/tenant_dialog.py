@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 class TenantDialog(QDialog):
-    def __init__(self, parent=None, title: str = "Арендатор", data: Optional[Dict] = None):
+    def __init__(self, parent=None, title: str = "Контрагенты", data: Optional[Dict] = None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
