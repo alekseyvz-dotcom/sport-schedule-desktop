@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QCheckBox,
     QDialog,
+    QHeaderView,
+    QAbstractItemView,
 )
 
 from app.services.tenants_service import (
@@ -28,11 +31,13 @@ class TenantsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        # --- Top bar ---
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: имя / ИНН / телефон")
+        self.ed_search.setClearButtonEnabled(True)
         self.ed_search.returnPressed.connect(self.reload)
 
-        self.cb_inactive = QCheckBox("Показывать архив")
+        self.cb_inactive = QCheckBox("Архив")
         self.cb_inactive.stateChanged.connect(lambda *_: self.reload())
 
         self.btn_add = QPushButton("Создать")
@@ -43,14 +48,20 @@ class TenantsPage(QWidget):
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_archive.clicked.connect(self._on_toggle_active)
 
+        # делаем кнопки одинаковой высоты, чуть “дороже” визуально
+        for b in (self.btn_add, self.btn_edit, self.btn_archive):
+            b.setMinimumHeight(34)
+
         top = QHBoxLayout()
+        top.setContentsMargins(12, 12, 12, 8)
+        top.setSpacing(10)
         top.addWidget(self.ed_search, 1)
         top.addWidget(self.cb_inactive)
         top.addWidget(self.btn_add)
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        # Расширили таблицу, чтобы было видно часть полей карточки
+        # --- Table ---
         self.tbl = QTableWidget(0, 12)
         self.tbl.setHorizontalHeaderLabels(
             [
@@ -68,13 +79,101 @@ class TenantsPage(QWidget):
                 "Комментарий",
             ]
         )
-        self.tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setSortingEnabled(True)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setVisible(False)
         self.tbl.doubleClicked.connect(self._on_edit)
 
+        header = self.tbl.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setHighlightSections(False)
+
+        # Важное: растягиваем “Название” и “Комментарий”, остальное по содержимому
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Название
+        for col in (2, 3, 4, 5, 6, 7, 8, 9, 10):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)          # Комментарий
+
+        self.tbl.setStyleSheet(
+            """
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #e6e6e6;
+                border-radius: 10px;
+                gridline-color: transparent;
+                selection-background-color: #d6e9ff;
+                selection-color: #111111;
+            }
+            QHeaderView::section {
+                background: #f6f7f9;
+                color: #111111;
+                padding: 8px 10px;
+                border: none;
+                border-bottom: 1px solid #e6e6e6;
+                font-weight: 600;
+            }
+            QTableWidget::item {
+                padding: 6px 10px;
+                border: none;
+            }
+            QTableWidget::item:selected {
+                background: #d6e9ff;
+            }
+            """
+        )
+
+        # Общий стиль страницы (аккуратные отступы)
         root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(10)
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
+
+        self.setStyleSheet(
+            """
+            QWidget {
+                background: #fbfbfc;
+            }
+            QLineEdit {
+                background: #ffffff;
+                border: 1px solid #e6e6e6;
+                border-radius: 10px;
+                padding: 8px 10px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #7fb3ff;
+            }
+            QPushButton {
+                background: #ffffff;
+                border: 1px solid #e6e6e6;
+                border-radius: 10px;
+                padding: 8px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                border: 1px solid #cfd6df;
+                background: #f6f7f9;
+            }
+            QPushButton:pressed {
+                background: #eef1f5;
+            }
+            QCheckBox {
+                padding: 0 6px;
+            }
+            """
+        )
+
+        # чуть крупнее шрифт таблицы
+        f = QFont()
+        f.setPointSize(max(f.pointSize(), 10))
+        self.tbl.setFont(f)
 
         self.reload()
 
@@ -98,13 +197,19 @@ class TenantsPage(QWidget):
             QMessageBox.critical(self, "Контрагенты", f"Ошибка загрузки:\n{e}")
             return
 
+        self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(0)
+
         for t in tenants:
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
 
             it_id = QTableWidgetItem(str(t.id))
             it_id.setData(Qt.UserRole, t)
+            it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            it_active = QTableWidgetItem("Да" if t.is_active else "Нет")
+            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self.tbl.setItem(r, 0, it_id)
             self.tbl.setItem(r, 1, QTableWidgetItem(t.name))
@@ -116,10 +221,17 @@ class TenantsPage(QWidget):
             self.tbl.setItem(r, 7, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
             self.tbl.setItem(r, 8, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
             self.tbl.setItem(r, 9, QTableWidgetItem(t.status or ""))
-            self.tbl.setItem(r, 10, QTableWidgetItem("Да" if t.is_active else "Нет"))
+            self.tbl.setItem(r, 10, it_active)
             self.tbl.setItem(r, 11, QTableWidgetItem(t.comment or ""))
 
-        self.tbl.resizeColumnsToContents()
+            # визуально “приглушаем” архивных
+            if not t.is_active:
+                for c in range(self.tbl.columnCount()):
+                    it = self.tbl.item(r, c)
+                    if it:
+                        it.setForeground(Qt.GlobalColor.darkGray)
+
+        self.tbl.setSortingEnabled(True)
 
     def _on_add(self):
         dlg = TenantDialog(self, title="Создать контрагента")
@@ -205,13 +317,12 @@ class TenantsPage(QWidget):
             return
 
         self.reload()
+        self._select_row_by_id(t.id)
 
     def _select_row_by_id(self, tenant_id: int) -> None:
         for r in range(self.tbl.rowCount()):
             item = self.tbl.item(r, 0)
-            if not item:
-                continue
-            if item.text() == str(tenant_id):
+            if item and item.text() == str(tenant_id):
                 self.tbl.setCurrentCell(r, 0)
                 self.tbl.scrollToItem(item)
                 return
