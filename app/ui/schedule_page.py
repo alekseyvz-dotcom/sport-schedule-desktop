@@ -51,6 +51,7 @@ class Resource:
     venue_unit_id: int | None
     resource_name: str
 
+
 _TABLE_QSS = """
 QTableWidget {
     background: #ffffff;
@@ -71,7 +72,7 @@ QHeaderView::section {
 }
 QTableWidget::item {
     padding: 6px 10px;
-    border: 1px solid transparent; /* база под рамку выделения */
+    border: 1px solid transparent; /* база для рамки выделения */
 }
 QTableWidget::item:selected {
     background: transparent;       /* не перекрывает цвет брони */
@@ -141,6 +142,8 @@ class SchedulePage(QWidget):
         self.dt_day = QDateEdit()
         self.dt_day.setCalendarPopup(True)
         self.dt_day.setDate(date.today())
+        self.dt_day.setDisplayFormat("dd.MM.yyyy")   # чтобы дата была полностью
+        self.dt_day.setFixedWidth(130)               # аккуратная ширина под dd.MM.yyyy
         self.dt_day.dateChanged.connect(lambda *_: self.reload())
 
         self.cb_cancelled = QCheckBox("Отменённые")
@@ -176,7 +179,6 @@ class SchedulePage(QWidget):
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
 
-        # без “зебры”, с сеткой
         self.tbl.setAlternatingRowColors(False)
         self.tbl.setShowGrid(True)
         self.tbl.setGridStyle(Qt.PenStyle.SolidLine)
@@ -203,17 +205,16 @@ class SchedulePage(QWidget):
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
-        # грузим справочники чуть позже, чтобы не ломать вход/создание окна
         QTimer.singleShot(0, self._load_refs)
 
-    # ---------- helpers for “аккуратная” заливка ----------
+    # ---------- colors helpers ----------
 
     def _base_color_for_booking(self, b) -> QColor:
         if getattr(b, "status", "") == "cancelled":
-            return QColor("#cfd6df")  # мягкий серый
+            return QColor("#cfd6df")
         if getattr(b, "kind", "") == "PD":
-            return QColor("#7cc7ff")  # голубой
-        return QColor("#7fe0a3")  # зелёный
+            return QColor("#7cc7ff")
+        return QColor("#7fe0a3")
 
     def _shade(self, c: QColor, factor: float) -> QColor:
         r = max(0, min(255, int(c.red() * factor)))
@@ -223,11 +224,13 @@ class SchedulePage(QWidget):
 
     def _apply_booking_cell_style(self, it: QTableWidgetItem, b, *, is_edge: bool) -> None:
         base = self._base_color_for_booking(b)
-        fill = self._shade(base, 0.92 if is_edge else 1.05)  # границы чуть плотнее
-        it.setBackground(QBrush(fill))
-        it.setForeground(QBrush(QColor("#0f172a")))
+        fill = self._shade(base, 0.92 if is_edge else 1.05)
 
-    # ------------------------------------------------------
+        # ВАЖНО: красим через BackgroundRole (стабильно с QSS)
+        it.setData(Qt.ItemDataRole.BackgroundRole, QBrush(fill))
+        it.setData(Qt.ItemDataRole.ForegroundRole, QBrush(QColor("#0f172a")))
+
+    # -----------------------------------
 
     def _load_refs(self):
         try:
@@ -239,7 +242,6 @@ class SchedulePage(QWidget):
             self.cmb_org.blockSignals(False)
 
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
-
         except Exception as e:
             _uilog("ERROR _load_refs: " + repr(e))
             _uilog(traceback.format_exc())
@@ -384,8 +386,8 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                it.setBackground(QBrush(QColor("#ffffff")))
-                it.setForeground(QBrush(QColor("#111111")))
+                it.setData(Qt.ItemDataRole.BackgroundRole, QBrush(QColor("#ffffff")))
+                it.setData(Qt.ItemDataRole.ForegroundRole, QBrush(QColor("#111111")))
                 it.setData(Qt.ItemDataRole.UserRole, None)
 
         if not self._resources:
@@ -424,16 +426,8 @@ class SchedulePage(QWidget):
             if not col:
                 continue
 
-            # если сервис отдаёт naive datetime, это место может падать.
-            # тут не “лечим”, но логируем чтобы вы увидели точную причину.
-            try:
-                start = max(b.starts_at, day_start)
-                end = min(b.ends_at, day_end)
-            except Exception as e:
-                _uilog(f"ERROR datetime compare: {repr(e)} b.starts_at={repr(getattr(b,'starts_at',None))} "
-                       f"b.ends_at={repr(getattr(b,'ends_at',None))} day_start={repr(day_start)}")
-                continue
-
+            start = max(b.starts_at, day_start)
+            end = min(b.ends_at, day_end)
             if end <= start:
                 continue
 
