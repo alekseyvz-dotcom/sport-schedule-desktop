@@ -156,13 +156,14 @@ class SchedulePage(QWidget):
         self.tbl.setColumnWidth(0, 70)
 
     def _selected_range(self) -> Optional[Tuple[int, int, int]]:
-        # (col, row_min, row_max) если выделение в одной колонке площадки
         items = self.tbl.selectedItems()
         if not items:
             return None
-
+    
+        cols_all = sorted({i.column() for i in items})
         cols = {i.column() for i in items if i.column() != 0}
         if len(cols) != 1:
+            QMessageBox.information(self, "DEBUG", f"Выделены колонки: {cols_all} (нужно ровно 1 площадку)")
             return None
         col = next(iter(cols))
 
@@ -239,6 +240,7 @@ class SchedulePage(QWidget):
         self.tbl.resizeRowsToContents()
 
     def _on_create(self):
+        QMessageBox.information(self, "DEBUG", "Нажали 'Создать бронь' (вошли в _on_create)")
         sel = self._selected_range()
         if not sel:
             QMessageBox.information(
@@ -273,6 +275,7 @@ class SchedulePage(QWidget):
 
         data = dlg.values()
         try:
+            QMessageBox.information(self, "DEBUG", f"Будем создавать: venue_id={venue_id}, starts_at={starts_at}, ends_at={ends_at}")
             new_id = create_booking(
                 venue_id=venue_id,
                 tenant_id=data["tenant_id"],
