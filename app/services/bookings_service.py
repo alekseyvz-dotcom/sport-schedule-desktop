@@ -20,10 +20,10 @@ class Booking:
     venue_unit_id: Optional[int]
     tenant_id: Optional[int]
     title: str
-    kind: str          # 'PD' или 'GZ' (в БД это bookings.activity)
+    kind: str  # 'PD' или 'GZ' (в БД это bookings.activity)
     starts_at: datetime
     ends_at: datetime
-    status: str        # planned/cancelled/done
+    status: str  # planned/cancelled/done
     tenant_name: str
     venue_unit_name: str
 
@@ -111,6 +111,7 @@ def create_booking(
     ends_at: datetime,
     venue_unit_id: int | None = None,
 ) -> int:
+    # title НЕ обязателен: в БД title NOT NULL, поэтому храним пустую строку вместо NULL
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
@@ -122,8 +123,6 @@ def create_booking(
 
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
-    if not title:
-        raise ValueError("Название бронирования не может быть пустым")
     if ends_at <= starts_at:
         raise ValueError("Окончание должно быть позже начала")
 
@@ -160,7 +159,7 @@ def create_booking(
                     int(venue_id),
                     int(venue_unit_id) if venue_unit_id is not None else None,
                     int(tenant_id) if tenant_id is not None else None,
-                    title,
+                    title,  # может быть ''
                     kind,
                     starts_at,
                     ends_at,
@@ -180,8 +179,6 @@ def create_booking(
         _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
 
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
-            # пока триггер проверяет пересечения по venue_id (не по unit),
-            # но для пользователя сообщение нормальное.
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
         raise
@@ -189,6 +186,7 @@ def create_booking(
     finally:
         if conn:
             put_conn(conn)
+
 
 def get_booking(booking_id: int) -> Booking:
     conn = None
@@ -246,13 +244,12 @@ def update_booking(
     kind: str,
     venue_unit_id: int | None,
 ) -> None:
+    # title НЕ обязателен
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
-    if not title:
-        raise ValueError("Название бронирования не может быть пустым")
 
     conn = None
     try:
@@ -269,7 +266,7 @@ def update_booking(
                 """,
                 (
                     int(tenant_id) if tenant_id is not None else None,
-                    title,
+                    title,  # может быть ''
                     kind,
                     int(venue_unit_id) if venue_unit_id is not None else None,
                     int(booking_id),
@@ -284,7 +281,6 @@ def update_booking(
 
         pgcode = getattr(e, "pgcode", None)
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
-            # если у вас триггер/ограничение по пересечениям
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
         raise
     finally:
@@ -311,4 +307,3 @@ def cancel_booking(booking_id: int) -> None:
     finally:
         if conn:
             put_conn(conn)
-
