@@ -28,6 +28,7 @@ from app.services.venues_service import (
     set_venue_active,
     Venue,
 )
+from app.services.venue_units_manage_service import apply_units_scheme
 from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
@@ -158,7 +159,6 @@ class OrgsVenuesPage(QWidget):
 
         self.tbl_orgs.resizeColumnsToContents()
 
-        # по возможности восстановим выделение, чтобы venues не "прыгали"
         if selected_id is not None:
             self._select_org_row_by_id(selected_id)
 
@@ -266,7 +266,6 @@ class OrgsVenuesPage(QWidget):
             return
 
         self.reload_orgs()
-        # если архив не показываем, запись может исчезнуть — это нормально
 
     # -------- venue actions
     def _venue_add(self):
@@ -279,8 +278,18 @@ class OrgsVenuesPage(QWidget):
         if dlg.exec() != VenueDialog.Accepted:
             return
 
+        data = dlg.values()
         try:
-            new_id = create_venue(org.id, **dlg.values())
+            # ВАЖНО: create_venue не должен получать units_scheme
+            new_id = create_venue(
+                org_id=org.id,
+                name=data["name"],
+                sport_type=data["sport_type"],
+                capacity=data["capacity"],
+                comment=data["comment"],
+            )
+            # NEW: применяем схему зон (создаст половины/четверти)
+            apply_units_scheme(new_id, data["units_scheme"])
         except Exception as e:
             QMessageBox.critical(self, "Создать площадку", f"Ошибка:\n{e}")
             return
@@ -299,6 +308,7 @@ class OrgsVenuesPage(QWidget):
             self,
             title=f"Редактировать площадку: {v.name}",
             data={
+                "id": v.id,  # ВАЖНО: чтобы dialog подтянул текущую схему зон
                 "name": v.name,
                 "sport_type": v.sport_type,
                 "capacity": v.capacity,
@@ -308,8 +318,17 @@ class OrgsVenuesPage(QWidget):
         if dlg.exec() != VenueDialog.Accepted:
             return
 
+        data = dlg.values()
         try:
-            update_venue(v.id, **dlg.values())
+            update_venue(
+                venue_id=v.id,
+                name=data["name"],
+                sport_type=data["sport_type"],
+                capacity=data["capacity"],
+                comment=data["comment"],
+            )
+            # NEW: применяем схему зон
+            apply_units_scheme(v.id, data["units_scheme"])
         except Exception as e:
             QMessageBox.critical(self, "Редактировать площадку", f"Ошибка:\n{e}")
             return
