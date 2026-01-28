@@ -9,6 +9,7 @@ import tempfile
 import traceback
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QAbstractItemView,
     QDialog,
+    QHeaderView,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -50,17 +52,87 @@ class Resource:
     resource_name: str
 
 
+_TABLE_QSS = """
+QTableWidget {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    gridline-color: transparent;
+    selection-background-color: #d6e9ff;
+    selection-color: #111111;
+}
+QHeaderView::section {
+    background: #f6f7f9;
+    color: #111111;
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 1px solid #e6e6e6;
+    font-weight: 600;
+}
+QTableWidget::item {
+    padding: 4px 8px;
+    border: none;
+}
+QTableWidget::item:selected {
+    background: #d6e9ff;
+}
+"""
+
+
+_PAGE_QSS = """
+QWidget {
+    background: #fbfbfc;
+}
+QComboBox, QDateEdit {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 6px 10px;
+    min-height: 22px;
+}
+QComboBox:focus, QDateEdit:focus {
+    border: 1px solid #7fb3ff;
+}
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-weight: 600;
+    min-height: 34px;
+}
+QPushButton:hover {
+    border: 1px solid #cfd6df;
+    background: #f6f7f9;
+}
+QPushButton:pressed {
+    background: #eef1f5;
+}
+QCheckBox {
+    padding: 0 6px;
+}
+QLabel#sectionTitle {
+    color: #111111;
+    font-weight: 700;
+    padding: 0 4px;
+}
+"""
+
+
 class SchedulePage(QWidget):
     WORK_START = time(8, 0)
     WORK_END = time(22, 0)
     SLOT_MINUTES = 30
 
-    # Postgres TIMESTAMPTZ -> aware datetime. Делаем UI-дату тоже aware.
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(_PAGE_QSS)
+
+        self.lbl_title = QLabel("Расписание")
+        self.lbl_title.setObjectName("sectionTitle")
 
         self.cmb_org = QComboBox()
         self.cmb_org.currentIndexChanged.connect(self._on_org_changed)
@@ -70,13 +142,13 @@ class SchedulePage(QWidget):
         self.dt_day.setDate(date.today())
         self.dt_day.dateChanged.connect(lambda *_: self.reload())
 
-        self.cb_cancelled = QCheckBox("Показывать отменённые")
+        self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_cancelled.setChecked(False)
         self.cb_cancelled.stateChanged.connect(lambda *_: self.reload())
 
-        self.btn_create = QPushButton("Создать бронь")
-        self.btn_edit = QPushButton("Редактировать бронь")
-        self.btn_cancel = QPushButton("Отменить бронь")
+        self.btn_create = QPushButton("Создать")
+        self.btn_edit = QPushButton("Редактировать")
+        self.btn_cancel = QPushButton("Отменить")
         self.btn_refresh = QPushButton("Обновить")
 
         self.btn_create.clicked.connect(self._on_create)
@@ -85,6 +157,9 @@ class SchedulePage(QWidget):
         self.btn_refresh.clicked.connect(self.reload)
 
         top = QHBoxLayout()
+        top.setContentsMargins(12, 12, 12, 8)
+        top.setSpacing(10)
+        top.addWidget(self.lbl_title)
         top.addWidget(QLabel("Учреждение:"))
         top.addWidget(self.cmb_org, 1)
         top.addWidget(QLabel("Дата:"))
@@ -99,13 +174,27 @@ class SchedulePage(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
+        self.tbl.setStyleSheet(_TABLE_QSS)
+
+        header = self.tbl.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        f = QFont()
+        f.setPointSize(max(f.pointSize(), 10))
+        self.tbl.setFont(f)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(10)
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
-        # ресурсы расписания: либо venue целиком, либо venue_unit
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
@@ -190,30 +279,28 @@ class SchedulePage(QWidget):
         headers = ["Время"] + [r.resource_name for r in self._resources]
         self.tbl.setHorizontalHeaderLabels(headers)
 
+        # фиксируем ширину времени, остальные — более “управляемо”
+        header = self.tbl.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for c in range(1, 1 + resource_count):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tbl.setItem(r, 0, it)
 
-        # создаём item в каждой ячейке ресурсов
         for r in range(len(times)):
             for c in range(1, 1 + resource_count):
                 it = QTableWidgetItem("")
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 self.tbl.setItem(r, c, it)
 
-        self.tbl.resizeColumnsToContents()
         self.tbl.setColumnWidth(0, 70)
+        self.tbl.resizeRowsToContents()
 
     def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int]]:
-        """
-        Возвращает (cols, rmin, rmax) для выделения:
-        - cols: список колонок ресурсов (>=1), можно несколько зон
-        - rmin/rmax: диапазон строк (время)
-        Ограничения:
-        - все cols должны относиться к одному venue_id
-        - все cols должны быть зонами (venue_unit_id != None)
-        """
         items = self.tbl.selectedItems()
         if not items:
             return None
@@ -248,7 +335,6 @@ class SchedulePage(QWidget):
         return it.data(Qt.ItemDataRole.UserRole)
 
     def reload(self):
-        # очистка
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -319,17 +405,18 @@ class SchedulePage(QWidget):
             it0 = self.tbl.item(r0, col)
             if it0:
                 unit_suffix = f" [{b.venue_unit_name}]" if getattr(b, "venue_unit_name", "") else ""
-                it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}\n{b.title}")
+                title = (b.title or "").strip()
+                if title:
+                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}\n{title}")
+                else:
+                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}")
 
         self.tbl.resizeRowsToContents()
 
     def _on_create(self):
         try:
-            _uilog("entered _on_create")
-
             sel = self._selected_multi_units()
             if not sel:
-                _uilog("no selection")
                 QMessageBox.information(
                     self,
                     "Создать бронь",
@@ -347,7 +434,6 @@ class SchedulePage(QWidget):
                 QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
                 return
 
-            # Показываем в диалоге только площадку (зоны выбраны в таблице)
             venue_name = self._resources[cols[0] - 1].venue_name
 
             dlg = BookingDialog(
@@ -356,7 +442,7 @@ class SchedulePage(QWidget):
                 ends_at=ends_at,
                 tenants=self._tenants,
                 venue_name=venue_name,
-                venue_units=None,  # отключаем выбор зоны в диалоге
+                venue_units=None,
             )
 
             if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -369,7 +455,7 @@ class SchedulePage(QWidget):
                 rsrc = self._resources[col - 1]
                 new_id = create_booking(
                     venue_id=int(rsrc.venue_id),
-                    venue_unit_id=int(rsrc.venue_unit_id),  # зона берётся из выделенной колонки
+                    venue_unit_id=int(rsrc.venue_unit_id),
                     tenant_id=data["tenant_id"],
                     title=data["title"],
                     kind=data["kind"],
