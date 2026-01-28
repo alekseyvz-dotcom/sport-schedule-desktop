@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
-from app.services.bookings_service import list_bookings_for_day, create_booking, Booking
+from app.services.venue_units_service import list_venue_units
+from app.services.bookings_service import list_bookings_for_day, create_booking
 from app.ui.booking_dialog import BookingDialog
 
 
@@ -37,9 +38,11 @@ def _uilog(msg: str) -> None:
 
 
 @dataclass(frozen=True)
-class SlotKey:
+class Resource:
     venue_id: int
-    starts_at: datetime
+    venue_name: str
+    venue_unit_id: int | None
+    resource_name: str
 
 
 class SchedulePage(QWidget):
@@ -90,7 +93,8 @@ class SchedulePage(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
-        self._venues: List[Tuple[int, str]] = []
+        # ресурсы расписания: либо venue целиком, либо venue_unit
+        self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
         self._load_refs()
@@ -114,22 +118,47 @@ class SchedulePage(QWidget):
     def _on_org_changed(self):
         org_id = self.cmb_org.currentData()
         if org_id is None:
-            self._venues = []
+            self._resources = []
             self._setup_table()
             return
 
         try:
             venues = list_active_venues(int(org_id))
-            self._venues = [(v.id, v.name) for v in venues]
+
+            resources: List[Resource] = []
+            for v in venues:
+                units = list_venue_units(v.id, include_inactive=False)
+                if units:
+                    for u in units:
+                        resources.append(
+                            Resource(
+                                venue_id=v.id,
+                                venue_name=v.name,
+                                venue_unit_id=u.id,
+                                resource_name=f"{v.name} — {u.name}",
+                            )
+                        )
+                else:
+                    resources.append(
+                        Resource(
+                            venue_id=v.id,
+                            venue_name=v.name,
+                            venue_unit_id=None,
+                            resource_name=v.name,
+                        )
+                    )
+
+            self._resources = resources
+
         except Exception as e:
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки площадок:\n{e}")
-            self._venues = []
+            self._resources = []
 
         self._setup_table()
         self.reload()
 
     def _time_slots(self) -> List[time]:
-        out = []
+        out: List[time] = []
         cur = datetime.combine(date.today(), self.WORK_START)
         end = datetime.combine(date.today(), self.WORK_END)
         step = timedelta(minutes=self.SLOT_MINUTES)
@@ -140,13 +169,13 @@ class SchedulePage(QWidget):
 
     def _setup_table(self):
         times = self._time_slots()
-        venue_count = len(self._venues)
+        resource_count = len(self._resources)
 
         self.tbl.clear()
         self.tbl.setRowCount(len(times))
-        self.tbl.setColumnCount(1 + venue_count)
+        self.tbl.setColumnCount(1 + resource_count)
 
-        headers = ["Время"] + [name for (_, name) in self._venues]
+        headers = ["Время"] + [r.resource_name for r in self._resources]
         self.tbl.setHorizontalHeaderLabels(headers)
 
         for r, tm in enumerate(times):
@@ -154,9 +183,9 @@ class SchedulePage(QWidget):
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.tbl.setItem(r, 0, it)
 
-        # создаём item в каждой ячейке площадок
+        # создаём item в каждой ячейке ресурсов
         for r in range(len(times)):
-            for c in range(1, 1 + venue_count):
+            for c in range(1, 1 + resource_count):
                 it = QTableWidgetItem("")
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 self.tbl.setItem(r, c, it)
@@ -172,7 +201,7 @@ class SchedulePage(QWidget):
         cols_all = sorted({i.column() for i in items})
         cols = {i.column() for i in items if i.column() != 0}
         if len(cols) != 1:
-            QMessageBox.information(self, "DEBUG", f"Выделены колонки: {cols_all} (нужно ровно 1 площадку)")
+            QMessageBox.information(self, "Выделение", f"Выделены колонки: {cols_all} (нужно ровно 1 ресурс)")
             return None
 
         col = next(iter(cols))
@@ -184,6 +213,7 @@ class SchedulePage(QWidget):
         return datetime.combine(day, tm, tzinfo=self.TZ)
 
     def reload(self):
+        # очистка
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -194,12 +224,12 @@ class SchedulePage(QWidget):
                 it.setBackground(Qt.GlobalColor.white)
                 it.setData(Qt.ItemDataRole.UserRole, None)
 
-        if not self._venues:
+        if not self._resources:
             return
 
         day = self.dt_day.date().toPython()
         include_cancelled = self.cb_cancelled.isChecked()
-        venue_ids = [vid for (vid, _) in self._venues]
+        venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
 
         try:
             bookings = list_bookings_for_day(venue_ids, day, include_cancelled=include_cancelled)
@@ -207,12 +237,25 @@ class SchedulePage(QWidget):
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
 
-        venue_col: Dict[int, int] = {vid: i + 1 for i, (vid, _) in enumerate(self._venues)}
+        # колонки по unit и (fallback) по venue
+        unit_col: Dict[int, int] = {}
+        venue_fallback_col: Dict[int, int] = {}
+        for i, rsrc in enumerate(self._resources):
+            col = i + 1
+            if rsrc.venue_unit_id is not None:
+                unit_col[int(rsrc.venue_unit_id)] = col
+            else:
+                venue_fallback_col[int(rsrc.venue_id)] = col
+
         day_start = datetime.combine(day, self.WORK_START, tzinfo=self.TZ)
         day_end = datetime.combine(day, self.WORK_END, tzinfo=self.TZ)
 
         for b in bookings:
-            col = venue_col.get(b.venue_id)
+            col = None
+            if getattr(b, "venue_unit_id", None) is not None:
+                col = unit_col.get(int(b.venue_unit_id))
+            if col is None:
+                col = venue_fallback_col.get(int(b.venue_id))
             if not col:
                 continue
 
@@ -241,7 +284,8 @@ class SchedulePage(QWidget):
 
             it0 = self.tbl.item(r0, col)
             if it0:
-                it0.setText(f"{b.kind} | {b.tenant_name}\n{b.title}")
+                unit_suffix = f" [{b.venue_unit_name}]" if getattr(b, "venue_unit_name", "") else ""
+                it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}\n{b.title}")
 
         self.tbl.resizeRowsToContents()
 
@@ -255,24 +299,28 @@ class SchedulePage(QWidget):
                 QMessageBox.information(
                     self,
                     "Создать бронь",
-                    "Выделите диапазон слотов в одной колонке площадки (не в колонке 'Время').",
+                    "Выделите диапазон слотов в одной колонке (не в колонке 'Время').",
                 )
                 return
 
             col, rmin, rmax = sel
             day = self.dt_day.date().toPython()
 
-            venue_idx = col - 1
-            venue_id, venue_name = self._venues[venue_idx]
+            res_idx = col - 1
+            rsrc = self._resources[res_idx]
 
             starts_at = self._row_to_datetime(day, rmin)
             ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
 
-            _uilog(f"selection: venue_id={venue_id}, starts_at={starts_at!r}, ends_at={ends_at!r}")
+            _uilog(
+                "selection: "
+                f"venue_id={rsrc.venue_id}, venue_unit_id={rsrc.venue_unit_id}, "
+                f"starts_at={starts_at!r}, ends_at={ends_at!r}"
+            )
 
             if not self._tenants:
                 _uilog("no tenants")
-                QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте арендатора.")
+                QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
                 return
 
             dlg = BookingDialog(
@@ -280,7 +328,7 @@ class SchedulePage(QWidget):
                 starts_at=starts_at,
                 ends_at=ends_at,
                 tenants=self._tenants,
-                venue_name=venue_name,
+                venue_name=rsrc.resource_name,
             )
 
             res = dlg.exec()
@@ -295,7 +343,8 @@ class SchedulePage(QWidget):
 
             _uilog("calling create_booking()")
             new_id = create_booking(
-                venue_id=venue_id,
+                venue_id=rsrc.venue_id,
+                venue_unit_id=rsrc.venue_unit_id,
                 tenant_id=data["tenant_id"],
                 title=data["title"],
                 kind="PD",
