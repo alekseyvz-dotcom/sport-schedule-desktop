@@ -27,7 +27,12 @@ from PySide6.QtWidgets import (
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
 from app.services.venue_units_service import list_venue_units
-from app.services.bookings_service import list_bookings_for_day, create_booking
+from app.services.bookings_service import (
+    list_bookings_for_day,
+    create_booking,
+    update_booking,
+    cancel_booking,
+)
 from app.ui.booking_dialog import BookingDialog
 
 
@@ -50,8 +55,7 @@ class SchedulePage(QWidget):
     WORK_END = time(22, 0)
     SLOT_MINUTES = 30
 
-    # ВАЖНО: Postgres TIMESTAMPTZ -> aware datetime. Делаем UI-дату тоже aware.
-    # Москва = UTC+3. Если другой регион — поменяйте значение.
+    # Postgres TIMESTAMPTZ -> aware datetime. Делаем UI-дату тоже aware.
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
@@ -71,8 +75,13 @@ class SchedulePage(QWidget):
         self.cb_cancelled.stateChanged.connect(lambda *_: self.reload())
 
         self.btn_create = QPushButton("Создать бронь")
+        self.btn_edit = QPushButton("Редактировать бронь")
+        self.btn_cancel = QPushButton("Отменить бронь")
         self.btn_refresh = QPushButton("Обновить")
+
         self.btn_create.clicked.connect(self._on_create)
+        self.btn_edit.clicked.connect(self._on_edit)
+        self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_refresh.clicked.connect(self.reload)
 
         top = QHBoxLayout()
@@ -82,12 +91,15 @@ class SchedulePage(QWidget):
         top.addWidget(self.dt_day)
         top.addWidget(self.cb_cancelled)
         top.addWidget(self.btn_create)
+        top.addWidget(self.btn_edit)
+        top.addWidget(self.btn_cancel)
         top.addWidget(self.btn_refresh)
 
         self.tbl = QTableWidget()
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
 
         root = QVBoxLayout(self)
         root.addLayout(top)
@@ -212,6 +224,12 @@ class SchedulePage(QWidget):
         tm = self._time_slots()[row]
         return datetime.combine(day, tm, tzinfo=self.TZ)
 
+    def _selected_booking(self):
+        it = self.tbl.currentItem()
+        if not it:
+            return None
+        return it.data(Qt.ItemDataRole.UserRole)
+
     def reload(self):
         # очистка
         for r in range(self.tbl.rowCount()):
@@ -237,7 +255,6 @@ class SchedulePage(QWidget):
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
 
-        # колонки по unit и (fallback) по venue
         unit_col: Dict[int, int] = {}
         venue_fallback_col: Dict[int, int] = {}
         for i, rsrc in enumerate(self._resources):
@@ -323,12 +340,15 @@ class SchedulePage(QWidget):
                 QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
                 return
 
+            units = [{"id": u.id, "name": u.name} for u in list_venue_units(int(rsrc.venue_id), include_inactive=False)]
+
             dlg = BookingDialog(
                 self,
                 starts_at=starts_at,
                 ends_at=ends_at,
                 tenants=self._tenants,
                 venue_name=rsrc.resource_name,
+                venue_units=units,
             )
 
             res = dlg.exec()
@@ -344,10 +364,10 @@ class SchedulePage(QWidget):
             _uilog("calling create_booking()")
             new_id = create_booking(
                 venue_id=rsrc.venue_id,
-                venue_unit_id=rsrc.venue_unit_id,
+                venue_unit_id=data["venue_unit_id"],  # важно: берём из диалога
                 tenant_id=data["tenant_id"],
                 title=data["title"],
-                kind="PD",
+                kind=data["kind"],                    # важно: берём из диалога
                 starts_at=starts_at,
                 ends_at=ends_at,
             )
@@ -366,3 +386,80 @@ class SchedulePage(QWidget):
                 f"{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n"
                 f"{repr(e)}",
             )
+
+    def _on_edit(self):
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Редактировать", "Выберите ячейку с бронью.")
+            return
+        if getattr(b, "status", "") == "cancelled":
+            QMessageBox.information(self, "Редактировать", "Отменённую бронь редактировать нельзя.")
+            return
+
+        # название ресурса для шапки
+        rsrc = next((r for r in self._resources if r.venue_id == b.venue_id and r.venue_unit_id == b.venue_unit_id), None)
+        venue_name = rsrc.resource_name if rsrc else f"Площадка {b.venue_id}"
+
+        # unit'ы площадки
+        units = [{"id": u.id, "name": u.name} for u in list_venue_units(int(b.venue_id), include_inactive=False)]
+
+        dlg = BookingDialog(
+            self,
+            title="Редактировать бронирование",
+            starts_at=b.starts_at,
+            ends_at=b.ends_at,
+            tenants=self._tenants,
+            venue_name=venue_name,
+            venue_units=units,
+            initial={
+                "kind": getattr(b, "kind", "PD"),
+                "tenant_id": getattr(b, "tenant_id", None),
+                "venue_unit_id": getattr(b, "venue_unit_id", None),
+                "title": getattr(b, "title", ""),
+            },
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        data = dlg.values()
+        try:
+            update_booking(
+                int(b.id),
+                tenant_id=data["tenant_id"],
+                title=data["title"],
+                kind=data["kind"],
+                venue_unit_id=data["venue_unit_id"],
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Редактировать бронирование", f"Ошибка:\n{e}")
+            return
+
+        self.reload()
+
+    def _on_cancel(self):
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Отмена", "Выберите ячейку с бронью.")
+            return
+        if getattr(b, "status", "") == "cancelled":
+            QMessageBox.information(self, "Отмена", "Бронь уже отменена.")
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Отменить бронь:\n{getattr(b, 'tenant_name', '')}\n{getattr(b, 'title', '')}\n"
+                f"{b.starts_at:%d.%m.%Y %H:%M} – {b.ends_at:%H:%M} ?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        try:
+            cancel_booking(int(b.id))
+        except Exception as e:
+            QMessageBox.critical(self, "Отмена брони", f"Ошибка:\n{e}")
+            return
+
+        self.reload()
