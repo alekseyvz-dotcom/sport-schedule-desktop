@@ -270,10 +270,16 @@ class SchedulePage(QWidget):
             tenants=self._tenants,
             venue_name=venue_name,
         )
-        if dlg.exec() != dlg.Accepted:
+        
+        res = dlg.exec()
+        QMessageBox.information(self, "DEBUG", f"BookingDialog.exec() вернул: {res}, Accepted={dlg.Accepted}")
+        
+        if res != dlg.Accepted:
+            QMessageBox.information(self, "DEBUG", "Диалог закрыт без OK (не Accepted)")
             return
-
+        
         data = dlg.values()
+
         try:
             QMessageBox.information(self, "DEBUG", f"Будем создавать: venue_id={venue_id}, starts_at={starts_at}, ends_at={ends_at}")
             new_id = create_booking(
