@@ -1,7 +1,9 @@
+import os
+import tempfile
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date, time, timedelta
+from datetime import datetime as _dt, date, time, timedelta
 from typing import List, Iterable
 
 from psycopg2.extras import RealDictCursor
@@ -86,8 +88,9 @@ def list_bookings_for_day(
 
 
 def _log(msg: str) -> None:
-    with open("booking_debug.log", "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
+    path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{_dt.now().isoformat()} {msg}\n")
 
 
 def create_booking(
