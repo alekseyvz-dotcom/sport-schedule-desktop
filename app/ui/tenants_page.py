@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QMessageBox,
     QCheckBox,
+    QDialog,
 )
 
 from app.services.tenants_service import (
@@ -122,7 +123,7 @@ class TenantsPage(QWidget):
 
     def _on_add(self):
         dlg = TenantDialog(self, title="Создать контрагента")
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
@@ -166,7 +167,7 @@ class TenantsPage(QWidget):
                 "notes": t.notes,
             },
         )
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
