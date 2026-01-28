@@ -1,3 +1,7 @@
+import os
+import tempfile
+from datetime import datetime as _dt
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +12,10 @@ from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
 
+def _tlog(msg: str) -> None:
+    path = os.path.join(tempfile.gettempdir(), "tenant_debug.log")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{_dt.now().isoformat()} {msg}\n")
 
 @dataclass(frozen=True)
 class Tenant:
@@ -201,6 +209,8 @@ def create_tenant(**data) -> int:
 
 
 def update_tenant(tenant_id: int, **data) -> None:
+    _tlog(f"update_tenant CALLED tenant_id={tenant_id}, name={data.get('name')!r}")
+
     name = (data.get("name") or "").strip()
     if not name:
         raise ValueError("Название контрагента не может быть пустым")
@@ -208,6 +218,7 @@ def update_tenant(tenant_id: int, **data) -> None:
     conn = None
     try:
         conn = get_conn()
+
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -253,17 +264,25 @@ def update_tenant(tenant_id: int, **data) -> None:
                     "notes": (data.get("notes") or "").strip() or None,
                 },
             )
+            rowcount = cur.rowcount
 
-            if cur.rowcount != 1:
-                raise RuntimeError(f"Контрагент id={tenant_id} не найден (rowcount={cur.rowcount}).")
+        _tlog(f"update_tenant rowcount={rowcount}")
+
+        if rowcount != 1:
+            raise RuntimeError(f"Контрагент id={tenant_id} не найден (rowcount={rowcount}).")
 
         conn.commit()
+        _tlog("update_tenant commit OK")
 
-    except Exception:
+    except Exception as e:
+        _tlog(f"update_tenant ERROR: {type(e).__name__}: {e!r}")
         if conn:
             conn.rollback()
+            _tlog("update_tenant rollback OK")
         raise
+
     finally:
+        _tlog("update_tenant returning connection to pool")
         if conn:
             put_conn(conn)
 
