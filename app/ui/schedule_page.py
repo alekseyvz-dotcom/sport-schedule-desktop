@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional
 import os
 import tempfile
 import traceback
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -47,6 +48,9 @@ class SchedulePage(QWidget):
     WORK_START = time(8, 0)
     WORK_END = time(22, 0)
     SLOT_MINUTES = 30
+
+    # ВАЖНО: приведём всё к TZ-aware datetime, т.к. Postgres TIMESTAMPTZ возвращает aware
+    TZ = ZoneInfo("Europe/Moscow")  # при необходимости замените на вашу таймзону
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -178,7 +182,8 @@ class SchedulePage(QWidget):
 
     def _row_to_datetime(self, day: date, row: int) -> datetime:
         tm = self._time_slots()[row]
-        return datetime.combine(day, tm)
+        # делаем aware, чтобы совпадало с TIMESTAMPTZ из БД
+        return datetime.combine(day, tm, tzinfo=self.TZ)
 
     def reload(self):
         # очищаем раскраску/тексты (кроме колонки времени)
@@ -207,8 +212,8 @@ class SchedulePage(QWidget):
             return
 
         venue_col: Dict[int, int] = {vid: i + 1 for i, (vid, _) in enumerate(self._venues)}
-        day_start = datetime.combine(day, self.WORK_START)
-        day_end = datetime.combine(day, self.WORK_END)
+        day_start = datetime.combine(day, self.WORK_START, tzinfo=self.TZ)
+        day_end = datetime.combine(day, self.WORK_END, tzinfo=self.TZ)
 
         for b in bookings:
             col = venue_col.get(b.venue_id)
@@ -284,7 +289,7 @@ class SchedulePage(QWidget):
 
             res = dlg.exec()
             _uilog(f"dlg.exec()={res}, Accepted={int(QDialog.DialogCode.Accepted)}")
-            
+
             if res != QDialog.DialogCode.Accepted:
                 _uilog("dialog rejected")
                 return
@@ -307,7 +312,6 @@ class SchedulePage(QWidget):
             self.reload()
 
         except Exception as e:
-            # если “ничего не происходит”, это место поймает неожиданные исключения в UI-логике
             _uilog("UNHANDLED ERROR in _on_create: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(
