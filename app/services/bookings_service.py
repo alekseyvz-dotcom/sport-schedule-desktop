@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime as _dt, date, time, timedelta
+from datetime import datetime, date, time, timedelta
 from typing import List, Iterable
+
+import os
+import tempfile
 
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
@@ -88,7 +91,7 @@ def list_bookings_for_day(
 def _log(msg: str) -> None:
     path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
     with open(path, "a", encoding="utf-8") as f:
-        f.write(f"{_dt.now().isoformat()} {msg}\n")
+        f.write(f"{datetime.now().isoformat()} {msg}\n")
 
 
 def create_booking(
@@ -102,8 +105,10 @@ def create_booking(
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
-    _log(f"create_booking called: venue_id={venue_id}, tenant_id={tenant_id}, kind={kind}, "
-         f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}")
+    _log(
+        f"create_booking called: venue_id={venue_id}, tenant_id={tenant_id}, kind={kind}, "
+        f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}"
+    )
 
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
@@ -116,7 +121,6 @@ def create_booking(
     try:
         conn = get_conn()
 
-        # ЛОГ: куда подключились (чтобы исключить "не та база")
         with conn.cursor() as cur:
             cur.execute("select current_database(), current_user, inet_server_addr(), inet_server_port(), now();")
             _log("db session: " + str(cur.fetchone()))
@@ -143,7 +147,6 @@ def create_booking(
 
         conn.commit()
         _log(f"commit ok, new_id={new_id}")
-
         return new_id
 
     except Exception as e:
@@ -153,7 +156,6 @@ def create_booking(
         pgcode = getattr(e, "pgcode", None)
         _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
 
-        # нормальное сообщение для пересечения
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
@@ -162,4 +164,3 @@ def create_booking(
     finally:
         if conn:
             put_conn(conn)
-
