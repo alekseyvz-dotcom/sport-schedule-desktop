@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QMessageBox,
     QLabel,
+    QHeaderView,
+    QAbstractItemView,
 )
 
 from app.services.orgs_service import (
@@ -33,16 +36,86 @@ from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
 
+_TABLE_QSS = """
+QTableWidget {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    gridline-color: transparent;
+    selection-background-color: #d6e9ff;
+    selection-color: #111111;
+}
+QHeaderView::section {
+    background: #f6f7f9;
+    color: #111111;
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 1px solid #e6e6e6;
+    font-weight: 600;
+}
+QTableWidget::item {
+    padding: 6px 10px;
+    border: none;
+}
+QTableWidget::item:selected {
+    background: #d6e9ff;
+}
+"""
+
+
+_PAGE_QSS = """
+QWidget {
+    background: #fbfbfc;
+}
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+QLineEdit:focus {
+    border: 1px solid #7fb3ff;
+}
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    border: 1px solid #cfd6df;
+    background: #f6f7f9;
+}
+QPushButton:pressed {
+    background: #eef1f5;
+}
+QCheckBox {
+    padding: 0 6px;
+}
+QLabel#sectionTitle {
+    color: #111111;
+    font-weight: 700;
+    padding: 0 4px;
+}
+"""
+
+
 class OrgsVenuesPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(_PAGE_QSS)
 
-        # --- Orgs (left)
+        # ---------- Orgs (left)
+        self.lbl_orgs = QLabel("Учреждения")
+        self.lbl_orgs.setObjectName("sectionTitle")
+
         self.ed_org_search = QLineEdit()
         self.ed_org_search.setPlaceholderText("Поиск учреждений: имя/адрес")
+        self.ed_org_search.setClearButtonEnabled(True)
         self.ed_org_search.returnPressed.connect(self.reload_orgs)
 
-        self.cb_org_inactive = QCheckBox("Показывать архив")
+        self.cb_org_inactive = QCheckBox("Архив")
         self.cb_org_inactive.stateChanged.connect(lambda *_: self.reload_orgs())
 
         self.btn_org_add = QPushButton("Создать")
@@ -53,7 +126,13 @@ class OrgsVenuesPage(QWidget):
         self.btn_org_edit.clicked.connect(self._org_edit)
         self.btn_org_archive.clicked.connect(self._org_toggle)
 
+        for b in (self.btn_org_add, self.btn_org_edit, self.btn_org_archive):
+            b.setMinimumHeight(34)
+
         org_top = QHBoxLayout()
+        org_top.setContentsMargins(12, 12, 12, 8)
+        org_top.setSpacing(10)
+        org_top.addWidget(self.lbl_orgs)
         org_top.addWidget(self.ed_org_search, 1)
         org_top.addWidget(self.cb_org_inactive)
         org_top.addWidget(self.btn_org_add)
@@ -62,18 +141,21 @@ class OrgsVenuesPage(QWidget):
 
         self.tbl_orgs = QTableWidget(0, 4)
         self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Активен"])
-        self.tbl_orgs.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tbl_orgs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._style_table(self.tbl_orgs)
         self.tbl_orgs.itemSelectionChanged.connect(self.reload_venues)
+        self.tbl_orgs.doubleClicked.connect(self._org_edit)
 
         left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(10)
         left.addLayout(org_top)
         left.addWidget(self.tbl_orgs, 1)
 
-        # --- Venues (right)
+        # ---------- Venues (right)
         self.lbl_venues = QLabel("Площадки: (выберите учреждение слева)")
+        self.lbl_venues.setObjectName("sectionTitle")
 
-        self.cb_venue_inactive = QCheckBox("Показывать архив")
+        self.cb_venue_inactive = QCheckBox("Архив")
         self.cb_venue_inactive.stateChanged.connect(lambda *_: self.reload_venues())
 
         self.btn_venue_add = QPushButton("Создать")
@@ -84,7 +166,12 @@ class OrgsVenuesPage(QWidget):
         self.btn_venue_edit.clicked.connect(self._venue_edit)
         self.btn_venue_archive.clicked.connect(self._venue_toggle)
 
+        for b in (self.btn_venue_add, self.btn_venue_edit, self.btn_venue_archive):
+            b.setMinimumHeight(34)
+
         venue_top = QHBoxLayout()
+        venue_top.setContentsMargins(12, 12, 12, 8)
+        venue_top.setSpacing(10)
         venue_top.addWidget(self.lbl_venues, 1)
         venue_top.addWidget(self.cb_venue_inactive)
         venue_top.addWidget(self.btn_venue_add)
@@ -92,22 +179,48 @@ class OrgsVenuesPage(QWidget):
         venue_top.addWidget(self.btn_venue_archive)
 
         self.tbl_venues = QTableWidget(0, 6)
-        self.tbl_venues.setHorizontalHeaderLabels(
-            ["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"]
-        )
-        self.tbl_venues.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tbl_venues.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tbl_venues.setHorizontalHeaderLabels(["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"])
+        self._style_table(self.tbl_venues)
+        self.tbl_venues.doubleClicked.connect(self._venue_edit)
 
         right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(10)
         right.addLayout(venue_top)
         right.addWidget(self.tbl_venues, 1)
 
-        # --- Root
+        # ---------- Root
         root = QHBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(12)
         root.addLayout(left, 1)
         root.addLayout(right, 1)
 
         self.reload_orgs()
+
+    def _style_table(self, tbl: QTableWidget) -> None:
+        tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tbl.setAlternatingRowColors(True)
+        tbl.setSortingEnabled(True)
+        tbl.setShowGrid(False)
+        tbl.verticalHeader().setVisible(False)
+        tbl.setStyleSheet(_TABLE_QSS)
+
+        header = tbl.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setHighlightSections(False)
+
+        f = QFont()
+        f.setPointSize(max(f.pointSize(), 10))
+        tbl.setFont(f)
+
+        # дефолт: почти всё по содержимому, последний столбец тянется
+        for c in range(tbl.columnCount()):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(tbl.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
 
     # -------- selection helpers
     def _selected_org(self) -> SportOrg | None:
@@ -144,20 +257,32 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.critical(self, "Учреждения", f"Ошибка загрузки:\n{e}")
             return
 
+        self.tbl_orgs.setSortingEnabled(False)
         self.tbl_orgs.setRowCount(0)
+
         for o in orgs:
             r = self.tbl_orgs.rowCount()
             self.tbl_orgs.insertRow(r)
 
             it_id = QTableWidgetItem(str(o.id))
             it_id.setData(Qt.UserRole, o)
+            it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            it_active = QTableWidgetItem("Да" if o.is_active else "Нет")
+            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self.tbl_orgs.setItem(r, 0, it_id)
             self.tbl_orgs.setItem(r, 1, QTableWidgetItem(o.name))
             self.tbl_orgs.setItem(r, 2, QTableWidgetItem(o.address or ""))
-            self.tbl_orgs.setItem(r, 3, QTableWidgetItem("Да" if o.is_active else "Нет"))
+            self.tbl_orgs.setItem(r, 3, it_active)
 
-        self.tbl_orgs.resizeColumnsToContents()
+            if not o.is_active:
+                for c in range(self.tbl_orgs.columnCount()):
+                    it = self.tbl_orgs.item(r, c)
+                    if it:
+                        it.setForeground(Qt.GlobalColor.darkGray)
+
+        self.tbl_orgs.setSortingEnabled(True)
 
         if selected_id is not None:
             self._select_org_row_by_id(selected_id)
@@ -182,22 +307,37 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки:\n{e}")
             return
 
+        self.tbl_venues.setSortingEnabled(False)
         self.tbl_venues.setRowCount(0)
+
         for v in venues:
             r = self.tbl_venues.rowCount()
             self.tbl_venues.insertRow(r)
 
             it_id = QTableWidgetItem(str(v.id))
             it_id.setData(Qt.UserRole, v)
+            it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            it_cap = QTableWidgetItem("" if v.capacity is None else str(v.capacity))
+            it_cap.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            it_active = QTableWidgetItem("Да" if v.is_active else "Нет")
+            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self.tbl_venues.setItem(r, 0, it_id)
             self.tbl_venues.setItem(r, 1, QTableWidgetItem(v.name))
             self.tbl_venues.setItem(r, 2, QTableWidgetItem(v.sport_type or ""))
-            self.tbl_venues.setItem(r, 3, QTableWidgetItem("" if v.capacity is None else str(v.capacity)))
-            self.tbl_venues.setItem(r, 4, QTableWidgetItem("Да" if v.is_active else "Нет"))
+            self.tbl_venues.setItem(r, 3, it_cap)
+            self.tbl_venues.setItem(r, 4, it_active)
             self.tbl_venues.setItem(r, 5, QTableWidgetItem(v.comment or ""))
 
-        self.tbl_venues.resizeColumnsToContents()
+            if not v.is_active:
+                for c in range(self.tbl_venues.columnCount()):
+                    it = self.tbl_venues.item(r, c)
+                    if it:
+                        it.setForeground(Qt.GlobalColor.darkGray)
+
+        self.tbl_venues.setSortingEnabled(True)
 
         if selected_id is not None:
             self._select_venue_row_by_id(selected_id)
@@ -280,7 +420,6 @@ class OrgsVenuesPage(QWidget):
 
         data = dlg.values()
         try:
-            # ВАЖНО: create_venue не должен получать units_scheme
             new_id = create_venue(
                 org_id=org.id,
                 name=data["name"],
@@ -288,7 +427,6 @@ class OrgsVenuesPage(QWidget):
                 capacity=data["capacity"],
                 comment=data["comment"],
             )
-            # NEW: применяем схему зон (создаст половины/четверти)
             apply_units_scheme(new_id, data["units_scheme"])
         except Exception as e:
             QMessageBox.critical(self, "Создать площадку", f"Ошибка:\n{e}")
@@ -308,7 +446,7 @@ class OrgsVenuesPage(QWidget):
             self,
             title=f"Редактировать площадку: {v.name}",
             data={
-                "id": v.id,  # ВАЖНО: чтобы dialog подтянул текущую схему зон
+                "id": v.id,  # чтобы dialog подтянул текущую схему зон
                 "name": v.name,
                 "sport_type": v.sport_type,
                 "capacity": v.capacity,
@@ -327,7 +465,6 @@ class OrgsVenuesPage(QWidget):
                 capacity=data["capacity"],
                 comment=data["comment"],
             )
-            # NEW: применяем схему зон
             apply_units_scheme(v.id, data["units_scheme"])
         except Exception as e:
             QMessageBox.critical(self, "Редактировать площадку", f"Ошибка:\n{e}")
