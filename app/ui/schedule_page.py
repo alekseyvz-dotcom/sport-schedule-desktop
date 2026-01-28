@@ -9,7 +9,7 @@ import tempfile
 import traceback
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor, QBrush
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -52,13 +52,18 @@ class Resource:
     resource_name: str
 
 
+# Более “аккуратная” таблица:
+# - видимая дорогая сетка
+# - мягкая подсветка выделения (без убийства ваших цветов брони)
+# - чуть аккуратнее padding/line-height
 _TABLE_QSS = """
 QTableWidget {
     background: #ffffff;
     border: 1px solid #e6e6e6;
     border-radius: 10px;
-    gridline-color: transparent;
-    selection-background-color: #d6e9ff;
+
+    gridline-color: #e9edf3;
+    selection-background-color: #00000000; /* прозрачно: не перекрывает setBackground */
     selection-color: #111111;
 }
 QHeaderView::section {
@@ -70,11 +75,11 @@ QHeaderView::section {
     font-weight: 600;
 }
 QTableWidget::item {
-    padding: 4px 8px;
+    padding: 6px 10px;
     border: none;
 }
 QTableWidget::item:selected {
-    background: #d6e9ff;
+    background: #00000000; /* важно: не затираем цвет слота */
 }
 """
 
@@ -174,8 +179,12 @@ class SchedulePage(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-        self.tbl.setAlternatingRowColors(True)
-        self.tbl.setShowGrid(False)
+
+        # ВАЖНО: без “зебры”, с сеткой
+        self.tbl.setAlternatingRowColors(False)
+        self.tbl.setShowGrid(True)
+        self.tbl.setGridStyle(Qt.PenStyle.SolidLine)
+
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setStyleSheet(_TABLE_QSS)
@@ -199,6 +208,64 @@ class SchedulePage(QWidget):
         self._tenants: List[Dict] = []
 
         self._load_refs()
+
+    # --------- Небольшие помощники для “аккуратной” заливки ---------
+
+    def _base_color_for_booking(self, b) -> QColor:
+        if getattr(b, "status", "") == "cancelled":
+            return QColor("#cfd6df")  # мягкий серый
+        # PD/прочее — более приятные пастельные тона
+        if getattr(b, "kind", "") == "PD":
+            return QColor("#7cc7ff")  # голубой
+        return QColor("#7fe0a3")  # зелёный
+
+    def _shade(self, c: QColor, factor: float) -> QColor:
+        """
+        factor > 1  -> светлее
+        factor < 1  -> темнее
+        """
+        r = max(0, min(255, int(c.red() * factor)))
+        g = max(0, min(255, int(c.green() * factor)))
+        b = max(0, min(255, int(c.blue() * factor)))
+        return QColor(r, g, b)
+
+    def _apply_booking_cell_style(self, it: QTableWidgetItem, b, *, is_edge: bool) -> None:
+        """
+        Более аккуратная заливка:
+        - внутри брони: ровный пастельный цвет
+        - на границах брони (первый/последний слот): чуть темнее, чтобы читалась “полоса”
+        - текст: тёмный
+        """
+        base = self._base_color_for_booking(b)
+        fill = self._shade(base, 0.92 if is_edge else 1.05)  # границы чуть плотнее
+        it.setBackground(QBrush(fill))
+        it.setForeground(QBrush(QColor("#0f172a")))
+
+    def _apply_selection_overlay(self) -> None:
+        """
+        “Красивое” выделение без QSS-перекраски:
+        мы не меняем background (чтобы не убить booking color),
+        а слегка подсвечиваем текст выбранных ячеек.
+        """
+        selected = set(self.tbl.selectedItems())
+        for r in range(self.tbl.rowCount()):
+            for c in range(self.tbl.columnCount()):
+                it = self.tbl.item(r, c)
+                if not it:
+                    continue
+                # не трогаем колонку времени
+                if c == 0:
+                    continue
+                # если выбранно — делаем текст чуть темнее/жирнее
+                f = it.font()
+                if it in selected:
+                    f.setBold(True)
+                    it.setFont(f)
+                else:
+                    f.setBold(False)
+                    it.setFont(f)
+
+    # ----------------------------------------------------------------
 
     def _load_refs(self):
         try:
@@ -279,7 +346,6 @@ class SchedulePage(QWidget):
         headers = ["Время"] + [r.resource_name for r in self._resources]
         self.tbl.setHorizontalHeaderLabels(headers)
 
-        # фиксируем ширину времени, остальные — более “управляемо”
         header = self.tbl.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for c in range(1, 1 + resource_count):
@@ -314,11 +380,19 @@ class SchedulePage(QWidget):
             rsrc = self._resources[col - 1]
             venue_ids.add(int(rsrc.venue_id))
             if rsrc.venue_unit_id is None:
-                QMessageBox.information(self, "Выделение", "Можно выбирать несколько колонок только для зон одной площадки.")
+                QMessageBox.information(
+                    self,
+                    "Выделение",
+                    "Можно выбирать несколько колонок только для зон одной площадки.",
+                )
                 return None
 
         if len(venue_ids) != 1:
-            QMessageBox.information(self, "Выделение", "Можно бронировать несколько зон только в рамках одной площадки.")
+            QMessageBox.information(
+                self,
+                "Выделение",
+                "Можно бронировать несколько зон только в рамках одной площадки.",
+            )
             return None
 
         rows = sorted({i.row() for i in items})
@@ -335,6 +409,7 @@ class SchedulePage(QWidget):
         return it.data(Qt.ItemDataRole.UserRole)
 
     def reload(self):
+        # очистка
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -342,7 +417,11 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                it.setBackground(Qt.GlobalColor.white)
+                it.setBackground(QBrush(QColor("#ffffff")))
+                it.setForeground(QBrush(QColor("#111111")))
+                f = it.font()
+                f.setBold(False)
+                it.setFont(f)
                 it.setData(Qt.ItemDataRole.UserRole, None)
 
         if not self._resources:
@@ -389,17 +468,14 @@ class SchedulePage(QWidget):
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
 
-            if b.status == "cancelled":
-                color = Qt.GlobalColor.lightGray
-            else:
-                color = Qt.GlobalColor.cyan if b.kind == "PD" else Qt.GlobalColor.green
-
             for r in range(r0, r1 + 1):
                 it = self.tbl.item(r, col)
                 if it is None:
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, col, it)
-                it.setBackground(color)
+
+                is_edge = (r == r0) or (r == r1)
+                self._apply_booking_cell_style(it, b, is_edge=is_edge)
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
             it0 = self.tbl.item(r0, col)
@@ -412,6 +488,7 @@ class SchedulePage(QWidget):
                     it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}")
 
         self.tbl.resizeRowsToContents()
+        self._apply_selection_overlay()
 
     def _on_create(self):
         try:
