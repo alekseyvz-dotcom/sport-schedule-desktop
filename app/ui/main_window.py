@@ -10,7 +10,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Sport Schedule — {user.username}")
 
         tabs = QTabWidget()
-        tabs.addTab(TenantsPage(), "Арендаторы")
+        tabs.addTab(TenantsPage(), "Контрагенты")
         tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
         tabs.addTab(SchedulePage(), "Расписание")
 
