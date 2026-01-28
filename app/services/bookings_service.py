@@ -189,3 +189,126 @@ def create_booking(
     finally:
         if conn:
             put_conn(conn)
+
+def get_booking(booking_id: int) -> Booking:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    b.id,
+                    b.venue_id,
+                    b.venue_unit_id,
+                    b.tenant_id,
+                    b.title,
+                    b.activity AS kind,
+                    b.starts_at,
+                    b.ends_at,
+                    b.status,
+                    COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(vu.name, '') AS venue_unit_name
+                FROM public.bookings b
+                LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
+                WHERE b.id=%s
+                """,
+                (int(booking_id),),
+            )
+            r = cur.fetchone()
+            if not r:
+                raise ValueError("Бронирование не найдено")
+
+            return Booking(
+                id=int(r["id"]),
+                venue_id=int(r["venue_id"]),
+                venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
+                tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
+                title=str(r.get("title") or ""),
+                kind=str(r.get("kind") or ""),
+                starts_at=r["starts_at"],
+                ends_at=r["ends_at"],
+                status=str(r.get("status") or "planned"),
+                tenant_name=str(r.get("tenant_name") or ""),
+                venue_unit_name=str(r.get("venue_unit_name") or ""),
+            )
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def update_booking(
+    booking_id: int,
+    *,
+    tenant_id: int | None,
+    title: str,
+    kind: str,
+    venue_unit_id: int | None,
+) -> None:
+    title = (title or "").strip()
+    kind = (kind or "").strip().upper()
+
+    if kind not in ("PD", "GZ"):
+        raise ValueError("Тип занятости должен быть PD или GZ")
+    if not title:
+        raise ValueError("Название бронирования не может быть пустым")
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.bookings
+                SET tenant_id=%s,
+                    title=%s,
+                    activity=%s,
+                    venue_unit_id=%s
+                WHERE id=%s
+                """,
+                (
+                    int(tenant_id) if tenant_id is not None else None,
+                    title,
+                    kind,
+                    int(venue_unit_id) if venue_unit_id is not None else None,
+                    int(booking_id),
+                ),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("Бронирование не найдено")
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+
+        pgcode = getattr(e, "pgcode", None)
+        if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
+            # если у вас триггер/ограничение по пересечениям
+            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def cancel_booking(booking_id: int) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.bookings SET status='cancelled' WHERE id=%s",
+                (int(booking_id),),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("Бронирование не найдено")
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
