@@ -84,6 +84,7 @@ class TenantRulesWidget(QWidget):
                         {
                             "id": int(u.id),
                             "venue_id": int(v.id),
+                            "sort_order": int(getattr(u, "sort_order", 0)),
                             "label": f"{org.name} / {v.name} — {u.name}",
                         }
                     )
@@ -159,21 +160,26 @@ class TenantRulesWidget(QWidget):
         )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
+    
         v = dlg.values()
-        self._rules_local.append(
-            {
-                "id": None,
-                "weekday": v["weekday"],
-                "venue_unit_id": v["venue_unit_id"],
-                "starts_at": v["starts_at"],
-                "ends_at": v["ends_at"],
-                "valid_from": v["valid_from"],
-                "valid_to": v["valid_to"],
-                "title": v["title"],
-                "is_active": True,
-                "op": "new",
-            }
-        )
+        unit_ids = v.get("venue_unit_ids") or [v["venue_unit_id"]]
+    
+        for uid in unit_ids:
+            self._rules_local.append(
+                {
+                    "id": None,
+                    "weekday": v["weekday"],
+                    "venue_unit_id": int(uid),
+                    "starts_at": v["starts_at"],
+                    "ends_at": v["ends_at"],
+                    "valid_from": v["valid_from"],
+                    "valid_to": v["valid_to"],
+                    "title": v["title"],
+                    "is_active": True,
+                    "op": "new",
+                }
+            )
+    
         self._refresh()
 
     def _on_edit(self):
