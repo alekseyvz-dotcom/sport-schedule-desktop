@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time, timedelta, timezone
-from typing import List, Optional, Dict, Tuple
+from typing import List, Dict, Tuple
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
@@ -77,7 +77,6 @@ class Period:
 
 
 class OrgUsagePage(QWidget):
-
     WORK_START = time(8, 0)
     WORK_END = time(22, 0)
 
@@ -142,8 +141,20 @@ class OrgUsagePage(QWidget):
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        # Таблица
-        self.tbl = QTableWidget(0, 2 + 1 + 6 + 5 * 3)  # орг, площадка, полоса, общие (6), смены (15)
+        # Таблица:
+        # 0 Учреждение
+        # 1 Площадка
+        # 2 Полоса (общая загрузка)
+        # 3 Доступно, ч
+        # 4 ПД, ч
+        # 5 ПД, %
+        # 6 ГЗ, ч
+        # 7 ГЗ, %
+        # 8 Итого, %
+        # 9..13  Утро:  ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
+        # 14..18 День:  ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
+        # 19..23 Вечер: ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
+        self.tbl = QTableWidget(0, 24)
         self.tbl.setHorizontalHeaderLabels(
             [
                 "Учреждение",
@@ -235,10 +246,7 @@ class OrgUsagePage(QWidget):
             else:
                 next_month = start.replace(month=start.month + 1, day=1)
             end = next_month - timedelta(days=1)
-            return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
-        if mode == "quarter":
-            q = (d.month - 1) // 3 + 1
-            start_month = 3 * (q - 1) + 1
+            return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d + 1
             start = d.replace(month=start_month, day=1)
             if start_month == 10:
                 next_q = start.replace(year=start.year + 1, month=1, day=1)
@@ -276,13 +284,12 @@ class OrgUsagePage(QWidget):
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
 
-        # Цвет прогресса по уровню загрузки
         if pct >= 80:
-            chunk = "#ef4444"  # red
+            chunk = "#ef4444"
         elif pct >= 60:
-            chunk = "#f59e0b"  # amber
+            chunk = "#f59e0b"
         else:
-            chunk = "#22c55e"  # green
+            chunk = "#22c55e"
 
         pb.setStyleSheet(
             f"""
@@ -323,7 +330,6 @@ class OrgUsagePage(QWidget):
             QMessageBox.critical(self, "Загрузка учреждений", f"Ошибка расчёта:\n{e}")
             return
 
-        # totals
         cap = sum(r.capacity_sec for r in rows)
         pd = sum(r.pd_sec for r in rows)
         gz = sum(r.gz_sec for r in rows)
@@ -334,12 +340,11 @@ class OrgUsagePage(QWidget):
             f"Занято {self._hours(tot)}ч ({self._pct(tot, cap)}%)"
         )
 
-        # --- группируем по учреждению: org_name -> list[UsageRow]
+        # группировка по учреждению
         by_org: Dict[Tuple[int, str], List[UsageRow]] = {}
         for r in rows:
             by_org.setdefault((r.org_id, r.org_name), []).append(r)
 
-        # сортируем учреждения по общей загрузке
         def org_sort_key(k):
             org_rows = by_org[k]
             cap0 = sum(x.capacity_sec for x in org_rows)
@@ -354,109 +359,136 @@ class OrgUsagePage(QWidget):
         for (oid, oname) in org_keys:
             org_rows = by_org[(oid, oname)]
 
-            # строка-итог по учреждению
+            # итог по учреждению
             org_cap = sum(x.capacity_sec for x in org_rows)
             org_pd = sum(x.pd_sec for x in org_rows)
             org_gz = sum(x.gz_sec for x in org_rows)
             org_tot = org_pd + org_gz
 
-            # shift totals
-            org_m = sum(x.morning_sec for x in org_rows)
-            org_d = sum(x.day_sec for x in org_rows)
-            org_e = sum(x.evening_sec for x in org_rows)
+            org_m_cap = sum(x.morning_capacity_sec for x in org_rows)
+            org_d_cap = sum(x.day_capacity_sec for x in org_rows)
+            org_e_cap = sum(x.evening_capacity_sec for x in org_rows)
 
-            org_row_idx = self.tbl.rowCount()
-            self.tbl.insertRow(org_row_idx)
+            org_m_pd = sum(x.morning_pd_sec for x in org_rows)
+            org_m_gz = sum(x.morning_gz_sec for x in org_rows)
+            org_d_pd = sum(x.day_pd_sec for x in org_rows)
+            org_d_gz = sum(x.day_gz_sec for x in org_rows)
+            org_e_pd = sum(x.evening_pd_sec for x in org_rows)
+            org_e_gz = sum(x.evening_gz_sec for x in org_rows)
 
-            it_org = QTableWidgetItem(oname)
-            it_org.setFont(self._bold_font())
-            self.tbl.setItem(org_row_idx, 0, it_org)
+            self._add_row(
+                org_name=oname,
+                venue_name="ИТОГО по учреждению",
+                is_total=True,
+                cap_sec=org_cap,
+                pd_sec=org_pd,
+                gz_sec=org_gz,
+                m_cap=org_m_cap,
+                m_pd=org_m_pd,
+                m_gz=org_m_gz,
+                d_cap=org_d_cap,
+                d_pd=org_d_pd,
+                d_gz=org_d_gz,
+                e_cap=org_e_cap,
+                e_pd=org_e_pd,
+                e_gz=org_e_gz,
+            )
 
-            it_venue = QTableWidgetItem("ИТОГО по учреждению")
-            it_venue.setFont(self._bold_font())
-            self.tbl.setItem(org_row_idx, 1, it_venue)
-
-            tot_pct = self._pct(org_tot, org_cap)
-            self.tbl.setCellWidget(org_row_idx, 2, self._make_progress(tot_pct))
-
-            self._set_num(self.tbl, org_row_idx, 3, f"{self._hours(org_cap):.2f}")
-            self._set_num(self.tbl, org_row_idx, 4, f"{self._hours(org_pd):.2f}")
-            self._set_num(self.tbl, org_row_idx, 5, f"{self._pct(org_pd, org_cap):.1f}%")
-            self._set_num(self.tbl, org_row_idx, 6, f"{self._hours(org_gz):.2f}")
-            self._set_num(self.tbl, org_row_idx, 7, f"{self._pct(org_gz, org_cap):.1f}%")
-            self._set_num(self.tbl, org_row_idx, 8, f"{tot_pct:.1f}%")
-
-            # Утро
-            self._set_num(self.tbl, org_row_idx, 9, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 10, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 11, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 12, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 13, f"{self._pct(org_m, int(org_cap * (4/14)) if org_cap else 0):.1f}%")
-
-            # День
-            self._set_num(self.tbl, org_row_idx, 14, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 15, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 16, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 17, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 18, f"{self._pct(org_d, int(org_cap * (6/14)) if org_cap else 0):.1f}%")
-
-            # Вечер
-            self._set_num(self.tbl, org_row_idx, 19, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 20, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 21, f"{self._hours(0):.2f}")
-            self._set_num(self.tbl, org_row_idx, 22, f"{0:.1f}%")
-            self._set_num(self.tbl, org_row_idx, 23, f"{self._pct(org_e, int(org_cap * (4/14)) if org_cap else 0):.1f}%")
-
-            # делаем строку итога светлее и жирнее
-            for c in range(self.tbl.columnCount()):
-                it = self.tbl.item(org_row_idx, c)
-                if it:
-                    it.setBackground(QColor("#f8fafc"))
-
-            # строки по площадкам (внутри учреждения) — сортируем по загрузке
+            # площадки внутри учреждения — сортировка по загрузке
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
-
             for r in org_rows:
-                row = self.tbl.rowCount()
-                self.tbl.insertRow(row)
-
-                self.tbl.setItem(row, 0, QTableWidgetItem(oname))
-                self.tbl.setItem(row, 1, QTableWidgetItem(r.venue_name))
-
-                cap_h = self._hours(r.capacity_sec)
-                pd_h = self._hours(r.pd_sec)
-                gz_h = self._hours(r.gz_sec)
-                tot_pct2 = self._pct(r.total_sec, r.capacity_sec)
-
-                self.tbl.setCellWidget(row, 2, self._make_progress(tot_pct2))
-
-                self._set_num(self.tbl, row, 3, f"{cap_h:.2f}")
-                self._set_num(self.tbl, row, 4, f"{pd_h:.2f}")
-                self._set_num(self.tbl, row, 5, f"{self._pct(r.pd_sec, r.capacity_sec):.1f}%")
-                self._set_num(self.tbl, row, 6, f"{gz_h:.2f}")
-                self._set_num(self.tbl, row, 7, f"{self._pct(r.gz_sec, r.capacity_sec):.1f}%")
-                self._set_num(self.tbl, row, 8, f"{tot_pct2:.1f}%")
-
-                # ВАЖНО: ниже временно — до расширения usage_service (см. комментарий выше)
-                self._set_num(self.tbl, row, 9, f"{0:.2f}")
-                self._set_num(self.tbl, row, 10, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 11, f"{0:.2f}")
-                self._set_num(self.tbl, row, 12, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 13, f"{0:.1f}%")
-
-                self._set_num(self.tbl, row, 14, f"{0:.2f}")
-                self._set_num(self.tbl, row, 15, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 16, f"{0:.2f}")
-                self._set_num(self.tbl, row, 17, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 18, f"{0:.1f}%")
-
-                self._set_num(self.tbl, row, 19, f"{0:.2f}")
-                self._set_num(self.tbl, row, 20, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 21, f"{0:.2f}")
-                self._set_num(self.tbl, row, 22, f"{0:.1f}%")
-                self._set_num(self.tbl, row, 23, f"{0:.1f}%")
+                self._add_row(
+                    org_name=oname,
+                    venue_name=r.venue_name,
+                    is_total=False,
+                    cap_sec=r.capacity_sec,
+                    pd_sec=r.pd_sec,
+                    gz_sec=r.gz_sec,
+                    m_cap=r.morning_capacity_sec,
+                    m_pd=r.morning_pd_sec,
+                    m_gz=r.morning_gz_sec,
+                    d_cap=r.day_capacity_sec,
+                    d_pd=r.day_pd_sec,
+                    d_gz=r.day_gz_sec,
+                    e_cap=r.evening_capacity_sec,
+                    e_pd=r.evening_pd_sec,
+                    e_gz=r.evening_gz_sec,
+                )
 
         self.tbl.resizeRowsToContents()
+
+    def _add_row(
+        self,
+        *,
+        org_name: str,
+        venue_name: str,
+        is_total: bool,
+        cap_sec: int,
+        pd_sec: int,
+        gz_sec: int,
+        m_cap: int,
+        m_pd: int,
+        m_gz: int,
+        d_cap: int,
+        d_pd: int,
+        d_gz: int,
+        e_cap: int,
+        e_pd: int,
+        e_gz: int,
+    ):
+        row = self.tbl.rowCount()
+        self.tbl.insertRow(row)
+
+        it_org = QTableWidgetItem(org_name)
+        it_venue = QTableWidgetItem(venue_name)
+
+        if is_total:
+            it_org.setFont(self._bold_font())
+            it_venue.setFont(self._bold_font())
+
+        self.tbl.setItem(row, 0, it_org)
+        self.tbl.setItem(row, 1, it_venue)
+
+        total_sec = int(pd_sec) + int(gz_sec)
+        total_pct = self._pct(total_sec, cap_sec)
+        self.tbl.setCellWidget(row, 2, self._make_progress(total_pct))
+
+        self._set_num(self.tbl, row, 3, f"{self._hours(cap_sec):.2f}")
+        self._set_num(self.tbl, row, 4, f"{self._hours(pd_sec):.2f}")
+        self._set_num(self.tbl, row, 5, f"{self._pct(pd_sec, cap_sec):.1f}%")
+        self._set_num(self.tbl, row, 6, f"{self._hours(gz_sec):.2f}")
+        self._set_num(self.tbl, row, 7, f"{self._pct(gz_sec, cap_sec):.1f}%")
+        self._set_num(self.tbl, row, 8, f"{total_pct:.1f}%")
+
+        # Утро
+        m_total = m_pd + m_gz
+        self._set_num(self.tbl, row, 9, f"{self._hours(m_pd):.2f}")
+        self._set_num(self.tbl, row, 10, f"{self._pct(m_pd, m_cap):.1f}%")
+        self._set_num(self.tbl, row, 11, f"{self._hours(m_gz):.2f}")
+        self._set_num(self.tbl, row, 12, f"{self._pct(m_gz, m_cap):.1f}%")
+        self._set_num(self.tbl, row, 13, f"{self._pct(m_total, m_cap):.1f}%")
+
+        # День
+        d_total = d_pd + d_gz
+        self._set_num(self.tbl, row, 14, f"{self._hours(d_pd):.2f}")
+        self._set_num(self.tbl, row, 15, f"{self._pct(d_pd, d_cap):.1f}%")
+        self._set_num(self.tbl, row, 16, f"{self._hours(d_gz):.2f}")
+        self._set_num(self.tbl, row, 17, f"{self._pct(d_gz, d_cap):.1f}%")
+        self._set_num(self.tbl, row, 18, f"{self._pct(d_total, d_cap):.1f}%")
+
+        # Вечер
+        e_total = e_pd + e_gz
+        self._set_num(self.tbl, row, 19, f"{self._hours(e_pd):.2f}")
+        self._set_num(self.tbl, row, 20, f"{self._pct(e_pd, e_cap):.1f}%")
+        self._set_num(self.tbl, row, 21, f"{self._hours(e_gz):.2f}")
+        self._set_num(self.tbl, row, 22, f"{self._pct(e_gz, e_cap):.1f}%")
+        self._set_num(self.tbl, row, 23, f"{self._pct(e_total, e_cap):.1f}%")
+
+        if is_total:
+            for c in range(self.tbl.columnCount()):
+                it = self.tbl.item(row, c)
+                if it:
+                    it.setBackground(QColor("#f8fafc"))
 
     def _bold_font(self) -> QFont:
         f = QFont(self.tbl.font())
