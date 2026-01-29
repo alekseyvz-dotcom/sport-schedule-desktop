@@ -243,10 +243,15 @@ class TenantDialog(QDialog):
         w = QDateEdit()
         w.setCalendarPopup(True)
         w.setDisplayFormat("dd.MM.yyyy")
-        w.setSpecialValueText("—")
         w.setMinimumDate(QDate(1900, 1, 1))
-        w.setDate(_pydate_to_qdate(d))
+    
+        if d:
+            w.setDate(_pydate_to_qdate(d))
+        else:
+            w.setDate(QDate.currentDate())
+    
         return w
+
 
     def _on_accept(self):
         name = self.ed_name.text().strip()
