@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
+from app.ui.tenant_rules_widget import TenantRulesWidget
+
 
 def _pydate_to_qdate(d: Optional[date]) -> QDate:
     if not d:
@@ -84,7 +86,7 @@ QPushButton:pressed {
 class TenantDialog(QDialog):
     """
     Карточка контрагента (тенант).
-    Сделано более “квадратно”: две колонки + блоки, без бесконечной вертикали.
+    Две колонки + блок правил расписания.
     """
 
     def __init__(self, parent=None, title: str = "Контрагент", data: Optional[Dict] = None):
@@ -93,10 +95,11 @@ class TenantDialog(QDialog):
         self.setModal(True)
         self.setStyleSheet(_DIALOG_QSS)
 
-        # чуть более “квадратный” размер по умолчанию
-        self.resize(920, 560)
-
         self._data_in = data or {}
+        self._tenant_id: Optional[int] = self._data_in.get("id")
+
+        # размер чуть больше, чтобы влезли правила
+        self.resize(1060, 650)
 
         # ---- widgets
         self.ed_name = QLineEdit(self._data_in.get("name", "") or "")
@@ -152,35 +155,29 @@ class TenantDialog(QDialog):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(10)
 
-        # 0 ряд
         grid.addWidget(QLabel("№ договора:"), 0, 0)
         grid.addWidget(self.ed_contract_no, 0, 1)
         grid.addWidget(QLabel("Дата договора:"), 0, 2)
         grid.addWidget(self.dt_contract_date, 0, 3)
 
-        # 1 ряд
         grid.addWidget(QLabel("Срок с:"), 1, 0)
         grid.addWidget(self.dt_valid_from, 1, 1)
         grid.addWidget(QLabel("Срок по:"), 1, 2)
         grid.addWidget(self.dt_valid_to, 1, 3)
 
-        # 2 ряд
         grid.addWidget(QLabel("Контакт:"), 2, 0)
         grid.addWidget(self.ed_contact_name, 2, 1)
         grid.addWidget(QLabel("Вид обязательства:"), 2, 2)
         grid.addWidget(self.ed_obligation_kind, 2, 3)
 
-        # 3 ряд
         grid.addWidget(QLabel("Способ передачи документов:"), 3, 0)
         grid.addWidget(self.ed_docs_delivery, 3, 1, 1, 3)
 
-        # 4 ряд
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
         grid.addWidget(self.cb_signed, 4, 2)
         grid.addWidget(self.cb_attached_1c, 4, 3)
 
-        # 5 ряд
         grid.addWidget(self.cb_has_ds, 5, 2)
 
         # ---- group: Комментарии / примечания
@@ -191,6 +188,22 @@ class TenantDialog(QDialog):
         fm_notes.setVerticalSpacing(10)
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
+
+        # ---- group: Правила расписания
+        gb_rules = QGroupBox("Правила расписания")
+        rules_layout = QVBoxLayout(gb_rules)
+        rules_layout.setContentsMargins(12, 16, 12, 12)
+
+        contract_from = _qdate_to_pydate(self.dt_valid_from.date())
+        contract_to = _qdate_to_pydate(self.dt_valid_to.date())
+
+        self.rules_widget = TenantRulesWidget(
+            self,
+            tenant_id=self._tenant_id,
+            contract_from=contract_from,
+            contract_to=contract_to,
+        )
+        rules_layout.addWidget(self.rules_widget)
 
         # ---- layout: two columns (left/right)
         cols = QHBoxLayout()
@@ -205,7 +218,7 @@ class TenantDialog(QDialog):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
         right_col.addWidget(gb_contract)
-        right_col.addStretch(1)
+        right_col.addWidget(gb_rules, 1)
 
         cols.addLayout(left_col, 1)
         cols.addLayout(right_col, 1)
@@ -270,3 +283,10 @@ class TenantDialog(QDialog):
             "has_ds": self.cb_has_ds.isChecked(),
             "notes": self.ed_notes.toPlainText().strip(),
         }
+
+    def rules_payload(self) -> list[dict]:
+        """
+        Правила, которые пользователь добавил/изменил/отключил в карточке.
+        Сохранять их в БД нужно в TenantsPage после dlg.exec().
+        """
+        return self.rules_widget.rules_payload()
