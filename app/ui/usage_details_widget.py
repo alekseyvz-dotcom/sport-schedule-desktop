@@ -8,8 +8,8 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QFrame
 
 
-PD_COLOR = QColor("#9bd7ff")  # пастельный голубой
-GZ_COLOR = QColor("#a7efc0")  # пастельный зелёный
+PD_COLOR = QColor("#9bd7ff")  # ПД
+GZ_COLOR = QColor("#ffcc80")  # ГЗ (оранжевый)
 BG_BAR = QColor("#eef2f7")
 TEXT = QColor("#0f172a")
 MUTED = QColor("#475569")
