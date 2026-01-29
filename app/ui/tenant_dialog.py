@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from datetime import date
 
 from PySide6.QtCore import QDate, Qt
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QTextEdit,
     QDateEdit,
-    QCheckBox,
     QComboBox,
     QMessageBox,
     QLabel,
@@ -26,7 +25,7 @@ from app.ui.tenant_rules_widget import TenantRulesWidget
 
 def _pydate_to_qdate(d: Optional[date]) -> QDate:
     if not d:
-        return QDate()  # invalid
+        return QDate()
     return QDate(d.year, d.month, d.day)
 
 
@@ -37,9 +36,7 @@ def _qdate_to_pydate(qd: QDate) -> Optional[date]:
 
 
 _DIALOG_QSS = """
-QDialog {
-    background: #fbfbfc;
-}
+QDialog { background: #fbfbfc; }
 QLineEdit, QTextEdit, QComboBox, QDateEdit {
     background: #ffffff;
     border: 1px solid #e6e6e6;
@@ -49,9 +46,7 @@ QLineEdit, QTextEdit, QComboBox, QDateEdit {
 QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #7fb3ff;
 }
-QTextEdit {
-    min-height: 84px;
-}
+QTextEdit { min-height: 84px; }
 QGroupBox {
     border: 1px solid #e6e6e6;
     border-radius: 12px;
@@ -73,20 +68,28 @@ QPushButton {
     font-weight: 600;
     min-height: 34px;
 }
-QPushButton:hover {
-    border: 1px solid #cfd6df;
-    background: #f6f7f9;
-}
-QPushButton:pressed {
-    background: #eef1f5;
-}
+QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
+QPushButton:pressed { background: #eef1f5; }
 """
+
+
+_OBLIGATION_OPTIONS = [
+    "орг группа 60 минут",
+    "орг группа 90 минут",
+    "мероприятия",
+]
+
+_DELIVERY_OPTIONS = [
+    "ЭДО",
+    "физически",
+]
 
 
 class TenantDialog(QDialog):
     """
     Карточка контрагента (тенант).
-    Две колонки + блок правил расписания.
+    Вид обязательств: множественный выбор
+    Способ передачи документов: одиночный выбор
     """
 
     def __init__(self, parent=None, title: str = "Контрагент", data: Optional[Dict] = None):
@@ -98,7 +101,6 @@ class TenantDialog(QDialog):
         self._data_in = data or {}
         self._tenant_id: Optional[int] = self._data_in.get("id")
 
-        # размер чуть больше, чтобы влезли правила
         self.resize(1060, 650)
 
         # ---- widgets
@@ -108,9 +110,17 @@ class TenantDialog(QDialog):
         self.ed_email = QLineEdit(self._data_in.get("email", "") or "")
 
         self.ed_contact_name = QLineEdit(self._data_in.get("contact_name", "") or "")
-        self.ed_obligation_kind = QLineEdit(self._data_in.get("obligation_kind", "") or "")
         self.ed_contract_no = QLineEdit(self._data_in.get("contract_no", "") or "")
-        self.ed_docs_delivery = QLineEdit(self._data_in.get("docs_delivery_method", "") or "")
+
+        # Вид обязательств (multi)
+        self.cmb_obligation = QComboBox()
+        self._setup_multiselect_combobox(self.cmb_obligation, _OBLIGATION_OPTIONS)
+        self._set_multiselect_from_string(self.cmb_obligation, self._data_in.get("obligation_kind", "") or "")
+
+        # Способ передачи документов (single)
+        self.cmb_delivery = QComboBox()
+        self.cmb_delivery.addItems(_DELIVERY_OPTIONS)
+        self._set_combobox_text(self.cmb_delivery, (self._data_in.get("docs_delivery_method", "") or "").strip())
 
         self.dt_contract_date = self._mk_date(self._data_in.get("contract_date"))
         self.dt_valid_from = self._mk_date(self._data_in.get("contract_valid_from"))
@@ -124,14 +134,7 @@ class TenantDialog(QDialog):
         idx = self.cmb_status.findData(cur_status)
         self.cmb_status.setCurrentIndex(idx if idx >= 0 else 0)
 
-        self.cb_signed = QCheckBox("Подписанный договор")
-        self.cb_signed.setChecked(bool(self._data_in.get("contract_signed") or False))
-
-        self.cb_attached_1c = QCheckBox("Прикреплен в 1С")
-        self.cb_attached_1c.setChecked(bool(self._data_in.get("attached_in_1c") or False))
-
-        self.cb_has_ds = QCheckBox("ДС")
-        self.cb_has_ds.setChecked(bool(self._data_in.get("has_ds") or False))
+        # Чекбоксы (ДС / 1С / подписанный договор) — УБРАЛИ по вашему требованию
 
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
         self.ed_notes = QTextEdit(self._data_in.get("notes", "") or "")
@@ -167,18 +170,14 @@ class TenantDialog(QDialog):
 
         grid.addWidget(QLabel("Контакт:"), 2, 0)
         grid.addWidget(self.ed_contact_name, 2, 1)
-        grid.addWidget(QLabel("Вид обязательства:"), 2, 2)
-        grid.addWidget(self.ed_obligation_kind, 2, 3)
+        grid.addWidget(QLabel("Вид обязательств:"), 2, 2)
+        grid.addWidget(self.cmb_obligation, 2, 3)
 
         grid.addWidget(QLabel("Способ передачи документов:"), 3, 0)
-        grid.addWidget(self.ed_docs_delivery, 3, 1, 1, 3)
+        grid.addWidget(self.cmb_delivery, 3, 1, 1, 3)
 
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
-        grid.addWidget(self.cb_signed, 4, 2)
-        grid.addWidget(self.cb_attached_1c, 4, 3)
-
-        grid.addWidget(self.cb_has_ds, 5, 2)
 
         # ---- group: Комментарии / примечания
         gb_notes = QGroupBox("Комментарии")
@@ -239,19 +238,96 @@ class TenantDialog(QDialog):
         root.addLayout(cols)
         root.addWidget(buttons)
 
+    # ---------- helpers for multiselect combobox ----------
+
+    def _setup_multiselect_combobox(self, cmb: QComboBox, options: List[str]) -> None:
+        """
+        Делает QComboBox с чекбоксами (множественный выбор).
+        Выбор хранится в checkState элементов модели.
+        """
+        cmb.clear()
+        cmb.setEditable(True)
+        cmb.lineEdit().setReadOnly(True)
+        cmb.lineEdit().setPlaceholderText("Выберите...")
+
+        # добавляем элементы
+        for opt in options:
+            cmb.addItem(opt)
+            idx = cmb.model().index(cmb.count() - 1, 0)
+            cmb.model().setData(idx, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+
+        # по клику в выпадающем списке переключаем галочку
+        cmb.view().pressed.connect(lambda mi: self._toggle_combo_checkstate(cmb, mi))
+
+        # первичное отображение текста
+        self._refresh_multiselect_text(cmb)
+
+    def _toggle_combo_checkstate(self, cmb: QComboBox, model_index) -> None:
+        state = cmb.model().data(model_index, Qt.ItemDataRole.CheckStateRole)
+        new_state = Qt.CheckState.Unchecked if state == Qt.CheckState.Checked else Qt.CheckState.Checked
+        cmb.model().setData(model_index, new_state, Qt.ItemDataRole.CheckStateRole)
+        self._refresh_multiselect_text(cmb)
+
+    def _refresh_multiselect_text(self, cmb: QComboBox) -> None:
+        selected = self._multiselect_values(cmb)
+        cmb.lineEdit().setText(", ".join(selected))
+
+    def _multiselect_values(self, cmb: QComboBox) -> List[str]:
+        out: List[str] = []
+        for i in range(cmb.count()):
+            idx = cmb.model().index(i, 0)
+            state = cmb.model().data(idx, Qt.ItemDataRole.CheckStateRole)
+            if state == Qt.CheckState.Checked:
+                out.append(cmb.itemText(i))
+        return out
+
+    def _set_multiselect_from_string(self, cmb: QComboBox, s: str) -> None:
+        # поддержим и "a,b" и "a; b"
+        raw = (s or "").strip()
+        if not raw:
+            self._refresh_multiselect_text(cmb)
+            return
+
+        parts = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+        want = set(parts)
+
+        for i in range(cmb.count()):
+            text = cmb.itemText(i)
+            idx = cmb.model().index(i, 0)
+            cmb.model().setData(
+                idx,
+                Qt.CheckState.Checked if text in want else Qt.CheckState.Unchecked,
+                Qt.ItemDataRole.CheckStateRole,
+            )
+        self._refresh_multiselect_text(cmb)
+
+    @staticmethod
+    def _set_combobox_text(cmb: QComboBox, text: str) -> None:
+        if not text:
+            cmb.setCurrentIndex(0)
+            return
+        idx = cmb.findText(text, Qt.MatchFlag.MatchFixedString)
+        if idx >= 0:
+            cmb.setCurrentIndex(idx)
+        else:
+            # если в данных была старая строка, которой нет в списке — добавим её
+            cmb.addItem(text)
+            cmb.setCurrentIndex(cmb.count() - 1)
+
+    # ---------- end helpers ----------
+
     def _mk_date(self, d: Optional[date]) -> QDateEdit:
         w = QDateEdit()
         w.setCalendarPopup(True)
         w.setDisplayFormat("dd.MM.yyyy")
         w.setMinimumDate(QDate(1900, 1, 1))
-    
+
         if d:
             w.setDate(_pydate_to_qdate(d))
         else:
             w.setDate(QDate.currentDate())
-    
-        return w
 
+        return w
 
     def _on_accept(self):
         name = self.ed_name.text().strip()
@@ -269,6 +345,9 @@ class TenantDialog(QDialog):
         self.accept()
 
     def values(self) -> Dict:
+        obligation_list = self._multiselect_values(self.cmb_obligation)
+        obligation_str = ", ".join(obligation_list)  # сохраняем обратно в строку (как было поле obligation_kind)
+
         return {
             "name": self.ed_name.text().strip(),
             "inn": self.ed_inn.text().strip(),
@@ -276,16 +355,13 @@ class TenantDialog(QDialog):
             "email": self.ed_email.text().strip(),
             "comment": self.ed_comment.toPlainText().strip(),
             "contact_name": self.ed_contact_name.text().strip(),
-            "obligation_kind": self.ed_obligation_kind.text().strip(),
+            "obligation_kind": obligation_str,
             "contract_no": self.ed_contract_no.text().strip(),
             "contract_date": _qdate_to_pydate(self.dt_contract_date.date()),
             "contract_valid_from": _qdate_to_pydate(self.dt_valid_from.date()),
             "contract_valid_to": _qdate_to_pydate(self.dt_valid_to.date()),
-            "docs_delivery_method": self.ed_docs_delivery.text().strip(),
+            "docs_delivery_method": self.cmb_delivery.currentText().strip(),
             "status": self.cmb_status.currentData(),
-            "contract_signed": self.cb_signed.isChecked(),
-            "attached_in_1c": self.cb_attached_1c.isChecked(),
-            "has_ds": self.cb_has_ds.isChecked(),
             "notes": self.ed_notes.toPlainText().strip(),
         }
 
