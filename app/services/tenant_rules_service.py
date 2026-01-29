@@ -23,6 +23,12 @@ class TenantRule:
     title: str
     is_active: bool
 
+@dataclass
+class GenerateReport:
+    created: int
+    skipped: int
+    errors: List[str]
+
 
 def list_rules_for_tenant(tenant_id: int, include_inactive: bool = False) -> List[TenantRule]:
     conn = None
@@ -138,32 +144,61 @@ def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
             yield d
         d += timedelta(days=1)
 
-
-def generate_bookings_for_rule(
-    *,
-    rule: TenantRule,
-    venue_id: int,
-    tz: timezone,
-) -> int:
-    """
-    Генерирует PD-брони по правилу.
-    Возвращает количество успешно созданных броней.
-    Если есть пересечения, create_booking выбросит исключение (и вы покажете его пользователю).
-    """
+def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: timezone) -> GenerateReport:
     created = 0
+    skipped = 0
+    errors: List[str] = []
+
     for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
         starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
         ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
+        try:
+            create_booking(
+                venue_id=int(venue_id),
+                venue_unit_id=int(rule.venue_unit_id),
+                tenant_id=int(rule.tenant_id),
+                title=rule.title or "Аренда по договору",
+                kind="PD",
+                starts_at=starts_dt,
+                ends_at=ends_dt,
+            )
+            created += 1
+        except Exception as e:
+            # пересечение или любая другая причина — пропускаем, но пишем в отчёт
+            skipped += 1
+            errors.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
 
-        create_booking(
-            venue_id=int(venue_id),
-            venue_unit_id=int(rule.venue_unit_id),
-            tenant_id=int(rule.tenant_id),
-            title=rule.title or "Аренда по договору",
-            kind="PD",
-            starts_at=starts_dt,
-            ends_at=ends_dt,
-        )
-        created += 1
+    return GenerateReport(created=created, skipped=skipped, errors=errors)
 
-    return created
+def get_venue_id_by_unit(venue_unit_id: int) -> int:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT venue_id FROM public.venue_units WHERE id=%s",
+                (int(venue_unit_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Не найдена зона venue_unit_id={venue_unit_id}")
+            return int(row["venue_id"])
+    finally:
+        if conn:
+            put_conn(conn)
+
+def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateReport:
+    rules = list_rules_for_tenant(int(tenant_id), include_inactive=False)
+    total_created = 0
+    total_skipped = 0
+    errors: List[str] = []
+
+    for rule in rules:
+        venue_id = get_venue_id_by_unit(rule.venue_unit_id)
+        rep = generate_bookings_for_rule_soft(rule=rule, venue_id=venue_id, tz=tz)
+        total_created += rep.created
+        total_skipped += rep.skipped
+        errors.extend(rep.errors)
+
+    return GenerateReport(created=total_created, skipped=total_skipped, errors=errors)
+
