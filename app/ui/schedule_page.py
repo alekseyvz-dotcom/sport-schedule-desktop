@@ -8,7 +8,7 @@ import os
 import tempfile
 import traceback
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QHeaderView,
+    QListWidget,
+    QListWidgetItem,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -60,7 +62,7 @@ QTableWidget {
     border-radius: 10px;
 
     gridline-color: #e9edf3;
-    selection-background-color: rgba(127, 179, 255, 60); /* лёгкая подсветка */
+    selection-background-color: rgba(127, 179, 255, 60);
     selection-color: #111111;
 }
 QHeaderView::section {
@@ -81,9 +83,7 @@ QTableWidget::item:selected {
 
 
 _PAGE_QSS = """
-QWidget {
-    background: #fbfbfc;
-}
+QWidget { background: #fbfbfc; }
 QComboBox, QDateEdit {
     background: #ffffff;
     border: 1px solid #e6e6e6;
@@ -91,9 +91,7 @@ QComboBox, QDateEdit {
     padding: 6px 10px;
     min-height: 22px;
 }
-QComboBox:focus, QDateEdit:focus {
-    border: 1px solid #7fb3ff;
-}
+QComboBox:focus, QDateEdit:focus { border: 1px solid #7fb3ff; }
 QPushButton {
     background: #ffffff;
     border: 1px solid #e6e6e6;
@@ -102,16 +100,9 @@ QPushButton {
     font-weight: 600;
     min-height: 34px;
 }
-QPushButton:hover {
-    border: 1px solid #cfd6df;
-    background: #f6f7f9;
-}
-QPushButton:pressed {
-    background: #eef1f5;
-}
-QCheckBox {
-    padding: 0 6px;
-}
+QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
+QPushButton:pressed { background: #eef1f5; }
+QCheckBox { padding: 0 6px; }
 QLabel#sectionTitle {
     color: #111111;
     font-weight: 700;
@@ -131,6 +122,8 @@ class SchedulePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(_PAGE_QSS)
+
+        self._settings = QSettings("SportApp", "Schedule")
 
         self.lbl_title = QLabel("Расписание")
         self.lbl_title.setObjectName("sectionTitle")
@@ -153,11 +146,13 @@ class SchedulePage(QWidget):
         self.btn_edit = QPushButton("Редактировать")
         self.btn_cancel = QPushButton("Отменить")
         self.btn_refresh = QPushButton("Обновить")
+        self.btn_columns = QPushButton("Колонки…")
 
         self.btn_create.clicked.connect(self._on_create)
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_cancel.clicked.connect(self._on_cancel)
         self.btn_refresh.clicked.connect(self.reload)
+        self.btn_columns.clicked.connect(self._on_columns)
 
         top = QHBoxLayout()
         top.setContentsMargins(12, 12, 12, 8)
@@ -172,16 +167,15 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_cancel)
         top.addWidget(self.btn_refresh)
+        top.addWidget(self.btn_columns)
 
         self.tbl = QTableWidget()
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-
         self.tbl.setAlternatingRowColors(False)
         self.tbl.setShowGrid(True)
         self.tbl.setGridStyle(Qt.PenStyle.SolidLine)
-
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setStyleSheet(_TABLE_QSS)
@@ -209,40 +203,75 @@ class SchedulePage(QWidget):
     # -------- colors --------
 
     def _base_color_for_booking(self, b) -> QColor:
-        # cancelled
         if getattr(b, "status", "") == "cancelled":
             return QColor("#d5dbe3")  # мягкий серый
-    
-        kind = (getattr(b, "kind", "") or "").upper()
-    
-        # ПД
+
+        kind = (getattr(b, "kind", None) or getattr(b, "activity", "") or "").upper()
+
         if kind == "PD":
             return QColor("#9bd7ff")  # пастельный голубой
-    
-        # ГЗ: обычное / безвозмездное
-        if kind == "GZ":
-            # как определить "безвозмездное":
-            # 1) если у объекта есть поле is_free / is_gratuitous
-            # 2) или по title/comment (временно)
-            is_free = bool(getattr(b, "is_free", False) or getattr(b, "is_gratuitous", False))
-    
-            # временная эвристика, если отдельного поля пока нет:
-            if not is_free:
-                t = (getattr(b, "title", "") or "") + " " + (getattr(b, "comment", "") or "")
-                t = t.lower()
-                is_free = ("безвозм" in t) or ("б/в" in t) or ("безвозмезд" in t)
-    
-            return QColor("#ffe0b2") if is_free else QColor("#ffcc80")  # светлее / темнее
-    
-        # fallback
-        return QColor("#e5e7eb")
 
+        if kind == "GZ":
+            return QColor("#ffcc80")  # пастельный оранжевый
+
+        return QColor("#e5e7eb")
 
     def _shade(self, c: QColor, factor: float) -> QColor:
         r = max(0, min(255, int(c.red() * factor)))
         g = max(0, min(255, int(c.green() * factor)))
         b = max(0, min(255, int(c.blue() * factor)))
         return QColor(r, g, b)
+
+    # -------- column settings --------
+
+    def _resource_key(self, r: Resource) -> str:
+        if r.venue_unit_id is not None:
+            return f"U:{int(r.venue_unit_id)}"
+        return f"V:{int(r.venue_id)}"
+
+    def _settings_key_for_org(self, org_id: int) -> str:
+        return f"schedule/columns/org_{org_id}"
+
+    def _load_columns_state(self, org_id: int) -> Dict[str, Dict]:
+        """
+        key -> {"pos": int, "hidden": bool}
+        """
+        k = self._settings_key_for_org(org_id)
+        v = self._settings.value(k, None)
+
+        # QSettings на разных платформах может вернуть не dict
+        return v if isinstance(v, dict) else {}
+
+    def _save_columns_state(self, org_id: int, state: Dict[str, Dict]) -> None:
+        self._settings.setValue(self._settings_key_for_org(org_id), state)
+
+    def _apply_order_and_hidden(self, org_id: int) -> None:
+        state = self._load_columns_state(org_id)
+
+        changed = False
+        for i, r in enumerate(self._resources):
+            key = self._resource_key(r)
+            if key not in state:
+                state[key] = {"pos": i, "hidden": False}
+                changed = True
+
+        existing = {self._resource_key(r) for r in self._resources}
+        for key in list(state.keys()):
+            if key not in existing:
+                state.pop(key, None)
+                changed = True
+
+        if changed:
+            self._save_columns_state(org_id, state)
+
+        self._resources.sort(key=lambda r: int(state[self._resource_key(r)].get("pos", 10_000)))
+
+    def _apply_hidden_columns(self, org_id: int) -> None:
+        state = self._load_columns_state(org_id)
+        for i, r in enumerate(self._resources):
+            key = self._resource_key(r)
+            hidden = bool(state.get(key, {}).get("hidden", False))
+            self.tbl.setColumnHidden(i + 1, hidden)  # col 0 = время
 
     # -----------------------
 
@@ -278,7 +307,9 @@ class SchedulePage(QWidget):
             for v in venues:
                 units = list_venue_units(v.id, include_inactive=False)
                 if units:
-                    for u in units:
+                    # sort zones by sort_order (from DB) + name
+                    units_sorted = sorted(units, key=lambda u: (int(getattr(u, "sort_order", 0)), str(u.name)))
+                    for u in units_sorted:
                         resources.append(
                             Resource(
                                 venue_id=v.id,
@@ -297,7 +328,11 @@ class SchedulePage(QWidget):
                         )
                     )
 
+            # базовая сортировка (потом пользователь может изменить через "Колонки…")
+            resources.sort(key=lambda r: (r.venue_name, r.resource_name))
+
             self._resources = resources
+            self._apply_order_and_hidden(int(org_id))
 
         except Exception as e:
             _uilog("ERROR _on_org_changed: " + repr(e))
@@ -306,6 +341,7 @@ class SchedulePage(QWidget):
             self._resources = []
 
         self._setup_table()
+        self._apply_hidden_columns(int(org_id))
         self.reload()
 
     def _time_slots(self) -> List[time]:
@@ -458,12 +494,102 @@ class SchedulePage(QWidget):
             if it0:
                 unit_suffix = f" [{b.venue_unit_name}]" if getattr(b, "venue_unit_name", "") else ""
                 title = (b.title or "").strip()
+                kind = getattr(b, "kind", None) or getattr(b, "activity", "")
                 if title:
-                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}\n{title}")
+                    it0.setText(f"{kind}{unit_suffix} | {b.tenant_name}\n{title}")
                 else:
-                    it0.setText(f"{b.kind}{unit_suffix} | {b.tenant_name}")
+                    it0.setText(f"{kind}{unit_suffix} | {b.tenant_name}")
 
         self.tbl.resizeRowsToContents()
+
+    def _on_columns(self):
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            return
+
+        org_id = int(org_id)
+        state = self._load_columns_state(org_id)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Колонки расписания")
+        dlg.resize(560, 430)
+
+        lst = QListWidget(dlg)
+        lst.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+        for r in self._resources:
+            key = self._resource_key(r)
+            it = QListWidgetItem(r.resource_name)
+            it.setData(Qt.ItemDataRole.UserRole, key)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            hidden = bool(state.get(key, {}).get("hidden", False))
+            it.setCheckState(Qt.CheckState.Unchecked if hidden else Qt.CheckState.Checked)
+            lst.addItem(it)
+
+        btn_up = QPushButton("Вверх")
+        btn_down = QPushButton("Вниз")
+        btn_all = QPushButton("Показать все")
+        btn_none = QPushButton("Скрыть все")
+        btn_ok = QPushButton("OK")
+        btn_cancel = QPushButton("Отмена")
+
+        def move(delta: int):
+            row = lst.currentRow()
+            if row < 0:
+                return
+            row2 = row + delta
+            if row2 < 0 or row2 >= lst.count():
+                return
+            it = lst.takeItem(row)
+            lst.insertItem(row2, it)
+            lst.setCurrentRow(row2)
+
+        btn_up.clicked.connect(lambda: move(-1))
+        btn_down.clicked.connect(lambda: move(+1))
+
+        def set_all(checked: bool):
+            for i in range(lst.count()):
+                it = lst.item(i)
+                it.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+
+        btn_all.clicked.connect(lambda: set_all(True))
+        btn_none.clicked.connect(lambda: set_all(False))
+
+        btn_ok.clicked.connect(dlg.accept)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        right = QVBoxLayout()
+        right.addWidget(btn_up)
+        right.addWidget(btn_down)
+        right.addSpacing(12)
+        right.addWidget(btn_all)
+        right.addWidget(btn_none)
+        right.addStretch(1)
+        right.addWidget(btn_ok)
+        right.addWidget(btn_cancel)
+
+        lay = QHBoxLayout(dlg)
+        lay.addWidget(lst, 1)
+        lay.addLayout(right)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_state: Dict[str, Dict] = dict(state)
+        for pos in range(lst.count()):
+            it = lst.item(pos)
+            key = str(it.data(Qt.ItemDataRole.UserRole))
+            shown = (it.checkState() == Qt.CheckState.Checked)
+            new_state.setdefault(key, {})
+            new_state[key]["pos"] = pos
+            new_state[key]["hidden"] = (not shown)
+
+        self._save_columns_state(org_id, new_state)
+
+        self._apply_order_and_hidden(org_id)
+        self._setup_table()
+        self._apply_hidden_columns(org_id)
+        self.reload()
 
     def _on_create(self):
         try:
