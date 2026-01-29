@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.services.ref_service import list_active_orgs, list_active_venues
 from app.services.venue_units_service import list_venue_units
-from app.services.tenant_rules_service import list_rules_for_tenant
+from app.services.tenant_rules_service import list_rules_for_tenant, set_rule_active
 from app.ui.tenant_rule_dialog import TenantRuleDialog
 
 
@@ -227,12 +227,29 @@ class TenantRulesWidget(QWidget):
             )
 
         self._refresh()
-
+        
     def _on_disable(self):
         idx = self._selected_index()
         if idx is None:
             QMessageBox.information(self, "Правила", "Выберите правило.")
             return
-        self._rules_local[idx]["op"] = "deactivate"
-        self._rules_local[idx]["is_active"] = False
+    
+        r = self._rules_local[idx]
+    
+        # Если правило уже выключено локально — ничего не делаем
+        if r.get("op") == "deactivate" or not r.get("is_active", True):
+            return
+    
+        # Если это правило уже в БД — выключаем в БД сразу
+        if r.get("id"):
+            try:
+                set_rule_active(int(r["id"]), False)
+            except Exception as e:
+                QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
+                return
+    
+        # Локально тоже помечаем, чтобы TenantDialog вернул актуальный payload
+        r["op"] = "deactivate"
+        r["is_active"] = False
         self._refresh()
+
