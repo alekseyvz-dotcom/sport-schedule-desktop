@@ -88,15 +88,22 @@ _DELIVERY_OPTIONS = [
 class TenantDialog(QDialog):
     """
     Карточка контрагента (тенант).
-    Вид обязательств: множественный выбор
-    Способ передачи документов: одиночный выбор
     """
 
-    def __init__(self, parent=None, title: str = "Контрагент", data: Optional[Dict] = None):
+    def __init__(
+        self,
+        parent=None,
+        title: str = "Контрагент",
+        data: Optional[Dict] = None,
+        *,
+        is_admin: bool = False,
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
         self.setStyleSheet(_DIALOG_QSS)
+
+        self._is_admin = bool(is_admin)
 
         self._data_in = data or {}
         self._tenant_id: Optional[int] = self._data_in.get("id")
@@ -201,7 +208,7 @@ class TenantDialog(QDialog):
             tenant_id=self._tenant_id,
             contract_from=contract_from,
             contract_to=contract_to,
-            is_admin=is_admin,
+            is_admin=self._is_admin,
         )
         rules_layout.addWidget(self.rules_widget)
 
