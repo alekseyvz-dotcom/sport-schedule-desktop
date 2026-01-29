@@ -65,12 +65,12 @@ class TenantRuleDialog(QDialog):
 
         self.ed_title = QLineEdit()
 
-        # defaults from contract
+        # defaults from contract (если договора нет — текущая дата)
         if contract_valid_from:
             self.dt_from.setDate(QDate(contract_valid_from.year, contract_valid_from.month, contract_valid_from.day))
         else:
             self.dt_from.setDate(QDate.currentDate())
-
+        
         if contract_valid_to:
             self.dt_to.setDate(QDate(contract_valid_to.year, contract_valid_to.month, contract_valid_to.day))
         else:
