@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, date, time, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+
+from psycopg2.extras import RealDictCursor
+
+from app.db import get_conn, put_conn
+
+
+@dataclass(frozen=True)
+class UsageRow:
+    org_id: int
+    org_name: str
+    venue_id: int
+    venue_name: str
+
+    capacity_sec: int
+
+    pd_sec: int
+    gz_sec: int
+    total_sec: int
+
+    # shift split
+    morning_sec: int   # 08-12
+    day_sec: int       # 12-18
+    evening_sec: int   # 18-22
+
+
+def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> int:
+    s = max(a0, b0)
+    e = min(a1, b1)
+    if e <= s:
+        return 0
+    return int((e - s).total_seconds())
+
+
+def _iter_days(d0: date, d1: date):
+    d = d0
+    while d <= d1:
+        yield d
+        d += timedelta(days=1)
+
+
+def _load_bookings_for_range(
+    *,
+    start_dt: datetime,
+    end_dt: datetime,
+    org_id: Optional[int],
+    include_cancelled: bool,
+) -> List[Dict]:
+    """
+    Грузим брони с привязкой к org/venue.
+    Важно: фильтр по времени (starts_at < end_dt and ends_at > start_dt) для пересечений.
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = """
+                SELECT
+                    b.id,
+                    b.venue_id,
+                    v.name as venue_name,
+                    v.org_id,
+                    o.name as org_name,
+                    b.activity,
+                    b.status,
+                    b.starts_at,
+                    b.ends_at
+                FROM public.bookings b
+                JOIN public.venues v ON v.id = b.venue_id
+                JOIN public.sport_orgs o ON o.id = v.org_id
+                WHERE b.starts_at < %(end_dt)s
+                  AND b.ends_at > %(start_dt)s
+            """
+            params = {"start_dt": start_dt, "end_dt": end_dt}
+            if not include_cancelled:
+                sql += " AND b.status <> 'cancelled'"
+            if org_id is not None:
+                sql += " AND v.org_id = %(org_id)s"
+                params["org_id"] = int(org_id)
+
+            cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def _load_venues(org_id: Optional[int]) -> List[Dict]:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = """
+                SELECT v.id as venue_id, v.name as venue_name, v.org_id, o.name as org_name
+                FROM public.venues v
+                JOIN public.sport_orgs o ON o.id = v.org_id
+                WHERE v.is_active = true
+            """
+            params = {}
+            if org_id is not None:
+                sql += " AND v.org_id = %(org_id)s"
+                params["org_id"] = int(org_id)
+            sql += " ORDER BY o.name, v.name"
+            cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def calc_usage_by_venues(
+    *,
+    start_day: date,
+    end_day: date,
+    tz: timezone,
+    org_id: Optional[int] = None,
+    include_cancelled: bool = False,
+    work_start: time = time(8, 0),
+    work_end: time = time(22, 0),
+) -> List[UsageRow]:
+    """
+    Считает загрузку по площадкам за период дат (включительно).
+    Разбивает на смены: 08-12, 12-18, 18-22.
+    Проценты UI считает сам: sec / capacity_sec.
+    """
+    if end_day < start_day:
+        raise ValueError("end_day < start_day")
+
+    # Диапазон по времени для выборки пересечений (широкий)
+    range_start_dt = datetime.combine(start_day, time(0, 0), tzinfo=tz)
+    range_end_dt = datetime.combine(end_day + timedelta(days=1), time(0, 0), tzinfo=tz)
+
+    venues = _load_venues(org_id)
+    bookings = _load_bookings_for_range(
+        start_dt=range_start_dt,
+        end_dt=range_end_dt,
+        org_id=org_id,
+        include_cancelled=include_cancelled,
+    )
+
+    # base aggregates (включая venues без бронирований)
+    agg: Dict[int, Dict] = {}
+    for v in venues:
+        vid = int(v["venue_id"])
+        # capacity = кол-во дней * (work_end-work_start)
+        days_count = (end_day - start_day).days + 1
+        cap = int(days_count * (datetime.combine(date.today(), work_end) - datetime.combine(date.today(), work_start)).total_seconds())
+        agg[vid] = {
+            "org_id": int(v["org_id"]),
+            "org_name": str(v["org_name"]),
+            "venue_id": vid,
+            "venue_name": str(v["venue_name"]),
+            "capacity_sec": cap,
+            "pd_sec": 0,
+            "gz_sec": 0,
+            "morning_sec": 0,
+            "day_sec": 0,
+            "evening_sec": 0,
+        }
+
+    # shifts
+    shift_m = (time(8, 0), time(12, 0))
+    shift_d = (time(12, 0), time(18, 0))
+    shift_e = (time(18, 0), time(22, 0))
+
+    for b in bookings:
+        vid = int(b["venue_id"])
+        if vid not in agg:
+            # на всякий случай (если площадка неактивна, но бронь есть)
+            continue
+
+        activity = (b["activity"] or "").strip()
+        starts_at: datetime = b["starts_at"]
+        ends_at: datetime = b["ends_at"]
+
+        # Режем бронь по дням, чтобы корректно разнести по сменам
+        for d in _iter_days(start_day, end_day):
+            work0 = datetime.combine(d, work_start, tzinfo=tz)
+            work1 = datetime.combine(d, work_end, tzinfo=tz)
+
+            # пересечение брони с рабочим временем дня
+            work_overlap = _overlap_seconds(starts_at, ends_at, work0, work1)
+            if work_overlap <= 0:
+                continue
+
+            # смены
+            m0 = datetime.combine(d, shift_m[0], tzinfo=tz)
+            m1 = datetime.combine(d, shift_m[1], tzinfo=tz)
+            d0 = datetime.combine(d, shift_d[0], tzinfo=tz)
+            d1 = datetime.combine(d, shift_d[1], tzinfo=tz)
+            e0 = datetime.combine(d, shift_e[0], tzinfo=tz)
+            e1 = datetime.combine(d, shift_e[1], tzinfo=tz)
+
+            agg[vid]["morning_sec"] += _overlap_seconds(starts_at, ends_at, m0, m1)
+            agg[vid]["day_sec"] += _overlap_seconds(starts_at, ends_at, d0, d1)
+            agg[vid]["evening_sec"] += _overlap_seconds(starts_at, ends_at, e0, e1)
+
+            if activity == "PD":
+                agg[vid]["pd_sec"] += work_overlap
+            elif activity == "GZ":
+                agg[vid]["gz_sec"] += work_overlap
+            else:
+                # неизвестный тип — считаем в общий, но не в PD/GZ
+                pass
+
+    out: List[UsageRow] = []
+    for vid, a in agg.items():
+        pd_sec = int(a["pd_sec"])
+        gz_sec = int(a["gz_sec"])
+        total_sec = pd_sec + gz_sec
+
+        out.append(
+            UsageRow(
+                org_id=int(a["org_id"]),
+                org_name=str(a["org_name"]),
+                venue_id=int(a["venue_id"]),
+                venue_name=str(a["venue_name"]),
+                capacity_sec=int(a["capacity_sec"]),
+                pd_sec=pd_sec,
+                gz_sec=gz_sec,
+                total_sec=total_sec,
+                morning_sec=int(a["morning_sec"]),
+                day_sec=int(a["day_sec"]),
+                evening_sec=int(a["evening_sec"]),
+            )
+        )
+
+    # сортировка по общей загрузке по убыванию
+    out.sort(key=lambda r: (r.total_sec / r.capacity_sec) if r.capacity_sec else 0.0, reverse=True)
+    return out
