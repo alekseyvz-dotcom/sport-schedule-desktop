@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta, timezone
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -24,10 +26,18 @@ from app.services.tenants_service import (
     update_tenant,
     set_tenant_active,
 )
+from app.services.tenant_rules_service import (
+    create_rule,
+    set_rule_active,
+    generate_bookings_for_tenant,
+)
 from app.ui.tenant_dialog import TenantDialog
 
 
 class TenantsPage(QWidget):
+    # Должно совпадать с SchedulePage (у вас TZ_OFFSET_HOURS = 3)
+    TZ = timezone(timedelta(hours=3))
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -48,7 +58,6 @@ class TenantsPage(QWidget):
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_archive.clicked.connect(self._on_toggle_active)
 
-        # делаем кнопки одинаковой высоты, чуть “дороже” визуально
         for b in (self.btn_add, self.btn_edit, self.btn_archive):
             b.setMinimumHeight(34)
 
@@ -94,12 +103,11 @@ class TenantsPage(QWidget):
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setHighlightSections(False)
 
-        # Важное: растягиваем “Название” и “Комментарий”, остальное по содержимому
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Название
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Название
         for col in (2, 3, 4, 5, 6, 7, 8, 9, 10):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)          # Комментарий
+        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Комментарий
 
         self.tbl.setStyleSheet(
             """
@@ -129,7 +137,6 @@ class TenantsPage(QWidget):
             """
         )
 
-        # Общий стиль страницы (аккуратные отступы)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
         root.setSpacing(10)
@@ -170,7 +177,6 @@ class TenantsPage(QWidget):
             """
         )
 
-        # чуть крупнее шрифт таблицы
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
@@ -224,7 +230,6 @@ class TenantsPage(QWidget):
             self.tbl.setItem(r, 10, it_active)
             self.tbl.setItem(r, 11, QTableWidgetItem(t.comment or ""))
 
-            # визуально “приглушаем” архивных
             if not t.is_active:
                 for c in range(self.tbl.columnCount()):
                     it = self.tbl.item(r, c)
@@ -233,18 +238,82 @@ class TenantsPage(QWidget):
 
         self.tbl.setSortingEnabled(True)
 
+    def _apply_rules_and_maybe_generate(self, tenant_id: int, rules_payload: list[dict]) -> None:
+        """
+        rules_payload приходит из TenantDialog.rules_payload()
+        Формат (как в нашем TenantRulesWidget):
+          - op: "new" / "deactivate" / "keep"
+          - id (может быть None)
+          - weekday, venue_unit_id, starts_at, ends_at, valid_from, valid_to, title, is_active
+        """
+        # 1) применяем изменения правил
+        try:
+            for r in rules_payload:
+                op = r.get("op", "keep")
+                if op == "new":
+                    create_rule(
+                        tenant_id=int(tenant_id),
+                        venue_unit_id=int(r["venue_unit_id"]),
+                        weekday=int(r["weekday"]),
+                        starts_at=r["starts_at"],
+                        ends_at=r["ends_at"],
+                        valid_from=r["valid_from"],
+                        valid_to=r["valid_to"],
+                        title=r.get("title", "") or "",
+                    )
+                elif op == "deactivate" and r.get("id"):
+                    set_rule_active(int(r["id"]), False)
+        except Exception as e:
+            QMessageBox.critical(self, "Правила расписания", f"Ошибка сохранения правил:\n{e}")
+            return
+
+        # 2) предлагаем генерацию броней
+        has_new = any(r.get("op") == "new" for r in rules_payload)
+        if not has_new:
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Генерация бронирований",
+                "Создать бронирования по новым правилам до конца периода действия правила?\n\n"
+                "Если какие-то даты уже заняты — они будут пропущены.",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        try:
+            rep = generate_bookings_for_tenant(tenant_id=int(tenant_id), tz=self.TZ)
+        except Exception as e:
+            QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
+            return
+
+        # показываем короткий отчёт
+        msg = f"Создано бронирований: {rep.created}\nПропущено (занято/ошибка): {rep.skipped}"
+        if rep.errors:
+            msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
+            if len(rep.errors) > 8:
+                msg += f"\n... и ещё {len(rep.errors) - 8}"
+        QMessageBox.information(self, "Генерация бронирований", msg)
+
     def _on_add(self):
         dlg = TenantDialog(self, title="Создать контрагента")
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
 
         try:
             new_id = create_tenant(**data)
         except Exception as e:
             QMessageBox.critical(self, "Создать контрагента", f"Ошибка:\n{e}")
             return
+
+        # сохраняем правила + предлагаем генерацию
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(new_id, rules_payload)
 
         QMessageBox.information(self, "Контрагенты", f"Создан контрагент (id={new_id}).")
         self.reload()
@@ -260,6 +329,7 @@ class TenantsPage(QWidget):
             self,
             title=f"Редактировать: {t.name}",
             data={
+                "id": t.id,  # важно: чтобы TenantDialog загрузил правила из БД
                 "name": t.name,
                 "inn": t.inn,
                 "phone": t.phone,
@@ -283,11 +353,16 @@ class TenantsPage(QWidget):
             return
 
         data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+
         try:
             update_tenant(t.id, **data)
         except Exception as e:
             QMessageBox.critical(self, "Редактировать контрагента", f"Ошибка:\n{e}")
             return
+
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(t.id, rules_payload)
 
         self.reload()
         self._select_row_by_id(t.id)
