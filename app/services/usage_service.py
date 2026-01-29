@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from psycopg2.extras import RealDictCursor
 
@@ -16,16 +16,30 @@ class UsageRow:
     venue_id: int
     venue_name: str
 
+    # capacity for whole work window (08-22) across days
     capacity_sec: int
 
     pd_sec: int
     gz_sec: int
     total_sec: int
 
-    # shift split
-    morning_sec: int   # 08-12
-    day_sec: int       # 12-18
-    evening_sec: int   # 18-22
+    # capacities per shift across days
+    morning_capacity_sec: int  # 08-12
+    day_capacity_sec: int      # 12-18
+    evening_capacity_sec: int  # 18-22
+
+    # totals per shift
+    morning_pd_sec: int
+    morning_gz_sec: int
+    morning_total_sec: int
+
+    day_pd_sec: int
+    day_gz_sec: int
+    day_total_sec: int
+
+    evening_pd_sec: int
+    evening_gz_sec: int
+    evening_total_sec: int
 
 
 def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> int:
@@ -50,10 +64,6 @@ def _load_bookings_for_range(
     org_id: Optional[int],
     include_cancelled: bool,
 ) -> List[Dict]:
-    """
-    Грузим брони с привязкой к org/venue.
-    Важно: фильтр по времени (starts_at < end_dt and ends_at > start_dt) для пересечений.
-    """
     conn = None
     try:
         conn = get_conn()
@@ -123,14 +133,17 @@ def calc_usage_by_venues(
     work_end: time = time(22, 0),
 ) -> List[UsageRow]:
     """
-    Считает загрузку по площадкам за период дат (включительно).
-    Разбивает на смены: 08-12, 12-18, 18-22.
-    Проценты UI считает сам: sec / capacity_sec.
+    Считает загрузку по площадкам (venues) за период дат (включительно),
+    в рабочем окне 08-22, и в разрезе смен:
+      - утро 08-12
+      - день 12-18
+      - вечер 18-22
+    Считает отдельно ПД/ГЗ по каждой смене.
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
 
-    # Диапазон по времени для выборки пересечений (широкий)
+    # Диапазон для выборки пересечений
     range_start_dt = datetime.combine(start_day, time(0, 0), tzinfo=tz)
     range_end_dt = datetime.combine(end_day + timedelta(days=1), time(0, 0), tzinfo=tz)
 
@@ -142,52 +155,65 @@ def calc_usage_by_venues(
         include_cancelled=include_cancelled,
     )
 
+    days_count = (end_day - start_day).days + 1
+
+    def _sec_between(t0: time, t1: time) -> int:
+        return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
+
+    # shifts (внутри рабочего окна)
+    shift_m = (time(8, 0), time(12, 0))
+    shift_d = (time(12, 0), time(18, 0))
+    shift_e = (time(18, 0), time(22, 0))
+
+    # capacities per day
+    cap_day = _sec_between(work_start, work_end)
+    cap_m = _sec_between(shift_m[0], shift_m[1])
+    cap_d = _sec_between(shift_d[0], shift_d[1])
+    cap_e = _sec_between(shift_e[0], shift_e[1])
+
     # base aggregates (включая venues без бронирований)
     agg: Dict[int, Dict] = {}
     for v in venues:
         vid = int(v["venue_id"])
-        # capacity = кол-во дней * (work_end-work_start)
-        days_count = (end_day - start_day).days + 1
-        cap = int(days_count * (datetime.combine(date.today(), work_end) - datetime.combine(date.today(), work_start)).total_seconds())
         agg[vid] = {
             "org_id": int(v["org_id"]),
             "org_name": str(v["org_name"]),
             "venue_id": vid,
             "venue_name": str(v["venue_name"]),
-            "capacity_sec": cap,
+            "capacity_sec": days_count * cap_day,
+            "morning_capacity_sec": days_count * cap_m,
+            "day_capacity_sec": days_count * cap_d,
+            "evening_capacity_sec": days_count * cap_e,
+            # totals
             "pd_sec": 0,
             "gz_sec": 0,
-            "morning_sec": 0,
-            "day_sec": 0,
-            "evening_sec": 0,
+            # shift split PD/GZ
+            "morning_pd_sec": 0,
+            "morning_gz_sec": 0,
+            "day_pd_sec": 0,
+            "day_gz_sec": 0,
+            "evening_pd_sec": 0,
+            "evening_gz_sec": 0,
         }
-
-    # shifts
-    shift_m = (time(8, 0), time(12, 0))
-    shift_d = (time(12, 0), time(18, 0))
-    shift_e = (time(18, 0), time(22, 0))
 
     for b in bookings:
         vid = int(b["venue_id"])
         if vid not in agg:
-            # на всякий случай (если площадка неактивна, но бронь есть)
             continue
 
-        activity = (b["activity"] or "").strip()
+        activity = (b["activity"] or "").strip()  # 'PD' or 'GZ'
         starts_at: datetime = b["starts_at"]
         ends_at: datetime = b["ends_at"]
 
-        # Режем бронь по дням, чтобы корректно разнести по сменам
+        # режем по дням для корректного разнесения
         for d in _iter_days(start_day, end_day):
             work0 = datetime.combine(d, work_start, tzinfo=tz)
             work1 = datetime.combine(d, work_end, tzinfo=tz)
-
-            # пересечение брони с рабочим временем дня
             work_overlap = _overlap_seconds(starts_at, ends_at, work0, work1)
             if work_overlap <= 0:
                 continue
 
-            # смены
+            # shifts intervals
             m0 = datetime.combine(d, shift_m[0], tzinfo=tz)
             m1 = datetime.combine(d, shift_m[1], tzinfo=tz)
             d0 = datetime.combine(d, shift_d[0], tzinfo=tz)
@@ -195,16 +221,22 @@ def calc_usage_by_venues(
             e0 = datetime.combine(d, shift_e[0], tzinfo=tz)
             e1 = datetime.combine(d, shift_e[1], tzinfo=tz)
 
-            agg[vid]["morning_sec"] += _overlap_seconds(starts_at, ends_at, m0, m1)
-            agg[vid]["day_sec"] += _overlap_seconds(starts_at, ends_at, d0, d1)
-            agg[vid]["evening_sec"] += _overlap_seconds(starts_at, ends_at, e0, e1)
+            m_overlap = _overlap_seconds(starts_at, ends_at, m0, m1)
+            d_overlap = _overlap_seconds(starts_at, ends_at, d0, d1)
+            e_overlap = _overlap_seconds(starts_at, ends_at, e0, e1)
 
             if activity == "PD":
                 agg[vid]["pd_sec"] += work_overlap
+                agg[vid]["morning_pd_sec"] += m_overlap
+                agg[vid]["day_pd_sec"] += d_overlap
+                agg[vid]["evening_pd_sec"] += e_overlap
             elif activity == "GZ":
                 agg[vid]["gz_sec"] += work_overlap
+                agg[vid]["morning_gz_sec"] += m_overlap
+                agg[vid]["day_gz_sec"] += d_overlap
+                agg[vid]["evening_gz_sec"] += e_overlap
             else:
-                # неизвестный тип — считаем в общий, но не в PD/GZ
+                # неизвестный тип активности: игнорируем для PD/GZ, но и в total тогда не попадёт
                 pass
 
     out: List[UsageRow] = []
@@ -212,6 +244,13 @@ def calc_usage_by_venues(
         pd_sec = int(a["pd_sec"])
         gz_sec = int(a["gz_sec"])
         total_sec = pd_sec + gz_sec
+
+        morning_pd = int(a["morning_pd_sec"])
+        morning_gz = int(a["morning_gz_sec"])
+        day_pd = int(a["day_pd_sec"])
+        day_gz = int(a["day_gz_sec"])
+        evening_pd = int(a["evening_pd_sec"])
+        evening_gz = int(a["evening_gz_sec"])
 
         out.append(
             UsageRow(
@@ -223,12 +262,20 @@ def calc_usage_by_venues(
                 pd_sec=pd_sec,
                 gz_sec=gz_sec,
                 total_sec=total_sec,
-                morning_sec=int(a["morning_sec"]),
-                day_sec=int(a["day_sec"]),
-                evening_sec=int(a["evening_sec"]),
+                morning_capacity_sec=int(a["morning_capacity_sec"]),
+                day_capacity_sec=int(a["day_capacity_sec"]),
+                evening_capacity_sec=int(a["evening_capacity_sec"]),
+                morning_pd_sec=morning_pd,
+                morning_gz_sec=morning_gz,
+                morning_total_sec=morning_pd + morning_gz,
+                day_pd_sec=day_pd,
+                day_gz_sec=day_gz,
+                day_total_sec=day_pd + day_gz,
+                evening_pd_sec=evening_pd,
+                evening_gz_sec=evening_gz,
+                evening_total_sec=evening_pd + evening_gz,
             )
         )
 
-    # сортировка по общей загрузке по убыванию
     out.sort(key=lambda r: (r.total_sec / r.capacity_sec) if r.capacity_sec else 0.0, reverse=True)
     return out
