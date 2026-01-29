@@ -8,6 +8,7 @@ from app.ui.org_usage_page import OrgUsagePage
 class MainWindow(QMainWindow):
     def __init__(self, user: AuthUser):
         super().__init__()
+        self.user = user
         self.setWindowTitle(f"Sport Schedule — {user.username}")
 
         tabs = QTabWidget()
