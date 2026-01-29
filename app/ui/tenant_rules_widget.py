@@ -32,11 +32,12 @@ def _weekday_name(w: int) -> str:
 
 class TenantRulesWidget(QWidget):
     """
-    Хранит rules в памяти (self._rules_local), чтобы TenantDialog мог вернуть их вызывающему коду.
-    Для существующего tenant_id может подтянуть активные правила из БД.
+    Виджет правил расписания (tenant_recurring_rules).
 
-    Админская кнопка "Удалить правило" (физически удалить правило + отменить будущие бронирования)
-    включается через параметр is_admin.
+    - Держит локальную копию правил self._rules_local, чтобы TenantDialog мог вернуть payload.
+    - Для существующего tenant_id подтягивает правила из БД.
+    - Отключение (disable): ставит is_active=false в БД + опционально отменяет будущие брони.
+    - Удаление (delete, только админ): DELETE правила + отмена будущих броней (эвристика).
     """
 
     def __init__(
@@ -54,7 +55,7 @@ class TenantRulesWidget(QWidget):
         self._contract_to = contract_to
         self._is_admin = bool(is_admin)
 
-        # список [{"id": unit_id, "venue_id": ..., "sort_order": ..., "label": "..."}]
+        # список [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
         self._units = self._load_units_flat()
         self._rules_local: List[Dict] = []
 
@@ -69,7 +70,6 @@ class TenantRulesWidget(QWidget):
         self.btn_add = QPushButton("Добавить правило")
         self.btn_edit = QPushButton("Изменить")
         self.btn_disable = QPushButton("Отключить")
-
         self.btn_delete = QPushButton("Удалить правило")
         self.btn_delete.setVisible(self._is_admin)
 
@@ -126,7 +126,7 @@ class TenantRulesWidget(QWidget):
                 "valid_to": r.valid_to,
                 "title": r.title,
                 "is_active": bool(r.is_active),
-                "op": "keep",  # keep / new / deactivate
+                "op": "keep",  # keep / new / deactivate / delete
             }
             for r in rules
         ]
@@ -162,7 +162,9 @@ class TenantRulesWidget(QWidget):
 
             period = QTableWidgetItem(f"{r['valid_from']:%d.%m.%Y}–{r['valid_to']:%d.%m.%Y}")
             title = QTableWidgetItem(r.get("title", "") or "")
-            active = QTableWidgetItem("Да" if r.get("is_active", True) and r.get("op") != "deactivate" else "Нет")
+
+            is_active = bool(r.get("is_active", True)) and r.get("op") != "deactivate"
+            active = QTableWidgetItem("Да" if is_active else "Нет")
 
             self.tbl.setItem(idx, 0, day)
             self.tbl.setItem(idx, 1, tm)
@@ -171,7 +173,7 @@ class TenantRulesWidget(QWidget):
             self.tbl.setItem(idx, 4, title)
             self.tbl.setItem(idx, 5, active)
 
-            if r.get("op") == "deactivate":
+            if r.get("op") == "deactivate" or not r.get("is_active", True):
                 for c in range(6):
                     item = self.tbl.item(idx, c)
                     if item:
@@ -217,7 +219,7 @@ class TenantRulesWidget(QWidget):
             return
 
         r = self._rules_local[idx]
-        if r.get("op") == "deactivate":
+        if r.get("op") == "deactivate" or not r.get("is_active", True):
             QMessageBox.information(self, "Правила", "Правило отключено. Включение сделаем отдельной кнопкой при необходимости.")
             return
 
@@ -234,23 +236,12 @@ class TenantRulesWidget(QWidget):
 
         v = dlg.values()
 
-        # Для edit: работаем по старой схеме (если правило из БД — старое деактивируем, новое добавляем)
-        r.update(
-            {
-                "weekday": v["weekday"],
-                "venue_unit_id": v["venue_unit_id"],
-                "starts_at": v["starts_at"],
-                "ends_at": v["ends_at"],
-                "valid_from": v["valid_from"],
-                "valid_to": v["valid_to"],
-                "title": v["title"],
-            }
-        )
-
+        # Простая стратегия без update_rule: если правило из БД — старое отключаем, новое добавляем
         if r.get("id"):
-            # старое отключить, новое создать (пока нет update_rule)
+            # локально помечаем деактивацию, реальную деактивацию сделает сохранение/кнопка отключить
             r["op"] = "deactivate"
             r["is_active"] = False
+
             self._rules_local.append(
                 {
                     "id": None,
@@ -265,6 +256,19 @@ class TenantRulesWidget(QWidget):
                     "op": "new",
                 }
             )
+        else:
+            # для новых (ещё не в БД) — просто меняем
+            r.update(
+                {
+                    "weekday": v["weekday"],
+                    "venue_unit_id": v["venue_unit_id"],
+                    "starts_at": v["starts_at"],
+                    "ends_at": v["ends_at"],
+                    "valid_from": v["valid_from"],
+                    "valid_to": v["valid_to"],
+                    "title": v["title"],
+                }
+            )
 
         self._refresh()
 
@@ -275,7 +279,6 @@ class TenantRulesWidget(QWidget):
             return
 
         r = self._rules_local[idx]
-
         if r.get("op") == "deactivate" or not r.get("is_active", True):
             return
 
@@ -347,7 +350,6 @@ class TenantRulesWidget(QWidget):
             return
 
         try:
-            # 1) отменим будущие брони по эвристике
             cancel_future_bookings_like_rule(
                 tenant_id=int(self._tenant_id),
                 venue_unit_id=int(r["venue_unit_id"]),
@@ -357,14 +359,10 @@ class TenantRulesWidget(QWidget):
                 from_day=date.today(),
                 activity="PD",
             )
-
-            # 2) удалим правило из БД
             delete_rule(int(r["id"]))
-
         except Exception as e:
             QMessageBox.critical(self, "Удалить правило", f"Ошибка:\n{e}")
             return
 
-        # 3) убрать из локального списка
         self._rules_local.pop(idx)
         self._refresh()
