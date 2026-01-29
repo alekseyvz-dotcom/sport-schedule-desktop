@@ -209,11 +209,34 @@ class SchedulePage(QWidget):
     # -------- colors --------
 
     def _base_color_for_booking(self, b) -> QColor:
+        # cancelled
         if getattr(b, "status", "") == "cancelled":
             return QColor("#d5dbe3")  # мягкий серый
-        if getattr(b, "kind", "") == "PD":
+    
+        kind = (getattr(b, "kind", "") or "").upper()
+    
+        # ПД
+        if kind == "PD":
             return QColor("#9bd7ff")  # пастельный голубой
-        return QColor("#a7efc0")  # пастельный зелёный
+    
+        # ГЗ: обычное / безвозмездное
+        if kind == "GZ":
+            # как определить "безвозмездное":
+            # 1) если у объекта есть поле is_free / is_gratuitous
+            # 2) или по title/comment (временно)
+            is_free = bool(getattr(b, "is_free", False) or getattr(b, "is_gratuitous", False))
+    
+            # временная эвристика, если отдельного поля пока нет:
+            if not is_free:
+                t = (getattr(b, "title", "") or "") + " " + (getattr(b, "comment", "") or "")
+                t = t.lower()
+                is_free = ("безвозм" in t) or ("б/в" in t) or ("безвозмезд" in t)
+    
+            return QColor("#ffe0b2") if is_free else QColor("#ffcc80")  # светлее / темнее
+    
+        # fallback
+        return QColor("#e5e7eb")
+
 
     def _shade(self, c: QColor, factor: float) -> QColor:
         r = max(0, min(255, int(c.red() * factor)))
