@@ -9,7 +9,7 @@ import tempfile
 import traceback
 
 from PySide6.QtCore import Qt, QTimer, QSettings
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QListWidget,
     QListWidgetItem,
+    QStyledItemDelegate,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -54,14 +55,12 @@ class Resource:
     resource_name: str
 
 
-# ВАЖНО: здесь НЕТ border/background у QTableWidget::item — чтобы не ломать setBackground().
 _TABLE_QSS = """
 QTableWidget {
     background: #ffffff;
     border: 1px solid #e6e6e6;
     border-radius: 10px;
 
-    gridline-color: #e9edf3;
     selection-background-color: rgba(127, 179, 255, 60);
     selection-color: #111111;
 }
@@ -109,6 +108,48 @@ QLabel#sectionTitle {
     padding: 0 4px;
 }
 """
+
+
+class BookingBlockDelegate(QStyledItemDelegate):
+    """
+    Рисует рамку у верхней/нижней ячейки блока бронирования.
+    Ожидает, что item.data(UserRole) содержит booking или None.
+    И что item.data(UserRole + 1) содержит строку: "top", "bottom", "middle" или None.
+    """
+
+    ROLE_PART = Qt.ItemDataRole.UserRole + 1
+
+    def paint(self, painter: QPainter, option, index):
+        super().paint(painter, option, index)
+
+        part = index.data(self.ROLE_PART)
+        if not part:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = option.rect.adjusted(1, 1, -1, -1)
+
+        # цвет рамки: чуть темнее, чем общий; можно поменять под себя
+        pen = QPen(QColor("#5a6a7a"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+
+        if part == "top":
+            painter.drawLine(rect.topLeft(), rect.topRight())
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+        elif part == "bottom":
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+        else:
+            # middle
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+
+        painter.restore()
 
 
 class SchedulePage(QWidget):
@@ -174,11 +215,16 @@ class SchedulePage(QWidget):
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.tbl.setAlternatingRowColors(False)
-        self.tbl.setShowGrid(True)
-        self.tbl.setGridStyle(Qt.PenStyle.SolidLine)
+
+        # Важно: убираем сетку (просили "без сетки")
+        self.tbl.setShowGrid(False)
+
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setStyleSheet(_TABLE_QSS)
+
+        # делегат для "красивых границ" у блоков
+        self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))
 
         header = self.tbl.horizontalHeader()
         header.setStretchLastSection(True)
@@ -216,12 +262,6 @@ class SchedulePage(QWidget):
 
         return QColor("#e5e7eb")
 
-    def _shade(self, c: QColor, factor: float) -> QColor:
-        r = max(0, min(255, int(c.red() * factor)))
-        g = max(0, min(255, int(c.green() * factor)))
-        b = max(0, min(255, int(c.blue() * factor)))
-        return QColor(r, g, b)
-
     # -------- column settings --------
 
     def _resource_key(self, r: Resource) -> str:
@@ -233,13 +273,8 @@ class SchedulePage(QWidget):
         return f"schedule/columns/org_{org_id}"
 
     def _load_columns_state(self, org_id: int) -> Dict[str, Dict]:
-        """
-        key -> {"pos": int, "hidden": bool}
-        """
         k = self._settings_key_for_org(org_id)
         v = self._settings.value(k, None)
-
-        # QSettings на разных платформах может вернуть не dict
         return v if isinstance(v, dict) else {}
 
     def _save_columns_state(self, org_id: int, state: Dict[str, Dict]) -> None:
@@ -307,7 +342,6 @@ class SchedulePage(QWidget):
             for v in venues:
                 units = list_venue_units(v.id, include_inactive=False)
                 if units:
-                    # sort zones by sort_order (from DB) + name
                     units_sorted = sorted(units, key=lambda u: (int(getattr(u, "sort_order", 0)), str(u.name)))
                     for u in units_sorted:
                         resources.append(
@@ -328,7 +362,6 @@ class SchedulePage(QWidget):
                         )
                     )
 
-            # базовая сортировка (потом пользователь может изменить через "Колонки…")
             resources.sort(key=lambda r: (r.venue_name, r.resource_name))
 
             self._resources = resources
@@ -380,6 +413,7 @@ class SchedulePage(QWidget):
             for c in range(1, 1 + resource_count):
                 it = QTableWidgetItem("")
                 it.setData(Qt.ItemDataRole.UserRole, None)
+                it.setData(BookingBlockDelegate.ROLE_PART, None)
                 self.tbl.setItem(r, c, it)
 
         self.tbl.setColumnWidth(0, 70)
@@ -430,6 +464,7 @@ class SchedulePage(QWidget):
                 it.setText("")
                 it.setBackground(QColor("#ffffff"))
                 it.setData(Qt.ItemDataRole.UserRole, None)
+                it.setData(BookingBlockDelegate.ROLE_PART, None)
 
         if not self._resources:
             return
@@ -485,20 +520,25 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, col, it)
 
-                is_edge = (r == r0) or (r == r1)
-                fill = self._shade(base, 0.92 if is_edge else 1.05)
-                it.setBackground(fill)
+                it.setBackground(base)
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
+                if r == r0:
+                    it.setData(BookingBlockDelegate.ROLE_PART, "top")
+                elif r == r1:
+                    it.setData(BookingBlockDelegate.ROLE_PART, "bottom")
+                else:
+                    it.setData(BookingBlockDelegate.ROLE_PART, "middle")
+
+            # Текст только в верхней ячейке блока:
             it0 = self.tbl.item(r0, col)
             if it0:
-                unit_suffix = f" [{b.venue_unit_name}]" if getattr(b, "venue_unit_name", "") else ""
-                title = (b.title or "").strip()
-                kind = getattr(b, "kind", None) or getattr(b, "activity", "")
+                tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+                title = (getattr(b, "title", "") or "").strip()
                 if title:
-                    it0.setText(f"{kind}{unit_suffix} | {b.tenant_name}\n{title}")
+                    it0.setText(f"{tenant_name}\n{title}")
                 else:
-                    it0.setText(f"{kind}{unit_suffix} | {b.tenant_name}")
+                    it0.setText(f"{tenant_name}")
 
         self.tbl.resizeRowsToContents()
 
