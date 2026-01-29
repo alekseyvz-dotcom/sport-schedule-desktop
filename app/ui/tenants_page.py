@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 
+from app.services.users_service import AuthUser
 from app.services.tenants_service import (
     Tenant,
     list_tenants,
@@ -35,11 +36,12 @@ from app.ui.tenant_dialog import TenantDialog
 
 
 class TenantsPage(QWidget):
-    # Должно совпадать с SchedulePage (у вас TZ_OFFSET_HOURS = 3)
     TZ = timezone(timedelta(hours=3))
 
-    def __init__(self, parent=None):
+    def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self._user = user
+        self._is_admin = (getattr(user, "role_code", "") == "admin")
 
         # --- Top bar ---
         self.ed_search = QLineEdit()
@@ -145,18 +147,14 @@ class TenantsPage(QWidget):
 
         self.setStyleSheet(
             """
-            QWidget {
-                background: #fbfbfc;
-            }
+            QWidget { background: #fbfbfc; }
             QLineEdit {
                 background: #ffffff;
                 border: 1px solid #e6e6e6;
                 border-radius: 10px;
                 padding: 8px 10px;
             }
-            QLineEdit:focus {
-                border: 1px solid #7fb3ff;
-            }
+            QLineEdit:focus { border: 1px solid #7fb3ff; }
             QPushButton {
                 background: #ffffff;
                 border: 1px solid #e6e6e6;
@@ -164,16 +162,9 @@ class TenantsPage(QWidget):
                 padding: 8px 12px;
                 font-weight: 600;
             }
-            QPushButton:hover {
-                border: 1px solid #cfd6df;
-                background: #f6f7f9;
-            }
-            QPushButton:pressed {
-                background: #eef1f5;
-            }
-            QCheckBox {
-                padding: 0 6px;
-            }
+            QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
+            QPushButton:pressed { background: #eef1f5; }
+            QCheckBox { padding: 0 6px; }
             """
         )
 
@@ -239,14 +230,6 @@ class TenantsPage(QWidget):
         self.tbl.setSortingEnabled(True)
 
     def _apply_rules_and_maybe_generate(self, tenant_id: int, rules_payload: list[dict]) -> None:
-        """
-        rules_payload приходит из TenantDialog.rules_payload()
-        Формат (как в нашем TenantRulesWidget):
-          - op: "new" / "deactivate" / "keep"
-          - id (может быть None)
-          - weekday, venue_unit_id, starts_at, ends_at, valid_from, valid_to, title, is_active
-        """
-        # 1) применяем изменения правил
         try:
             for r in rules_payload:
                 op = r.get("op", "keep")
@@ -267,7 +250,6 @@ class TenantsPage(QWidget):
             QMessageBox.critical(self, "Правила расписания", f"Ошибка сохранения правил:\n{e}")
             return
 
-        # 2) предлагаем генерацию броней
         has_new = any(r.get("op") == "new" for r in rules_payload)
         if not has_new:
             return
@@ -289,7 +271,6 @@ class TenantsPage(QWidget):
             QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
             return
 
-        # показываем короткий отчёт
         msg = f"Создано бронирований: {rep.created}\nПропущено (занято/ошибка): {rep.skipped}"
         if rep.errors:
             msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
@@ -298,7 +279,7 @@ class TenantsPage(QWidget):
         QMessageBox.information(self, "Генерация бронирований", msg)
 
     def _on_add(self):
-        dlg = TenantDialog(self, title="Создать контрагента")
+        dlg = TenantDialog(self, title="Создать контрагента", is_admin=self._is_admin)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -311,7 +292,6 @@ class TenantsPage(QWidget):
             QMessageBox.critical(self, "Создать контрагента", f"Ошибка:\n{e}")
             return
 
-        # сохраняем правила + предлагаем генерацию
         if rules_payload:
             self._apply_rules_and_maybe_generate(new_id, rules_payload)
 
@@ -328,8 +308,9 @@ class TenantsPage(QWidget):
         dlg = TenantDialog(
             self,
             title=f"Редактировать: {t.name}",
+            is_admin=self._is_admin,
             data={
-                "id": t.id,  # важно: чтобы TenantDialog загрузил правила из БД
+                "id": t.id,
                 "name": t.name,
                 "inn": t.inn,
                 "phone": t.phone,
