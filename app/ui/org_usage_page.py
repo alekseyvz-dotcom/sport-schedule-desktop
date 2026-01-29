@@ -229,48 +229,48 @@ class OrgUsagePage(QWidget):
 
         self.reload()
 
-def _calc_period(self) -> Period:
-    mode = self.cmb_period.currentData()
-    d = self.dt_anchor.date().toPython()
-
-    if mode == "day":
+    def _calc_period(self) -> Period:
+        mode = self.cmb_period.currentData()
+        d = self.dt_anchor.date().toPython()
+    
+        if mode == "day":
+            return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
+    
+        if mode == "week":
+            start = d - timedelta(days=d.weekday())  # Пн
+            end = start + timedelta(days=6)          # Вс
+            return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
+    
+        if mode == "month":
+            start = d.replace(day=1)
+            if start.month == 12:
+                next_month = start.replace(year=start.year + 1, month=1, day=1)
+            else:
+                next_month = start.replace(month=start.month + 1, day=1)
+            end = next_month - timedelta(days=1)
+            return Period(
+                start=start,
+                end=end,
+                title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})",
+            )
+    
+        if mode == "quarter":
+            q = (d.month - 1) // 3 + 1
+            start_month = 3 * (q - 1) + 1
+            start = d.replace(month=start_month, day=1)
+            if start_month == 10:
+                next_q = start.replace(year=start.year + 1, month=1, day=1)
+            else:
+                next_q = start.replace(month=start_month + 3, day=1)
+            end = next_q - timedelta(days=1)
+            return Period(start=start, end=end, title=f"Квартал Q{q}: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
+    
+        if mode == "year":
+            start = d.replace(month=1, day=1)
+            end = d.replace(month=12, day=31)
+            return Period(start=start, end=end, title=f"Год: {d.year}")
+    
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
-
-    if mode == "week":
-        start = d - timedelta(days=d.weekday())  # Пн
-        end = start + timedelta(days=6)          # Вс
-        return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
-
-    if mode == "month":
-        start = d.replace(day=1)
-        if start.month == 12:
-            next_month = start.replace(year=start.year + 1, month=1, day=1)
-        else:
-            next_month = start.replace(month=start.month + 1, day=1)
-        end = next_month - timedelta(days=1)
-        return Period(
-            start=start,
-            end=end,
-            title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})",
-        )
-
-    if mode == "quarter":
-        q = (d.month - 1) // 3 + 1
-        start_month = 3 * (q - 1) + 1
-        start = d.replace(month=start_month, day=1)
-        if start_month == 10:
-            next_q = start.replace(year=start.year + 1, month=1, day=1)
-        else:
-            next_q = start.replace(month=start_month + 3, day=1)
-        end = next_q - timedelta(days=1)
-        return Period(start=start, end=end, title=f"Квартал Q{q}: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
-
-    if mode == "year":
-        start = d.replace(month=1, day=1)
-        end = d.replace(month=12, day=31)
-        return Period(start=start, end=end, title=f"Год: {d.year}")
-
-    return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
     def reload(self):
         p = self._calc_period()
