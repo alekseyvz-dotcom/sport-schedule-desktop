@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
-from typing import Optional, Tuple, List
+from datetime import date, time, timedelta, timezone
+from typing import List, Optional, Dict, Tuple
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -77,6 +77,7 @@ class Period:
 
 
 class OrgUsagePage(QWidget):
+
     WORK_START = time(8, 0)
     WORK_END = time(22, 0)
 
@@ -141,23 +142,37 @@ class OrgUsagePage(QWidget):
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        self.tbl = QTableWidget(0, 12)
+        # Таблица
+        self.tbl = QTableWidget(0, 2 + 1 + 6 + 5 * 3)  # орг, площадка, полоса, общие (6), смены (15)
         self.tbl.setHorizontalHeaderLabels(
             [
                 "Учреждение",
                 "Площадка",
+                "Полоса",
                 "Доступно, ч",
-                "PD, ч",
-                "PD, %",
-                "GZ, ч",
-                "GZ, %",
-                "Итого, ч",
+                "ПД, ч",
+                "ПД, %",
+                "ГЗ, ч",
+                "ГЗ, %",
                 "Итого, %",
-                "Утро (08-12), ч",
-                "День (12-18), ч",
-                "Вечер (18-22), ч",
+                "Утро ПД, ч",
+                "Утро ПД, %",
+                "Утро ГЗ, ч",
+                "Утро ГЗ, %",
+                "Утро Итог, %",
+                "День ПД, ч",
+                "День ПД, %",
+                "День ГЗ, ч",
+                "День ГЗ, %",
+                "День Итог, %",
+                "Вечер ПД, ч",
+                "Вечер ПД, %",
+                "Вечер ГЗ, ч",
+                "Вечер ГЗ, %",
+                "Вечер Итог, %",
             ]
         )
+
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -169,10 +184,10 @@ class OrgUsagePage(QWidget):
         header.setStretchLastSection(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for c in range(2, 12):
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        for c in range(3, self.tbl.columnCount()):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
 
         f = QFont()
@@ -192,7 +207,6 @@ class OrgUsagePage(QWidget):
         try:
             orgs = list_active_orgs()
             self.cmb_org.blockSignals(True)
-            # сохранить первый пункт "Все"
             while self.cmb_org.count() > 1:
                 self.cmb_org.removeItem(1)
             for o in orgs:
@@ -211,7 +225,6 @@ class OrgUsagePage(QWidget):
         if mode == "day":
             return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
         if mode == "week":
-            # ISO: понедельник
             start = d - timedelta(days=d.weekday())
             end = start + timedelta(days=6)
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
@@ -227,7 +240,6 @@ class OrgUsagePage(QWidget):
             q = (d.month - 1) // 3 + 1
             start_month = 3 * (q - 1) + 1
             start = d.replace(month=start_month, day=1)
-            # следующий квартал
             if start_month == 10:
                 next_q = start.replace(year=start.year + 1, month=1, day=1)
             else:
@@ -238,6 +250,7 @@ class OrgUsagePage(QWidget):
             start = d.replace(month=1, day=1)
             end = d.replace(month=12, day=31)
             return Period(start=start, end=end, title=f"Год: {d.year}")
+
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
     @staticmethod
@@ -249,6 +262,45 @@ class OrgUsagePage(QWidget):
         if cap <= 0:
             return 0.0
         return round(100.0 * (sec / cap), 1)
+
+    @staticmethod
+    def _set_num(tbl: QTableWidget, row: int, col: int, text: str):
+        it = QTableWidgetItem(text)
+        it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tbl.setItem(row, col, it)
+
+    def _make_progress(self, pct: float) -> QProgressBar:
+        pb = QProgressBar()
+        pb.setRange(0, 100)
+        pb.setValue(max(0, min(100, int(round(pct)))))
+        pb.setTextVisible(True)
+        pb.setFormat(f"{pct:.1f}%")
+
+        # Цвет прогресса по уровню загрузки
+        if pct >= 80:
+            chunk = "#ef4444"  # red
+        elif pct >= 60:
+            chunk = "#f59e0b"  # amber
+        else:
+            chunk = "#22c55e"  # green
+
+        pb.setStyleSheet(
+            f"""
+            QProgressBar {{
+                border: 1px solid #e6e6e6;
+                border-radius: 8px;
+                background: #ffffff;
+                text-align: center;
+                padding: 2px;
+                min-width: 120px;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 8px;
+                background: {chunk};
+            }}
+            """
+        )
+        return pb
 
     def reload(self):
         p = self._calc_period()
@@ -277,81 +329,136 @@ class OrgUsagePage(QWidget):
         gz = sum(r.gz_sec for r in rows)
         tot = pd + gz
         self.lbl_total.setText(
-            f"ИТОГО: PD {self._hours(pd)}ч ({self._pct(pd, cap)}%) | "
-            f"GZ {self._hours(gz)}ч ({self._pct(gz, cap)}%) | "
+            f"ИТОГО: ПД {self._hours(pd)}ч ({self._pct(pd, cap)}%) | "
+            f"ГЗ {self._hours(gz)}ч ({self._pct(gz, cap)}%) | "
             f"Занято {self._hours(tot)}ч ({self._pct(tot, cap)}%)"
         )
+
+        # --- группируем по учреждению: org_name -> list[UsageRow]
+        by_org: Dict[Tuple[int, str], List[UsageRow]] = {}
+        for r in rows:
+            by_org.setdefault((r.org_id, r.org_name), []).append(r)
+
+        # сортируем учреждения по общей загрузке
+        def org_sort_key(k):
+            org_rows = by_org[k]
+            cap0 = sum(x.capacity_sec for x in org_rows)
+            tot0 = sum(x.total_sec for x in org_rows)
+            return (tot0 / cap0) if cap0 else 0.0
+
+        org_keys = sorted(by_org.keys(), key=org_sort_key, reverse=True)
 
         self.tbl.setRowCount(0)
         self.tbl.setSortingEnabled(False)
 
-        for r in rows:
-            row = self.tbl.rowCount()
-            self.tbl.insertRow(row)
+        for (oid, oname) in org_keys:
+            org_rows = by_org[(oid, oname)]
 
-            cap_h = self._hours(r.capacity_sec)
-            pd_h = self._hours(r.pd_sec)
-            gz_h = self._hours(r.gz_sec)
-            tot_h = self._hours(r.total_sec)
+            # строка-итог по учреждению
+            org_cap = sum(x.capacity_sec for x in org_rows)
+            org_pd = sum(x.pd_sec for x in org_rows)
+            org_gz = sum(x.gz_sec for x in org_rows)
+            org_tot = org_pd + org_gz
 
-            pd_pct = self._pct(r.pd_sec, r.capacity_sec)
-            gz_pct = self._pct(r.gz_sec, r.capacity_sec)
-            tot_pct = self._pct(r.total_sec, r.capacity_sec)
+            # shift totals
+            org_m = sum(x.morning_sec for x in org_rows)
+            org_d = sum(x.day_sec for x in org_rows)
+            org_e = sum(x.evening_sec for x in org_rows)
 
-            items = [
-                QTableWidgetItem(r.org_name),
-                QTableWidgetItem(r.venue_name),
-                QTableWidgetItem(f"{cap_h:.2f}"),
-                QTableWidgetItem(f"{pd_h:.2f}"),
-                QTableWidgetItem(f"{pd_pct:.1f}%"),
-                QTableWidgetItem(f"{gz_h:.2f}"),
-                QTableWidgetItem(f"{gz_pct:.1f}%"),
-                QTableWidgetItem(f"{tot_h:.2f}"),
-                QTableWidgetItem(f"{tot_pct:.1f}%"),
-                QTableWidgetItem(f"{self._hours(r.morning_sec):.2f}"),
-                QTableWidgetItem(f"{self._hours(r.day_sec):.2f}"),
-                QTableWidgetItem(f"{self._hours(r.evening_sec):.2f}"),
-            ]
+            org_row_idx = self.tbl.rowCount()
+            self.tbl.insertRow(org_row_idx)
 
-            for c, it in enumerate(items):
-                if c >= 2:
-                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.tbl.setItem(row, c, it)
+            it_org = QTableWidgetItem(oname)
+            it_org.setFont(self._bold_font())
+            self.tbl.setItem(org_row_idx, 0, it_org)
 
-            # слегка подсветим высокую загрузку
-            if tot_pct >= 80:
-                for c in range(self.tbl.columnCount()):
-                    it = self.tbl.item(row, c)
-                    if it:
-                        it.setForeground(Qt.GlobalColor.darkRed)
-            elif tot_pct >= 60:
-                for c in range(self.tbl.columnCount()):
-                    it = self.tbl.item(row, c)
-                    if it:
-                        it.setForeground(Qt.GlobalColor.darkBlue)
+            it_venue = QTableWidgetItem("ИТОГО по учреждению")
+            it_venue.setFont(self._bold_font())
+            self.tbl.setItem(org_row_idx, 1, it_venue)
 
-        # сортировка по "Итого, %" (колонка 8) по убыванию — вручную
-        self._sort_by_total_percent_desc()
+            tot_pct = self._pct(org_tot, org_cap)
+            self.tbl.setCellWidget(org_row_idx, 2, self._make_progress(tot_pct))
+
+            self._set_num(self.tbl, org_row_idx, 3, f"{self._hours(org_cap):.2f}")
+            self._set_num(self.tbl, org_row_idx, 4, f"{self._hours(org_pd):.2f}")
+            self._set_num(self.tbl, org_row_idx, 5, f"{self._pct(org_pd, org_cap):.1f}%")
+            self._set_num(self.tbl, org_row_idx, 6, f"{self._hours(org_gz):.2f}")
+            self._set_num(self.tbl, org_row_idx, 7, f"{self._pct(org_gz, org_cap):.1f}%")
+            self._set_num(self.tbl, org_row_idx, 8, f"{tot_pct:.1f}%")
+
+            # Утро
+            self._set_num(self.tbl, org_row_idx, 9, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 10, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 11, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 12, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 13, f"{self._pct(org_m, int(org_cap * (4/14)) if org_cap else 0):.1f}%")
+
+            # День
+            self._set_num(self.tbl, org_row_idx, 14, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 15, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 16, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 17, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 18, f"{self._pct(org_d, int(org_cap * (6/14)) if org_cap else 0):.1f}%")
+
+            # Вечер
+            self._set_num(self.tbl, org_row_idx, 19, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 20, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 21, f"{self._hours(0):.2f}")
+            self._set_num(self.tbl, org_row_idx, 22, f"{0:.1f}%")
+            self._set_num(self.tbl, org_row_idx, 23, f"{self._pct(org_e, int(org_cap * (4/14)) if org_cap else 0):.1f}%")
+
+            # делаем строку итога светлее и жирнее
+            for c in range(self.tbl.columnCount()):
+                it = self.tbl.item(org_row_idx, c)
+                if it:
+                    it.setBackground(QColor("#f8fafc"))
+
+            # строки по площадкам (внутри учреждения) — сортируем по загрузке
+            org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
+
+            for r in org_rows:
+                row = self.tbl.rowCount()
+                self.tbl.insertRow(row)
+
+                self.tbl.setItem(row, 0, QTableWidgetItem(oname))
+                self.tbl.setItem(row, 1, QTableWidgetItem(r.venue_name))
+
+                cap_h = self._hours(r.capacity_sec)
+                pd_h = self._hours(r.pd_sec)
+                gz_h = self._hours(r.gz_sec)
+                tot_pct2 = self._pct(r.total_sec, r.capacity_sec)
+
+                self.tbl.setCellWidget(row, 2, self._make_progress(tot_pct2))
+
+                self._set_num(self.tbl, row, 3, f"{cap_h:.2f}")
+                self._set_num(self.tbl, row, 4, f"{pd_h:.2f}")
+                self._set_num(self.tbl, row, 5, f"{self._pct(r.pd_sec, r.capacity_sec):.1f}%")
+                self._set_num(self.tbl, row, 6, f"{gz_h:.2f}")
+                self._set_num(self.tbl, row, 7, f"{self._pct(r.gz_sec, r.capacity_sec):.1f}%")
+                self._set_num(self.tbl, row, 8, f"{tot_pct2:.1f}%")
+
+                # ВАЖНО: ниже временно — до расширения usage_service (см. комментарий выше)
+                self._set_num(self.tbl, row, 9, f"{0:.2f}")
+                self._set_num(self.tbl, row, 10, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 11, f"{0:.2f}")
+                self._set_num(self.tbl, row, 12, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 13, f"{0:.1f}%")
+
+                self._set_num(self.tbl, row, 14, f"{0:.2f}")
+                self._set_num(self.tbl, row, 15, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 16, f"{0:.2f}")
+                self._set_num(self.tbl, row, 17, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 18, f"{0:.1f}%")
+
+                self._set_num(self.tbl, row, 19, f"{0:.2f}")
+                self._set_num(self.tbl, row, 20, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 21, f"{0:.2f}")
+                self._set_num(self.tbl, row, 22, f"{0:.1f}%")
+                self._set_num(self.tbl, row, 23, f"{0:.1f}%")
 
         self.tbl.resizeRowsToContents()
 
-    def _sort_by_total_percent_desc(self):
-        # простая сортировка таблицы без включения встроенного sort (проценты как строка)
-        rows_data = []
-        for r in range(self.tbl.rowCount()):
-            pct_text = self.tbl.item(r, 8).text().replace("%", "").strip()
-            try:
-                pct = float(pct_text)
-            except Exception:
-                pct = 0.0
-            row_items = [self.tbl.takeItem(r, c) for c in range(self.tbl.columnCount())]
-            rows_data.append((pct, row_items))
-
-        rows_data.sort(key=lambda x: x[0], reverse=True)
-
-        self.tbl.setRowCount(0)
-        for pct, items in rows_data:
-            row = self.tbl.rowCount()
-            self.tbl.insertRow(row)
-            for c, it in enumerate(items):
-                self.tbl.setItem(row, c, it)
+    def _bold_font(self) -> QFont:
+        f = QFont(self.tbl.font())
+        f.setBold(True)
+        return f
