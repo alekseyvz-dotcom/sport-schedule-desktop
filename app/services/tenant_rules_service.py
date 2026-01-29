@@ -202,3 +202,17 @@ def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateRep
 
     return GenerateReport(created=total_created, skipped=total_skipped, errors=errors)
 
+def delete_rule(rule_id: int) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.tenant_recurring_rules WHERE id=%s", (int(rule_id),))
+                if cur.rowcount != 1:
+                    raise ValueError("Правило не найдено")
+    finally:
+        if conn:
+            put_conn(conn)
+
+
