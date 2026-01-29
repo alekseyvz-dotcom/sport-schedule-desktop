@@ -201,6 +201,7 @@ class TenantDialog(QDialog):
             tenant_id=self._tenant_id,
             contract_from=contract_from,
             contract_to=contract_to,
+            is_admin=is_admin,
         )
         rules_layout.addWidget(self.rules_widget)
 
