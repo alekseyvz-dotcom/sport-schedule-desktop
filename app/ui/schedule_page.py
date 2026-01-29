@@ -110,32 +110,42 @@ QLabel#sectionTitle {
 """
 
 class BookingBlockDelegate(QStyledItemDelegate):
-    ROLE_PART = Qt.ItemDataRole.UserRole + 1  # top/middle/bottom
+    ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     def paint(self, painter: QPainter, option, index):
-        # стандартная отрисовка ячейки (фон, текст, selection)
+        # стандарт: фон/текст/selection
         super().paint(painter, option, index)
+
+        rect = option.rect
+        part = index.data(self.ROLE_PART)
+        booking = index.data(Qt.ItemDataRole.UserRole)
+        has_booking = bool(booking)
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        rect = option.rect
+        grid_color = QColor("#e9edf3")
 
-        part = index.data(self.ROLE_PART)
-        has_booking = bool(index.data(Qt.ItemDataRole.UserRole))
+        if has_booking:
+            bg = index.data(Qt.ItemDataRole.BackgroundRole)
+            if isinstance(bg, QColor):
+                grid_color = bg
+            else:
+                # fallback
+                grid_color = QColor("#9bd7ff")
 
-        grid_pen = QPen(QColor("#e9edf3"))
+        grid_pen = QPen(grid_color)
         grid_pen.setWidth(1)
         painter.setPen(grid_pen)
 
-        if not has_booking:
-            # пустая ячейка: обычная сетка (нижняя линия)
-            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-        else:
+        painter.drawLine(rect.topLeft(), rect.bottomLeft())
+        painter.drawLine(rect.topRight(), rect.bottomRight())
 
-            pass
+        # горизонтальные линии: сверху и снизу
+        painter.drawLine(rect.topLeft(), rect.topRight())
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
-        # ---- 2) Границы блока бронирования
+        # --- 2) рамка блока бронирования (поверх сетки)
         if part:
             border_pen = QPen(QColor("#5a6a7a"))
             border_pen.setWidth(2)
@@ -143,6 +153,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
             r = rect.adjusted(1, 1, -1, -1)
 
+            # боковые всегда
             painter.drawLine(r.topLeft(), r.bottomLeft())
             painter.drawLine(r.topRight(), r.bottomRight())
 
