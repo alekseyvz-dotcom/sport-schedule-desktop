@@ -109,48 +109,49 @@ QLabel#sectionTitle {
 }
 """
 
-
 class BookingBlockDelegate(QStyledItemDelegate):
-    """
-    Рисует рамку у верхней/нижней ячейки блока бронирования.
-    Ожидает, что item.data(UserRole) содержит booking или None.
-    И что item.data(UserRole + 1) содержит строку: "top", "bottom", "middle" или None.
-    """
-
-    ROLE_PART = Qt.ItemDataRole.UserRole + 1
+    ROLE_PART = Qt.ItemDataRole.UserRole + 1  # top/middle/bottom
 
     def paint(self, painter: QPainter, option, index):
+        # стандартная отрисовка ячейки (фон, текст, selection)
         super().paint(painter, option, index)
 
-        part = index.data(self.ROLE_PART)
-        if not part:
-            return
-
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        rect = option.rect.adjusted(1, 1, -1, -1)
+        rect = option.rect
 
-        # цвет рамки: чуть темнее, чем общий; можно поменять под себя
-        pen = QPen(QColor("#5a6a7a"))
-        pen.setWidth(2)
-        painter.setPen(pen)
+        part = index.data(self.ROLE_PART)
+        has_booking = bool(index.data(Qt.ItemDataRole.UserRole))
 
-        if part == "top":
-            painter.drawLine(rect.topLeft(), rect.topRight())
-            painter.drawLine(rect.topLeft(), rect.bottomLeft())
-            painter.drawLine(rect.topRight(), rect.bottomRight())
-        elif part == "bottom":
+        grid_pen = QPen(QColor("#e9edf3"))
+        grid_pen.setWidth(1)
+        painter.setPen(grid_pen)
+
+        if not has_booking:
+            # пустая ячейка: обычная сетка (нижняя линия)
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-            painter.drawLine(rect.topLeft(), rect.bottomLeft())
-            painter.drawLine(rect.topRight(), rect.bottomRight())
         else:
-            # middle
-            painter.drawLine(rect.topLeft(), rect.bottomLeft())
-            painter.drawLine(rect.topRight(), rect.bottomRight())
+
+            pass
+
+        # ---- 2) Границы блока бронирования
+        if part:
+            border_pen = QPen(QColor("#5a6a7a"))
+            border_pen.setWidth(2)
+            painter.setPen(border_pen)
+
+            r = rect.adjusted(1, 1, -1, -1)
+
+            painter.drawLine(r.topLeft(), r.bottomLeft())
+            painter.drawLine(r.topRight(), r.bottomRight())
+
+            if part == "top":
+                painter.drawLine(r.topLeft(), r.topRight())
+            elif part == "bottom":
+                painter.drawLine(r.bottomLeft(), r.bottomRight())
 
         painter.restore()
-
 
 class SchedulePage(QWidget):
     WORK_START = time(8, 0)
