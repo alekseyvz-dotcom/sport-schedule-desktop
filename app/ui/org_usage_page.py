@@ -141,19 +141,6 @@ class OrgUsagePage(QWidget):
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        # Таблица:
-        # 0 Учреждение
-        # 1 Площадка
-        # 2 Полоса (общая загрузка)
-        # 3 Доступно, ч
-        # 4 ПД, ч
-        # 5 ПД, %
-        # 6 ГЗ, ч
-        # 7 ГЗ, %
-        # 8 Итого, %
-        # 9..13  Утро:  ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
-        # 14..18 День:  ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
-        # 19..23 Вечер: ПД ч, ПД %, ГЗ ч, ГЗ %, Итого %
         self.tbl = QTableWidget(0, 24)
         self.tbl.setHorizontalHeaderLabels(
             [
@@ -232,15 +219,15 @@ class OrgUsagePage(QWidget):
     def _calc_period(self) -> Period:
         mode = self.cmb_period.currentData()
         d = self.dt_anchor.date().toPython()
-    
+
         if mode == "day":
             return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
-    
+
         if mode == "week":
-            start = d - timedelta(days=d.weekday())  # Пн
-            end = start + timedelta(days=6)          # Вс
+            start = d - timedelta(days=d.weekday())
+            end = start + timedelta(days=6)
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
-    
+
         if mode == "month":
             start = d.replace(day=1)
             if start.month == 12:
@@ -248,12 +235,8 @@ class OrgUsagePage(QWidget):
             else:
                 next_month = start.replace(month=start.month + 1, day=1)
             end = next_month - timedelta(days=1)
-            return Period(
-                start=start,
-                end=end,
-                title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})",
-            )
-    
+            return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
+
         if mode == "quarter":
             q = (d.month - 1) // 3 + 1
             start_month = 3 * (q - 1) + 1
@@ -264,13 +247,61 @@ class OrgUsagePage(QWidget):
                 next_q = start.replace(month=start_month + 3, day=1)
             end = next_q - timedelta(days=1)
             return Period(start=start, end=end, title=f"Квартал Q{q}: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
-    
+
         if mode == "year":
             start = d.replace(month=1, day=1)
             end = d.replace(month=12, day=31)
             return Period(start=start, end=end, title=f"Год: {d.year}")
-    
+
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
+
+    @staticmethod
+    def _hours(sec: int) -> float:
+        return round(sec / 3600.0, 2)
+
+    @staticmethod
+    def _pct(sec: int, cap: int) -> float:
+        if cap <= 0:
+            return 0.0
+        return round(100.0 * (sec / cap), 1)
+
+    @staticmethod
+    def _set_num(tbl: QTableWidget, row: int, col: int, text: str):
+        it = QTableWidgetItem(text)
+        it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tbl.setItem(row, col, it)
+
+    def _make_progress(self, pct: float) -> QProgressBar:
+        pb = QProgressBar()
+        pb.setRange(0, 100)
+        pb.setValue(max(0, min(100, int(round(pct)))))
+        pb.setTextVisible(True)
+        pb.setFormat(f"{pct:.1f}%")
+
+        if pct >= 80:
+            chunk = "#ef4444"
+        elif pct >= 60:
+            chunk = "#f59e0b"
+        else:
+            chunk = "#22c55e"
+
+        pb.setStyleSheet(
+            f"""
+            QProgressBar {{
+                border: 1px solid #e6e6e6;
+                border-radius: 8px;
+                background: #ffffff;
+                text-align: center;
+                padding: 2px;
+                min-width: 120px;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 8px;
+                background: {chunk};
+            }}
+            """
+        )
+        return pb
 
     def reload(self):
         p = self._calc_period()
@@ -303,7 +334,6 @@ class OrgUsagePage(QWidget):
             f"Занято {self._hours(tot)}ч ({self._pct(tot, cap)}%)"
         )
 
-        # группировка по учреждению
         by_org: Dict[Tuple[int, str], List[UsageRow]] = {}
         for r in rows:
             by_org.setdefault((r.org_id, r.org_name), []).append(r)
@@ -317,16 +347,13 @@ class OrgUsagePage(QWidget):
         org_keys = sorted(by_org.keys(), key=org_sort_key, reverse=True)
 
         self.tbl.setRowCount(0)
-        self.tbl.setSortingEnabled(False)
 
         for (oid, oname) in org_keys:
             org_rows = by_org[(oid, oname)]
 
-            # итог по учреждению
             org_cap = sum(x.capacity_sec for x in org_rows)
             org_pd = sum(x.pd_sec for x in org_rows)
             org_gz = sum(x.gz_sec for x in org_rows)
-            org_tot = org_pd + org_gz
 
             org_m_cap = sum(x.morning_capacity_sec for x in org_rows)
             org_d_cap = sum(x.day_capacity_sec for x in org_rows)
@@ -357,7 +384,6 @@ class OrgUsagePage(QWidget):
                 e_gz=org_e_gz,
             )
 
-            # площадки внутри учреждения — сортировка по загрузке
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
             for r in org_rows:
                 self._add_row(
@@ -423,7 +449,6 @@ class OrgUsagePage(QWidget):
         self._set_num(self.tbl, row, 7, f"{self._pct(gz_sec, cap_sec):.1f}%")
         self._set_num(self.tbl, row, 8, f"{total_pct:.1f}%")
 
-        # Утро
         m_total = m_pd + m_gz
         self._set_num(self.tbl, row, 9, f"{self._hours(m_pd):.2f}")
         self._set_num(self.tbl, row, 10, f"{self._pct(m_pd, m_cap):.1f}%")
@@ -431,7 +456,6 @@ class OrgUsagePage(QWidget):
         self._set_num(self.tbl, row, 12, f"{self._pct(m_gz, m_cap):.1f}%")
         self._set_num(self.tbl, row, 13, f"{self._pct(m_total, m_cap):.1f}%")
 
-        # День
         d_total = d_pd + d_gz
         self._set_num(self.tbl, row, 14, f"{self._hours(d_pd):.2f}")
         self._set_num(self.tbl, row, 15, f"{self._pct(d_pd, d_cap):.1f}%")
@@ -439,7 +463,6 @@ class OrgUsagePage(QWidget):
         self._set_num(self.tbl, row, 17, f"{self._pct(d_gz, d_cap):.1f}%")
         self._set_num(self.tbl, row, 18, f"{self._pct(d_total, d_cap):.1f}%")
 
-        # Вечер
         e_total = e_pd + e_gz
         self._set_num(self.tbl, row, 19, f"{self._hours(e_pd):.2f}")
         self._set_num(self.tbl, row, 20, f"{self._pct(e_pd, e_cap):.1f}%")
