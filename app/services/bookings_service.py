@@ -307,3 +307,68 @@ def cancel_booking(booking_id: int) -> None:
     finally:
         if conn:
             put_conn(conn)
+            
+def cancel_future_bookings_like_rule(
+    *,
+    tenant_id: int,
+    venue_unit_id: int,
+    weekday: int,          # 1..7 (Mon..Sun)
+    starts_at: time,
+    ends_at: time,
+    from_day: date,
+    activity: str = "PD",
+) -> int:
+    """
+    Эвристически отменяет будущие бронирования, которые выглядят как созданные по правилу.
+
+    Матчинг:
+      - tenant_id совпадает
+      - venue_unit_id совпадает
+      - activity совпадает (PD по умолчанию)
+      - status <> 'cancelled'
+      - starts_at::date >= from_day
+      - isodow(starts_at) == weekday
+      - starts_at::time == starts_at и ends_at::time == ends_at (точное совпадение времени)
+    Возвращает количество отменённых строк.
+    """
+    activity = (activity or "PD").strip().upper()
+    if activity not in ("PD", "GZ"):
+        raise ValueError("activity должен быть PD или GZ")
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.bookings
+                SET status='cancelled'
+                WHERE tenant_id = %s
+                  AND venue_unit_id = %s
+                  AND activity = %s::public.activity_type
+                  AND status <> 'cancelled'
+                  AND starts_at::date >= %s
+                  AND extract(isodow from starts_at) = %s
+                  AND starts_at::time = %s
+                  AND ends_at::time   = %s
+                """,
+                (
+                    int(tenant_id),
+                    int(venue_unit_id),
+                    activity,
+                    from_day,
+                    int(weekday),
+                    starts_at,
+                    ends_at,
+                ),
+            )
+            affected = int(cur.rowcount)
+        conn.commit()
+        return affected
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
