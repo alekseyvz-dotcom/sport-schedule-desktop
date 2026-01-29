@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from app.services.ref_service import list_active_orgs, list_active_venues
 from app.services.venue_units_service import list_venue_units
 from app.services.tenant_rules_service import list_rules_for_tenant, set_rule_active
+from app.services.bookings_service import cancel_future_bookings_like_rule
 from app.ui.tenant_rule_dialog import TenantRuleDialog
 
 
@@ -236,11 +237,11 @@ class TenantRulesWidget(QWidget):
     
         r = self._rules_local[idx]
     
-        # Если правило уже выключено локально — ничего не делаем
+        # уже отключено
         if r.get("op") == "deactivate" or not r.get("is_active", True):
             return
     
-        # Если это правило уже в БД — выключаем в БД сразу
+        # если правило в БД — выключаем в БД
         if r.get("id"):
             try:
                 set_rule_active(int(r["id"]), False)
@@ -248,8 +249,31 @@ class TenantRulesWidget(QWidget):
                 QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
                 return
     
-        # Локально тоже помечаем, чтобы TenantDialog вернул актуальный payload
+            ans = QMessageBox.question(
+                self,
+                "Правило отключено",
+                "Правило отключено. Уже созданные бронирования останутся.\n\n"
+                "Отменить будущие бронирования автоматически?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+    
+            if ans == QMessageBox.StandardButton.Yes:
+                try:
+                    cancelled = cancel_future_bookings_like_rule(
+                        tenant_id=int(self._tenant_id),
+                        venue_unit_id=int(r["venue_unit_id"]),
+                        weekday=int(r["weekday"]),
+                        starts_at=r["starts_at"],
+                        ends_at=r["ends_at"],
+                        from_day=date.today(),
+                        activity="PD",  # у вас генератор создаёт PD
+                    )
+                    QMessageBox.information(self, "Бронирования", f"Отменено бронирований: {cancelled}")
+                except Exception as e:
+                    QMessageBox.warning(self, "Бронирования", f"Не удалось отменить бронирования:\n{e}")
+    
+        # локально (и для новых правил тоже)
         r["op"] = "deactivate"
         r["is_active"] = False
         self._refresh()
-
