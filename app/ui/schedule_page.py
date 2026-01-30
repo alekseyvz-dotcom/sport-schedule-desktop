@@ -1049,8 +1049,20 @@ class SchedulePage(QWidget):
             QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
             return
     
-        if not self._resources:
-            QMessageBox.information(self, "Создать бронь", "Нет площадок/зон в выбранном учреждении.")
+        it = self.tbl.currentItem()
+        if not it:
+            QMessageBox.information(self, "Создать бронь", "Выберите слот.")
+            return
+    
+        col = it.column()
+        if col <= 0:
+            QMessageBox.information(self, "Создать бронь", "Выберите слот на площадке/зоне (не колонку 'Время').")
+            return
+    
+        # если в ячейке уже есть бронь — открываем редактирование
+        b0 = it.data(Qt.ItemDataRole.UserRole)
+        if b0:
+            self._on_edit()
             return
     
         day = self.dt_day.date().toPython()
@@ -1058,26 +1070,12 @@ class SchedulePage(QWidget):
         sel = self._selected_multi_units()
         if sel:
             cols, rmin, rmax = sel
-            # поддержим простой кейс: создаём для первой выбранной колонки
+            # создаём по первой выбранной колонке (можно расширить на мульти-колонки позже)
             col = cols[0]
             r0, r1 = rmin, rmax
         else:
-            it = self.tbl.currentItem()
-            if not it:
-                QMessageBox.information(self, "Создать бронь", "Выберите слот.")
-                return
-            col = it.column()
-            if col <= 0:
-                QMessageBox.information(self, "Создать бронь", "Выберите слот на площадке/зоне (не колонку 'Время').")
-                return
             r0 = it.row()
             r1 = it.row()
-    
-        # если кликнули по существующей брони — редактируем
-        it0 = self.tbl.item(r0, col)
-        if it0 and it0.data(Qt.ItemDataRole.UserRole):
-            self._on_edit()
-            return
     
         starts_at = self._row_to_datetime(day, r0)
         ends_at = self._row_to_datetime(day, r1) + timedelta(minutes=self.SLOT_MINUTES)
@@ -1085,34 +1083,46 @@ class SchedulePage(QWidget):
         rsrc = self._resources[col - 1]
         venue_id = int(rsrc.venue_id)
         venue_unit_id = int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None
+        venue_name = str(rsrc.venue_name)
+    
+        # список зон для выбранной площадки (чтобы диалог показывал комбобокс "Зона")
+        venue_units = None
+        try:
+            units = list_venue_units(venue_id, include_inactive=False)
+            if units:
+                venue_units = [{"id": u.id, "name": u.name} for u in units]
+        except Exception:
+            venue_units = None
     
         dlg = BookingDialog(
             self,
             title="Создать бронь",
-            tenants=self._tenants,
-            venue_id=venue_id,
-            venue_unit_id=venue_unit_id,
             starts_at=starts_at,
             ends_at=ends_at,
+            tenants=self._tenants,
+            venue_name=venue_name,
+            venue_units=venue_units,
+            initial={"venue_unit_id": venue_unit_id, "kind": "PD", "title": ""},
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
     
         data = dlg.values()
+    
         try:
             create_booking(
-                venue_id=int(data["venue_id"]),
-                tenant_id=(int(data["tenant_id"]) if data.get("tenant_id") else None),
+                venue_id=venue_id,
+                venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
+                tenant_id=int(data["tenant_id"]) if data.get("tenant_id") is not None else None,
                 title=str(data.get("title") or ""),
                 kind=str(data.get("kind") or "PD"),
-                starts_at=data["starts_at"],
-                ends_at=data["ends_at"],
-                venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
+                starts_at=starts_at,
+                ends_at=ends_at,
             )
         except Exception as e:
-            _uilog("ERROR create: " + repr(e))
+            _uilog("ERROR create_booking: " + repr(e))
             _uilog(traceback.format_exc())
-            QMessageBox.critical(self, "Создать бронь", f"Непредвиденная ошибка. Смотрите лог:\n{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n{e}")
+            QMessageBox.critical(self, "Создать бронь", f"Ошибка создания:\n{e}")
             return
     
         self.reload()
@@ -1123,11 +1133,46 @@ class SchedulePage(QWidget):
             QMessageBox.information(self, "Редактировать", "Выберите бронирование.")
             return
     
+        venue_id = int(getattr(b, "venue_id"))
+        venue_unit_id = getattr(b, "venue_unit_id", None)
+        venue_unit_id = int(venue_unit_id) if venue_unit_id is not None else None
+    
+        starts_at = getattr(b, "starts_at")
+        ends_at = getattr(b, "ends_at")
+    
+        # найдём читаемое имя площадки
+        venue_name = ""
+        for r in self._resources:
+            if int(r.venue_id) == venue_id:
+                venue_name = str(r.venue_name)
+                break
+        if not venue_name:
+            venue_name = f"Площадка {venue_id}"
+    
+        venue_units = None
+        try:
+            units = list_venue_units(venue_id, include_inactive=False)
+            if units:
+                venue_units = [{"id": u.id, "name": u.name} for u in units]
+        except Exception:
+            venue_units = None
+    
+        initial = {
+            "kind": getattr(b, "kind", "PD"),
+            "tenant_id": getattr(b, "tenant_id", None),
+            "venue_unit_id": venue_unit_id,
+            "title": getattr(b, "title", ""),
+        }
+    
         dlg = BookingDialog(
             self,
             title="Редактировать бронь",
+            starts_at=starts_at,
+            ends_at=ends_at,
             tenants=self._tenants,
-            initial=b,
+            venue_name=venue_name,
+            venue_units=venue_units,
+            initial=initial,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -1136,15 +1181,15 @@ class SchedulePage(QWidget):
         try:
             update_booking(
                 int(getattr(b, "id")),
-                tenant_id=(int(data["tenant_id"]) if data.get("tenant_id") else None),
+                tenant_id=int(data["tenant_id"]) if data.get("tenant_id") is not None else None,
                 title=str(data.get("title") or ""),
                 kind=str(data.get("kind") or "PD"),
                 venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
             )
         except Exception as e:
-            _uilog("ERROR update: " + repr(e))
+            _uilog("ERROR update_booking: " + repr(e))
             _uilog(traceback.format_exc())
-            QMessageBox.critical(self, "Редактировать", f"Непредвиденная ошибка. Смотрите лог:\n{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n{e}")
+            QMessageBox.critical(self, "Редактировать", f"Ошибка сохранения:\n{e}")
             return
     
         self.reload()
