@@ -11,7 +11,7 @@ class WelcomeLoginPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        title = QLabel("Добро пожаловать в Sport Schedule")
+        title = QLabel("Добро пожаловать в ИАС ФУТБОЛ")
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         subtitle = QLabel("Пожалуйста, войдите в систему.")
         subtitle.setStyleSheet("color: #666;")
