@@ -518,6 +518,54 @@ class SchedulePage(QWidget):
     def _selected_booking(self):
         return self._selected_booking_from_list() if self._mode() == "list" else self._selected_booking_from_grid()
 
+    def _row_to_datetime(self, day: date, row: int) -> datetime:
+        """
+        Преобразует индекс строки (слот) в datetime начала слота.
+        """
+        slots = self._time_slots()
+        if row < 0 or row >= len(slots):
+            raise ValueError("row out of range")
+        return datetime.combine(day, slots[row], tzinfo=self.TZ)
+    
+    
+    def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int]]:
+        """
+        Возвращает (cols, rmin, rmax) по выделению в сетке:
+          cols  - список колонок (индексы QTableWidget), только ресурсные колонки (>=1)
+          rmin/rmax - min/max строка выделения
+        Ограничение: все выбранные колонки должны относиться к ОДНОЙ площадке (venue_id).
+        """
+        ranges = self.tbl.selectedRanges()
+        if not ranges:
+            return None
+    
+        cols_set = set()
+        rmin = 10**9
+        rmax = -1
+    
+        for rg in ranges:
+            rmin = min(rmin, rg.topRow())
+            rmax = max(rmax, rg.bottomRow())
+            for c in range(rg.leftColumn(), rg.rightColumn() + 1):
+                if c <= 0:
+                    continue  # пропускаем колонку "Время"
+                cols_set.add(c)
+    
+        if not cols_set or rmax < rmin:
+            return None
+    
+        cols = sorted(cols_set)
+    
+        # проверка: выбранные колонки должны быть одной площадки (venue_id)
+        venue_ids = set()
+        for c in cols:
+            rsrc = self._resources[c - 1]
+            venue_ids.add(int(rsrc.venue_id))
+        if len(venue_ids) != 1:
+            return None
+    
+        return cols, rmin, rmax
+
     # -------- data loading / period --------
 
     def _load_refs(self):
