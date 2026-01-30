@@ -183,6 +183,8 @@ class OrgUsagePage(QWidget):
         self.tbl.setFont(f)
 
         self.details = UsageDetailsWidget(self)
+        # теперь подписи смен можно менять (метод добавили в UsageDetailsWidget)
+        self.details.set_shift_titles("Утро", "День", "Вечер")
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.tbl)
@@ -273,6 +275,13 @@ class OrgUsagePage(QWidget):
             """
         )
         return pb
+
+    def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
+        # честные подписи: показываем, что смены считаются в пределах режима работы учреждения
+        m = "Утро (в пределах режима)" if m_cap > 0 else "Утро (нет)"
+        d = "День (в пределах режима)" if d_cap > 0 else "День (нет)"
+        e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
+        self.details.set_shift_titles(m, d, e)
 
     def reload(self):
         p = self._calc_period()
@@ -409,16 +418,17 @@ class OrgUsagePage(QWidget):
 
         kind, obj_id = tag
 
-        # ВАЖНО:
-        # Мы больше не показываем фиксированные "08–12/12–18/18–22" как фактические интервалы.
-        # UsageDetailsWidget должен отображать "утро/день/вечер" как доли в пределах режима работы.
-        # Если у вас там сейчас жёстко прошиты часы, просто поменяйте подписи на нейтральные.
-
         if kind == "venue":
             v = next((x for x in self._rows if int(x.venue_id) == int(obj_id)), None)
             if not v:
                 self.details.set_data(None)
                 return
+
+            self._apply_shift_titles(
+                m_cap=v.morning_capacity_sec,
+                d_cap=v.day_capacity_sec,
+                e_cap=v.evening_capacity_sec,
+            )
 
             self.details.set_data(
                 UsageTotals(
@@ -446,6 +456,12 @@ class OrgUsagePage(QWidget):
                 self.details.set_data(None)
                 return
 
+            m_cap = sum(x.morning_capacity_sec for x in org_rows)
+            d_cap = sum(x.day_capacity_sec for x in org_rows)
+            e_cap = sum(x.evening_capacity_sec for x in org_rows)
+
+            self._apply_shift_titles(m_cap=m_cap, d_cap=d_cap, e_cap=e_cap)
+
             cap = sum(x.capacity_sec for x in org_rows)
             pd = sum(x.pd_sec for x in org_rows)
             gz = sum(x.gz_sec for x in org_rows)
@@ -457,13 +473,13 @@ class OrgUsagePage(QWidget):
                     cap_sec=cap,
                     pd_sec=pd,
                     gz_sec=gz,
-                    m_cap=sum(x.morning_capacity_sec for x in org_rows),
+                    m_cap=m_cap,
                     m_pd=sum(x.morning_pd_sec for x in org_rows),
                     m_gz=sum(x.morning_gz_sec for x in org_rows),
-                    d_cap=sum(x.day_capacity_sec for x in org_rows),
+                    d_cap=d_cap,
                     d_pd=sum(x.day_pd_sec for x in org_rows),
                     d_gz=sum(x.day_gz_sec for x in org_rows),
-                    e_cap=sum(x.evening_capacity_sec for x in org_rows),
+                    e_cap=e_cap,
                     e_pd=sum(x.evening_pd_sec for x in org_rows),
                     e_gz=sum(x.evening_gz_sec for x in org_rows),
                 )
