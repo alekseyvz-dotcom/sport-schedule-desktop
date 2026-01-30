@@ -12,7 +12,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.user: AuthUser | None = None
-        self.setWindowTitle("Sport Schedule")
+        self.setWindowTitle("ИАС ФУТБОЛ")
 
         self.welcome = WelcomeLoginPage()
         self.welcome.logged_in.connect(self.on_logged_in)
@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
     def on_logged_in(self, user: AuthUser):
         self.user = user
-        self.setWindowTitle(f"Sport Schedule — {user.username}")
+        self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
 
         tabs = QTabWidget()
         tabs.addTab(TenantsPage(user), "Контрагенты")
