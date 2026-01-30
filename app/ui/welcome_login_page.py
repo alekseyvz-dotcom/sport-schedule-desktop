@@ -43,7 +43,7 @@ class WelcomeLoginPage(QWidget):
         card.setObjectName("loginCard")
         card.setFixedWidth(460)
 
-        title = QLabel("Sport Schedule")
+        title = QLabel("ИАС ФУТБОЛ")
         title.setObjectName("appTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
