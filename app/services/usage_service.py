@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Literal
 
 from psycopg2.extras import RealDictCursor
 
@@ -55,15 +55,10 @@ def _iter_days(d0: date, d1: date):
 
 
 def _sec_between(t0: time, t1: time) -> int:
-    # ВАЖНО: предполагаем t1 > t0 (смены через полночь здесь не поддерживаем)
     return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
 
 
 def _clip_interval(a: Tuple[time, time], b: Tuple[time, time]) -> Optional[Tuple[time, time]]:
-    """
-    Пересечение двух time-интервалов внутри одного дня.
-    Возвращает (start,end) или None.
-    """
     s = max(a[0], b[0])
     e = min(a[1], b[1])
     if e <= s:
@@ -72,10 +67,6 @@ def _clip_interval(a: Tuple[time, time], b: Tuple[time, time]) -> Optional[Tuple
 
 
 def _work_window_for_org(vrow: Dict) -> Tuple[time, time]:
-    """
-    vrow содержит:
-      org_work_start, org_work_end, org_is_24h
-    """
     if bool(vrow.get("org_is_24h") or False):
         return time(0, 0), time(23, 59, 59)
     return vrow["org_work_start"], vrow["org_work_end"]
@@ -96,6 +87,7 @@ def _load_bookings_for_range(
                 SELECT
                     b.id,
                     b.venue_id,
+                    b.venue_unit_id,
                     v.name as venue_name,
                     v.org_id,
                     o.name as org_name,
@@ -163,15 +155,14 @@ def calc_usage_by_venues(
     tz: timezone,
     org_id: Optional[int] = None,
     include_cancelled: bool = False,
+    base_shift_m: Tuple[time, time] = (time(8, 0), time(12, 0)),
+    base_shift_d: Tuple[time, time] = (time(12, 0), time(18, 0)),
+    base_shift_e: Tuple[time, time] = (time(18, 0), time(22, 0)),
 ) -> List[UsageRow]:
     """
-    Теперь capacity и окно учёта берём из sport_orgs.work_start/work_end/is_24h.
-
-    Смены считаем как пересечение:
-      - утро: 08-12
-      - день: 12-18
-      - вечер: 18-22
-    но ОБРЕЗАЕМ по рабочему окну учреждения, чтобы не накапливать секунды вне работы.
+    Аналитика по площадкам (venues).
+    Окно учёта = режим работы учреждения (sport_orgs.work_start/work_end/is_24h).
+    Смены = пересечение базовых смен с окном работы.
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
@@ -188,11 +179,6 @@ def calc_usage_by_venues(
     )
 
     days_count = (end_day - start_day).days + 1
-
-    # Базовые смены (как у вас в UI аналитики)
-    base_shift_m = (time(8, 0), time(12, 0))
-    base_shift_d = (time(12, 0), time(18, 0))
-    base_shift_e = (time(18, 0), time(22, 0))
 
     agg: Dict[int, Dict] = {}
 
@@ -258,7 +244,6 @@ def calc_usage_by_venues(
             if work_overlap <= 0:
                 continue
 
-            # shift overlaps (only if shift exists inside work window)
             m_overlap = 0
             d_overlap = 0
             e_overlap = 0
@@ -288,11 +273,9 @@ def calc_usage_by_venues(
                 agg[vid]["morning_gz_sec"] += m_overlap
                 agg[vid]["day_gz_sec"] += d_overlap
                 agg[vid]["evening_gz_sec"] += e_overlap
-            else:
-                pass
 
     out: List[UsageRow] = []
-    for vid, a in agg.items():
+    for _, a in agg.items():
         pd_sec = int(a["pd_sec"])
         gz_sec = int(a["gz_sec"])
         total_sec = pd_sec + gz_sec
