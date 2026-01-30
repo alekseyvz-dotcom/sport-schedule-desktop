@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from psycopg2.extras import RealDictCursor
 
@@ -16,19 +16,16 @@ class UsageRow:
     venue_id: int
     venue_name: str
 
-    # capacity for whole work window (08-22) across days
     capacity_sec: int
 
     pd_sec: int
     gz_sec: int
     total_sec: int
 
-    # capacities per shift across days
-    morning_capacity_sec: int  # 08-12
-    day_capacity_sec: int      # 12-18
-    evening_capacity_sec: int  # 18-22
+    morning_capacity_sec: int
+    day_capacity_sec: int
+    evening_capacity_sec: int
 
-    # totals per shift
     morning_pd_sec: int
     morning_gz_sec: int
     morning_total_sec: int
@@ -57,6 +54,33 @@ def _iter_days(d0: date, d1: date):
         d += timedelta(days=1)
 
 
+def _sec_between(t0: time, t1: time) -> int:
+    # ВАЖНО: предполагаем t1 > t0 (смены через полночь здесь не поддерживаем)
+    return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
+
+
+def _clip_interval(a: Tuple[time, time], b: Tuple[time, time]) -> Optional[Tuple[time, time]]:
+    """
+    Пересечение двух time-интервалов внутри одного дня.
+    Возвращает (start,end) или None.
+    """
+    s = max(a[0], b[0])
+    e = min(a[1], b[1])
+    if e <= s:
+        return None
+    return s, e
+
+
+def _work_window_for_org(vrow: Dict) -> Tuple[time, time]:
+    """
+    vrow содержит:
+      org_work_start, org_work_end, org_is_24h
+    """
+    if bool(vrow.get("org_is_24h") or False):
+        return time(0, 0), time(23, 59, 59)
+    return vrow["org_work_start"], vrow["org_work_end"]
+
+
 def _load_bookings_for_range(
     *,
     start_dt: datetime,
@@ -75,6 +99,9 @@ def _load_bookings_for_range(
                     v.name as venue_name,
                     v.org_id,
                     o.name as org_name,
+                    o.work_start as org_work_start,
+                    o.work_end as org_work_end,
+                    o.is_24h as org_is_24h,
                     b.activity,
                     b.status,
                     b.starts_at,
@@ -105,7 +132,14 @@ def _load_venues(org_id: Optional[int]) -> List[Dict]:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             sql = """
-                SELECT v.id as venue_id, v.name as venue_name, v.org_id, o.name as org_name
+                SELECT
+                    v.id as venue_id,
+                    v.name as venue_name,
+                    v.org_id,
+                    o.name as org_name,
+                    o.work_start as org_work_start,
+                    o.work_end as org_work_end,
+                    o.is_24h as org_is_24h
                 FROM public.venues v
                 JOIN public.sport_orgs o ON o.id = v.org_id
                 WHERE v.is_active = true
@@ -129,21 +163,19 @@ def calc_usage_by_venues(
     tz: timezone,
     org_id: Optional[int] = None,
     include_cancelled: bool = False,
-    work_start: time = time(8, 0),
-    work_end: time = time(22, 0),
 ) -> List[UsageRow]:
     """
-    Считает загрузку по площадкам (venues) за период дат (включительно),
-    в рабочем окне 08-22, и в разрезе смен:
-      - утро 08-12
-      - день 12-18
-      - вечер 18-22
-    Считает отдельно ПД/ГЗ по каждой смене.
+    Теперь capacity и окно учёта берём из sport_orgs.work_start/work_end/is_24h.
+
+    Смены считаем как пересечение:
+      - утро: 08-12
+      - день: 12-18
+      - вечер: 18-22
+    но ОБРЕЗАЕМ по рабочему окну учреждения, чтобы не накапливать секунды вне работы.
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
 
-    # Диапазон для выборки пересечений
     range_start_dt = datetime.combine(start_day, time(0, 0), tzinfo=tz)
     range_end_dt = datetime.combine(end_day + timedelta(days=1), time(0, 0), tzinfo=tz)
 
@@ -157,37 +189,45 @@ def calc_usage_by_venues(
 
     days_count = (end_day - start_day).days + 1
 
-    def _sec_between(t0: time, t1: time) -> int:
-        return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
+    # Базовые смены (как у вас в UI аналитики)
+    base_shift_m = (time(8, 0), time(12, 0))
+    base_shift_d = (time(12, 0), time(18, 0))
+    base_shift_e = (time(18, 0), time(22, 0))
 
-    # shifts (внутри рабочего окна)
-    shift_m = (time(8, 0), time(12, 0))
-    shift_d = (time(12, 0), time(18, 0))
-    shift_e = (time(18, 0), time(22, 0))
-
-    # capacities per day
-    cap_day = _sec_between(work_start, work_end)
-    cap_m = _sec_between(shift_m[0], shift_m[1])
-    cap_d = _sec_between(shift_d[0], shift_d[1])
-    cap_e = _sec_between(shift_e[0], shift_e[1])
-
-    # base aggregates (включая venues без бронирований)
     agg: Dict[int, Dict] = {}
+
+    # init venues (включая без бронирований)
     for v in venues:
         vid = int(v["venue_id"])
+        work_start, work_end = _work_window_for_org(v)
+
+        cap_day = _sec_between(work_start, work_end)
+
+        # shift capacities = пересечение смены с рабочим окном
+        sm = _clip_interval(base_shift_m, (work_start, work_end))
+        sd = _clip_interval(base_shift_d, (work_start, work_end))
+        se = _clip_interval(base_shift_e, (work_start, work_end))
+
+        cap_m = _sec_between(*sm) if sm else 0
+        cap_d = _sec_between(*sd) if sd else 0
+        cap_e = _sec_between(*se) if se else 0
+
         agg[vid] = {
             "org_id": int(v["org_id"]),
             "org_name": str(v["org_name"]),
             "venue_id": vid,
             "venue_name": str(v["venue_name"]),
+            "work_start": work_start,
+            "work_end": work_end,
+            "shift_m": sm,
+            "shift_d": sd,
+            "shift_e": se,
             "capacity_sec": days_count * cap_day,
             "morning_capacity_sec": days_count * cap_m,
             "day_capacity_sec": days_count * cap_d,
             "evening_capacity_sec": days_count * cap_e,
-            # totals
             "pd_sec": 0,
             "gz_sec": 0,
-            # shift split PD/GZ
             "morning_pd_sec": 0,
             "morning_gz_sec": 0,
             "day_pd_sec": 0,
@@ -201,11 +241,16 @@ def calc_usage_by_venues(
         if vid not in agg:
             continue
 
-        activity = (b["activity"] or "").strip()  # 'PD' or 'GZ'
+        activity = (b["activity"] or "").strip().upper()
         starts_at: datetime = b["starts_at"]
         ends_at: datetime = b["ends_at"]
 
-        # режем по дням для корректного разнесения
+        work_start: time = agg[vid]["work_start"]
+        work_end: time = agg[vid]["work_end"]
+        sm = agg[vid]["shift_m"]
+        sd = agg[vid]["shift_d"]
+        se = agg[vid]["shift_e"]
+
         for d in _iter_days(start_day, end_day):
             work0 = datetime.combine(d, work_start, tzinfo=tz)
             work1 = datetime.combine(d, work_end, tzinfo=tz)
@@ -213,17 +258,25 @@ def calc_usage_by_venues(
             if work_overlap <= 0:
                 continue
 
-            # shifts intervals
-            m0 = datetime.combine(d, shift_m[0], tzinfo=tz)
-            m1 = datetime.combine(d, shift_m[1], tzinfo=tz)
-            d0 = datetime.combine(d, shift_d[0], tzinfo=tz)
-            d1 = datetime.combine(d, shift_d[1], tzinfo=tz)
-            e0 = datetime.combine(d, shift_e[0], tzinfo=tz)
-            e1 = datetime.combine(d, shift_e[1], tzinfo=tz)
+            # shift overlaps (only if shift exists inside work window)
+            m_overlap = 0
+            d_overlap = 0
+            e_overlap = 0
 
-            m_overlap = _overlap_seconds(starts_at, ends_at, m0, m1)
-            d_overlap = _overlap_seconds(starts_at, ends_at, d0, d1)
-            e_overlap = _overlap_seconds(starts_at, ends_at, e0, e1)
+            if sm:
+                m0 = datetime.combine(d, sm[0], tzinfo=tz)
+                m1 = datetime.combine(d, sm[1], tzinfo=tz)
+                m_overlap = _overlap_seconds(starts_at, ends_at, m0, m1)
+
+            if sd:
+                d0 = datetime.combine(d, sd[0], tzinfo=tz)
+                d1 = datetime.combine(d, sd[1], tzinfo=tz)
+                d_overlap = _overlap_seconds(starts_at, ends_at, d0, d1)
+
+            if se:
+                e0 = datetime.combine(d, se[0], tzinfo=tz)
+                e1 = datetime.combine(d, se[1], tzinfo=tz)
+                e_overlap = _overlap_seconds(starts_at, ends_at, e0, e1)
 
             if activity == "PD":
                 agg[vid]["pd_sec"] += work_overlap
@@ -236,7 +289,6 @@ def calc_usage_by_venues(
                 agg[vid]["day_gz_sec"] += d_overlap
                 agg[vid]["evening_gz_sec"] += e_overlap
             else:
-                # неизвестный тип активности: игнорируем для PD/GZ, но и в total тогда не попадёт
                 pass
 
     out: List[UsageRow] = []
