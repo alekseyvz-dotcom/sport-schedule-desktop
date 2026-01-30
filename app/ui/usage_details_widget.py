@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -50,10 +50,15 @@ class _BarsWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: Optional[UsageTotals] = None
+        self._shift_titles: Tuple[str, str, str] = ("Утро", "День", "Вечер")
         self.setMinimumHeight(170)
 
     def set_data(self, data: Optional[UsageTotals]) -> None:
         self._data = data
+        self.update()
+
+    def set_shift_titles(self, morning: str, day: str, evening: str) -> None:
+        self._shift_titles = (morning or "Утро", day or "День", evening or "Вечер")
         self.update()
 
     def paintEvent(self, _):
@@ -72,16 +77,18 @@ class _BarsWidget(QWidget):
             p.drawText(r.x(), r.y() + 28, "Выберите площадку или итог по учреждению слева.")
             return
 
+        m_title, d_title, e_title = self._shift_titles
+
         rows = [
-            ("Утро 08–12", self._data.m_cap, self._data.m_pd, self._data.m_gz),
-            ("День 12–18", self._data.d_cap, self._data.d_pd, self._data.d_gz),
-            ("Вечер 18–22", self._data.e_cap, self._data.e_pd, self._data.e_gz),
+            (m_title, self._data.m_cap, self._data.m_pd, self._data.m_gz),
+            (d_title, self._data.d_cap, self._data.d_pd, self._data.d_gz),
+            (e_title, self._data.e_cap, self._data.e_pd, self._data.e_gz),
         ]
 
         y = r.y() + 42
         bar_h = 22
         gap = 18
-        label_w = 120
+        label_w = 160  # было 120, чтобы помещались более длинные подписи
         bar_w = max(260, r.width() - label_w - 90)
 
         p.setFont(self.font())
@@ -107,15 +114,15 @@ class _BarsWidget(QWidget):
             p.setBrush(PD_COLOR)
             p.drawRoundedRect(QRectF(bx, by, max(0.0, pd_w), bar_h), 8, 8)
 
-            # GZ chunk (рисуем поверх справа от PD)
+            # GZ chunk
             p.setBrush(GZ_COLOR)
             p.drawRoundedRect(QRectF(bx + pd_w, by, max(0.0, gz_w), bar_h), 8, 8)
 
-            # text справа
+            # text right
             p.setPen(QPen(TEXT))
             p.drawText(int(bx + bar_w + 10), int(y + bar_h - 4), f"{tot_pct:.1f}%")
 
-            # подписи маленькие
+            # small captions
             p.setPen(QPen(MUTED))
             p.drawText(int(bx), int(y - 2), f"ПД { _hours(pd):.1f}ч  ГЗ { _hours(gz):.1f}ч")
 
@@ -159,13 +166,12 @@ class _DonutWidget(QWidget):
         gz_pct = _pct(gz, cap)
         free_pct = _pct(free, cap)
 
-        # donut rect
         size = min(r.width(), r.height() - 30)
         cx = r.x()
         cy = r.y() + 30
         donut = QRectF(cx, cy, size, size)
 
-        start = 90 * 16  # Qt uses 1/16 degree, 90 = вверх
+        start = 90 * 16
 
         def draw_slice(val_sec: int, color: QColor):
             nonlocal start
@@ -181,16 +187,13 @@ class _DonutWidget(QWidget):
         draw_slice(gz, GZ_COLOR)
         draw_slice(free, QColor("#e5e7eb"))
 
-        # inner hole
         p.setBrush(QColor("#fbfbfc"))
         p.drawEllipse(donut.adjusted(size * 0.22, size * 0.22, -size * 0.22, -size * 0.22))
 
-        # center text
         p.setPen(QPen(TEXT))
         p.setFont(QFont(self.font().family(), self.font().pointSize() + 4, QFont.Weight.Bold))
         p.drawText(donut, Qt.AlignmentFlag.AlignCenter, f"{_pct(busy, cap):.1f}%")
 
-        # legend справа
         lx = int(donut.right() + 18)
         ly = int(donut.top() + 10)
 
@@ -232,10 +235,19 @@ class UsageDetailsWidget(QWidget):
 
         self.set_data(None)
 
+    def set_shift_titles(self, morning_title: str, day_title: str, evening_title: str) -> None:
+        """
+        Теперь OrgUsagePage (или любой другой экран) может менять подписи смен,
+        чтобы не показывать фиксированные 08–12/12–18/18–22.
+        """
+        self.bars.set_shift_titles(morning_title, day_title, evening_title)
+
     def set_data(self, data: Optional[UsageTotals]):
         if not data:
             self.lbl_title.setText("Детали")
             self.lbl_period.setText("")
+            # дефолтные подписи
+            self.set_shift_titles("Утро", "День", "Вечер")
         else:
             self.lbl_title.setText(data.title)
             self.lbl_period.setText(f"Период: {data.period_title}")
