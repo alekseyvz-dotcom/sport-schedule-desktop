@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 
 from psycopg2.extras import RealDictCursor
 
@@ -35,6 +35,7 @@ def list_usage_by_tenants(
     """
     Агрегация по арендаторам за период [start_dt, end_dt).
     Считает пересечение брони с периодом.
+    ВАЖНО: tenant_id может быть NULL — показываем строку "Без арендатора".
     """
     if end_dt <= start_dt:
         raise ValueError("end_dt <= start_dt")
@@ -43,9 +44,6 @@ def list_usage_by_tenants(
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # ВАЖНО:
-            # seconds считаем по пересечению: [max(starts_at,start_dt), min(ends_at,end_dt)]
-            # и только если пересечение положительное.
             sql = """
                 WITH b0 AS (
                     SELECT
@@ -80,7 +78,7 @@ def list_usage_by_tenants(
                     WHERE e > s
                 )
                 SELECT
-                    t.id AS tenant_id,
+                    b1.tenant_id AS tenant_id,
                     COALESCE(t.name, 'Без арендатора') AS tenant_name,
                     COALESCE(t.tenant_kind, 'unknown') AS tenant_kind,
                     COALESCE(t.rent_kind, 'unknown') AS rent_kind,
@@ -96,11 +94,11 @@ def list_usage_by_tenants(
             """
 
             if only_active_tenants:
-                # NULL tenant_id тоже отфильтруем (если нужно оставить "Без арендатора" — скажи)
-                sql += " WHERE t.is_active = true"
+                # Оставляем "Без арендатора" (tenant_id IS NULL) даже при фильтре активных
+                sql += " WHERE (b1.tenant_id IS NULL OR t.is_active = true)"
 
             sql += """
-                GROUP BY t.id, t.name, t.tenant_kind, t.rent_kind
+                GROUP BY b1.tenant_id, t.name, t.tenant_kind, t.rent_kind
                 ORDER BY total_sec DESC, tenant_name
             """
 
