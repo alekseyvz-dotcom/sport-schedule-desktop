@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QLabel,
     QGroupBox,
-    QWidget,
     QScrollArea,
     QSizePolicy,
 )
@@ -50,7 +49,12 @@ QLineEdit, QTextEdit, QComboBox, QDateEdit {
 QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #7fb3ff;
 }
-QTextEdit { min-height: 84px; }
+
+/* make comment fields smaller */
+QTextEdit#smallText {
+    min-height: 54px;
+}
+
 QGroupBox {
     border: 1px solid #e6e6e6;
     border-radius: 12px;
@@ -121,7 +125,6 @@ class TenantDialog(QDialog):
         self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
         self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
 
-        # чуть выше по умолчанию (так правилам комфортнее)
         self.resize(1100, 740)
 
         # ---- widgets (общие)
@@ -143,7 +146,7 @@ class TenantDialog(QDialog):
         idx_rent = self.cmb_rent_kind.findData(self._rent_kind_in)
         self.cmb_rent_kind.setCurrentIndex(idx_rent if idx_rent >= 0 else 0)
 
-        # ---- widgets (только юрлицо)
+        # ---- widgets (юрлицо, но переносим ИНН/Email в "Основное")
         self.ed_inn = QLineEdit(self._data_in.get("inn", "") or "")
         self.ed_email = QLineEdit(self._data_in.get("email", "") or "")
 
@@ -173,7 +176,9 @@ class TenantDialog(QDialog):
         self.cmb_status.setCurrentIndex(idx if idx >= 0 else 0)
 
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
+        self.ed_comment.setObjectName("smallText")
         self.ed_notes = QTextEdit(self._data_in.get("notes", "") or "")
+        self.ed_notes.setObjectName("smallText")
 
         # ---- group: Основное (общие поля)
         gb_main = QGroupBox("Основное")
@@ -189,7 +194,11 @@ class TenantDialog(QDialog):
         fm_main.addRow("Телефон:", self.ed_phone)
         fm_main.addRow("Вид обязательств:", self.cmb_obligation)
 
-        # ---- group: Реквизиты (юрлицо) — отдельный контейнер, чтобы скрывать красиво
+        # NEW: ИНН и Email в левую колонку (в "Основное")
+        fm_main.addRow("ИНН:", self.ed_inn)
+        fm_main.addRow("Email:", self.ed_email)
+
+        # ---- group: Реквизиты (юрлицо) — теперь без ИНН/Email, оставляем контейнер для будущих полей
         self.gb_legal = QGroupBox("Реквизиты (юрлицо)")
         fm_legal = QFormLayout(self.gb_legal)
         fm_legal.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -197,10 +206,10 @@ class TenantDialog(QDialog):
         fm_legal.setHorizontalSpacing(12)
         fm_legal.setVerticalSpacing(10)
 
-        fm_legal.addRow("ИНН:", self.ed_inn)
-        fm_legal.addRow("Email:", self.ed_email)
+        # можно добавить сюда другие реквизиты, если появятся
+        fm_legal.addRow(QLabel(""), QLabel(""))
 
-        # ---- group: Договор / реквизиты (юрлицо)
+        # ---- group: Договор (юрлицо)
         self.gb_contract = QGroupBox("Договор")
         grid = QGridLayout(self.gb_contract)
         grid.setContentsMargins(12, 16, 12, 12)
@@ -226,21 +235,22 @@ class TenantDialog(QDialog):
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
 
-        # ---- group: Комментарии / примечания (общие)
+        # ---- group: Комментарии / примечания (общие) — сделаем компактнее
         gb_notes = QGroupBox("Комментарии")
         fm_notes = QFormLayout(gb_notes)
         fm_notes.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         fm_notes.setHorizontalSpacing(12)
-        fm_notes.setVerticalSpacing(10)
+        fm_notes.setVerticalSpacing(8)
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
+
+        gb_notes.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         # ---- group: Правила расписания (общие) + QScrollArea
         gb_rules = QGroupBox("Правила расписания")
         rules_layout = QVBoxLayout(gb_rules)
         rules_layout.setContentsMargins(12, 16, 12, 12)
 
-        # Contract_from/contract_to для правил: если юрлицо — из договора, если физлицо — можно оставить пусто
         contract_from = _qdate_to_pydate(self.dt_valid_from.date())
         contract_to = _qdate_to_pydate(self.dt_valid_to.date())
 
@@ -279,7 +289,6 @@ class TenantDialog(QDialog):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
-        # Чтобы верхние группы не раздувались по высоте
         self.gb_legal.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.gb_contract.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
@@ -317,17 +326,19 @@ class TenantDialog(QDialog):
         self.gb_legal.setVisible(not is_person)
         self.gb_contract.setVisible(not is_person)
 
-        # NEW: чтобы дефолт для новых правил менялся сразу
+        # ИНН/Email в "Основное": для физлица делаем read-only и очищаем визуально (значения всё равно будут очищены в values())
+        self.ed_inn.setEnabled(not is_person)
+        self.ed_email.setEnabled(not is_person)
+        if is_person:
+            self.ed_inn.setText("")
+            self.ed_email.setText("")
+
         if hasattr(self, "rules_widget") and hasattr(self.rules_widget, "set_tenant_kind"):
             self.rules_widget.set_tenant_kind(self.cmb_tenant_kind.currentData())
 
     # ---------- helpers for multiselect combobox ----------
 
     def _setup_multiselect_combobox(self, cmb: QComboBox, options: List[str]) -> None:
-        """
-        Делает QComboBox с чекбоксами (множественный выбор).
-        Выбор хранится в checkState элементов модели.
-        """
         cmb.clear()
         cmb.setEditable(True)
         cmb.lineEdit().setReadOnly(True)
@@ -403,7 +414,6 @@ class TenantDialog(QDialog):
             w.setDate(_pydate_to_qdate(d))
         else:
             w.setDate(QDate.currentDate())
-
         return w
 
     def _on_accept(self):
@@ -442,7 +452,6 @@ class TenantDialog(QDialog):
         }
 
         if is_person:
-            # Минимальные поля, остальное чистим чтобы не было "хвостов"
             base.update(
                 {
                     "inn": None,
@@ -461,7 +470,6 @@ class TenantDialog(QDialog):
             )
             return base
 
-        # Юрлицо
         base.update(
             {
                 "inn": self.ed_inn.text().strip(),
@@ -481,8 +489,4 @@ class TenantDialog(QDialog):
         return base
 
     def rules_payload(self) -> list[dict]:
-        """
-        Правила, которые пользователь добавил/изменил/отключил в карточке.
-        Сохранять их в БД нужно в TenantsPage после dlg.exec().
-        """
         return self.rules_widget.rules_payload()
