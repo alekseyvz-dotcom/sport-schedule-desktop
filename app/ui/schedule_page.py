@@ -28,12 +28,14 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QStyledItemDelegate,
+    QStackedWidget,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
 from app.services.venue_units_service import list_venue_units
 from app.services.bookings_service import (
     list_bookings_for_day,
+    list_bookings_for_range,
     create_booking,
     update_booking,
     cancel_booking,
@@ -109,6 +111,7 @@ QLabel#sectionTitle {
 }
 """
 
+
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
@@ -131,7 +134,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
             if isinstance(bg, QColor):
                 grid_color = bg
             else:
-                # fallback
                 grid_color = QColor("#9bd7ff")
 
         grid_pen = QPen(grid_color)
@@ -141,11 +143,10 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.drawLine(rect.topLeft(), rect.bottomLeft())
         painter.drawLine(rect.topRight(), rect.bottomRight())
 
-        # горизонтальные линии: сверху и снизу
         painter.drawLine(rect.topLeft(), rect.topRight())
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
-        # --- 2) рамка блока бронирования (поверх сетки)
+        # рамка блока брони
         if part:
             border_pen = QPen(QColor("#5a6a7a"))
             border_pen.setWidth(2)
@@ -153,7 +154,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
             r = rect.adjusted(1, 1, -1, -1)
 
-            # боковые всегда
             painter.drawLine(r.topLeft(), r.bottomLeft())
             painter.drawLine(r.topRight(), r.bottomRight())
 
@@ -164,6 +164,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
         painter.restore()
 
+
 class SchedulePage(QWidget):
     WORK_START = time(8, 0)
     WORK_END = time(22, 0)
@@ -171,6 +172,8 @@ class SchedulePage(QWidget):
 
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+
+    LIST_ROLE_BOOKING = Qt.ItemDataRole.UserRole + 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -190,6 +193,19 @@ class SchedulePage(QWidget):
         self.dt_day.setDisplayFormat("dd.MM.yyyy")
         self.dt_day.setFixedWidth(130)
         self.dt_day.dateChanged.connect(lambda *_: self.reload())
+
+        self.cmb_view = QComboBox()
+        self.cmb_view.addItem("Слоты", "grid")
+        self.cmb_view.addItem("Список", "list")
+        self.cmb_view.currentIndexChanged.connect(self._apply_view_mode)
+
+        self.cmb_period = QComboBox()
+        self.cmb_period.addItem("День", "day")
+        self.cmb_period.addItem("Неделя", "week")       # с понедельника
+        self.cmb_period.addItem("Месяц", "month")
+        self.cmb_period.addItem("Квартал", "quarter")
+        self.cmb_period.addItem("Год", "year")
+        self.cmb_period.currentIndexChanged.connect(lambda *_: self.reload())
 
         self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_cancelled.setChecked(False)
@@ -215,6 +231,10 @@ class SchedulePage(QWidget):
         top.addWidget(self.cmb_org, 1)
         top.addWidget(QLabel("Дата:"))
         top.addWidget(self.dt_day)
+        top.addWidget(QLabel("Вид:"))
+        top.addWidget(self.cmb_view)
+        top.addWidget(QLabel("Период:"))
+        top.addWidget(self.cmb_period)
         top.addWidget(self.cb_cancelled)
         top.addWidget(self.btn_create)
         top.addWidget(self.btn_edit)
@@ -222,20 +242,16 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_refresh)
         top.addWidget(self.btn_columns)
 
+        # --- GRID (слоты)
         self.tbl = QTableWidget()
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.tbl.setAlternatingRowColors(False)
-
-        # Важно: убираем сетку (просили "без сетки")
         self.tbl.setShowGrid(False)
-
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setStyleSheet(_TABLE_QSS)
-
-        # делегат для "красивых границ" у блоков
         self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))
 
         header = self.tbl.horizontalHeader()
@@ -247,32 +263,97 @@ class SchedulePage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
+        # --- LIST (таблица-список)
+        self.tbl_list = QTableWidget()
+        self._setup_list_table()
+
+        # --- stack
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.tbl)
+        self.stack.addWidget(self.tbl_list)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
         root.setSpacing(10)
         root.addLayout(top)
-        root.addWidget(self.tbl, 1)
+        root.addWidget(self.stack, 1)
 
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
 
         QTimer.singleShot(0, self._load_refs)
 
+        last_view = str(self._settings.value("schedule/view_mode", "grid"))
+        self.cmb_view.setCurrentIndex(0 if last_view == "grid" else 1)
+        self._apply_view_mode()
+
     # -------- colors --------
 
     def _base_color_for_booking(self, b) -> QColor:
         if getattr(b, "status", "") == "cancelled":
-            return QColor("#d5dbe3")  # мягкий серый
+            return QColor("#d5dbe3")
 
         kind = (getattr(b, "kind", None) or getattr(b, "activity", "") or "").upper()
-
         if kind == "PD":
-            return QColor("#9bd7ff")  # пастельный голубой
-
+            return QColor("#9bd7ff")
         if kind == "GZ":
-            return QColor("#ffcc80")  # пастельный оранжевый
-
+            return QColor("#ffcc80")
         return QColor("#e5e7eb")
+
+    # -------- view mode --------
+
+    def _apply_view_mode(self) -> None:
+        mode = self.cmb_view.currentData() or "grid"
+        self._settings.setValue("schedule/view_mode", mode)
+
+        is_grid = (mode == "grid")
+        self.stack.setCurrentIndex(0 if is_grid else 1)
+
+        self.btn_create.setEnabled(is_grid)
+        self.btn_columns.setEnabled(is_grid)
+
+        self.reload()
+
+    def _mode(self) -> str:
+        return str(self.cmb_view.currentData() or "grid")
+
+    # -------- list table --------
+
+    def _setup_list_table(self) -> None:
+        self.tbl_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tbl_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tbl_list.setAlternatingRowColors(False)
+        self.tbl_list.setShowGrid(False)
+        self.tbl_list.verticalHeader().setVisible(False)
+        self.tbl_list.setStyleSheet(_TABLE_QSS)
+        self.tbl_list.itemDoubleClicked.connect(lambda *_: self._on_edit())
+
+        self.tbl_list.setColumnCount(5)
+        self.tbl_list.setHorizontalHeaderLabels(["Дата", "Арендатор", "Событие", "Площадка", "Время"])
+
+        header = self.tbl_list.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        f = QFont()
+        f.setPointSize(max(f.pointSize(), 10))
+        self.tbl_list.setFont(f)
+
+    def _selected_booking_from_list(self):
+        row = self.tbl_list.currentRow()
+        if row < 0:
+            return None
+        it = self.tbl_list.item(row, 0)
+        if not it:
+            return None
+        return it.data(self.LIST_ROLE_BOOKING)
 
     # -------- column settings --------
 
@@ -345,6 +426,7 @@ class SchedulePage(QWidget):
         if org_id is None:
             self._resources = []
             self._setup_table()
+            self.tbl_list.setRowCount(0)
             return
 
         try:
@@ -459,13 +541,76 @@ class SchedulePage(QWidget):
         tm = self._time_slots()[row]
         return datetime.combine(day, tm, tzinfo=self.TZ)
 
-    def _selected_booking(self):
+    def _selected_booking_from_grid(self):
         it = self.tbl.currentItem()
         if not it:
             return None
         return it.data(Qt.ItemDataRole.UserRole)
 
+    def _selected_booking(self):
+        if self._mode() == "list":
+            return self._selected_booking_from_list()
+        return self._selected_booking_from_grid()
+
+    # -------- period helpers --------
+
+    def _period_range(self, anchor: date) -> tuple[date, date]:
+        p = self.cmb_period.currentData() or "day"
+
+        if p == "day":
+            return anchor, anchor
+
+        if p == "week":
+            # понедельник..воскресенье
+            start = anchor - timedelta(days=anchor.weekday())
+            end = start + timedelta(days=6)
+            return start, end
+
+        if p == "month":
+            start = anchor.replace(day=1)
+            if start.month == 12:
+                next_m = start.replace(year=start.year + 1, month=1)
+            else:
+                next_m = start.replace(month=start.month + 1)
+            end = next_m - timedelta(days=1)
+            return start, end
+
+        if p == "quarter":
+            q = (anchor.month - 1) // 3
+            start_month = q * 3 + 1
+            start = anchor.replace(month=start_month, day=1)
+            if start_month == 10:
+                next_q = start.replace(year=start.year + 1, month=1)
+            else:
+                next_q = start.replace(month=start_month + 3)
+            end = next_q - timedelta(days=1)
+            return start, end
+
+        if p == "year":
+            return anchor.replace(month=1, day=1), anchor.replace(month=12, day=31)
+
+        return anchor, anchor
+
+    def _resolve_resource_name(self, venue_id: int, venue_unit_id) -> str:
+        for r in self._resources:
+            if int(r.venue_id) != int(venue_id):
+                continue
+            if r.venue_unit_id is None and venue_unit_id is None:
+                return r.resource_name
+            if r.venue_unit_id is not None and venue_unit_id is not None and int(r.venue_unit_id) == int(venue_unit_id):
+                return r.resource_name
+        if venue_unit_id is not None:
+            return f"Площадка {venue_id} — зона {venue_unit_id}"
+        return f"Площадка {venue_id}"
+
+    # -------- reload --------
+
     def reload(self):
+        if self._mode() == "list":
+            return self._reload_list()
+        return self._reload_grid()
+
+    def _reload_grid(self):
         # очистка
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
@@ -526,23 +671,22 @@ class SchedulePage(QWidget):
 
             base = self._base_color_for_booking(b)
 
-            for r in range(r0, r1 + 1):
-                it = self.tbl.item(r, col)
+            for rr in range(r0, r1 + 1):
+                it = self.tbl.item(rr, col)
                 if it is None:
                     it = QTableWidgetItem("")
-                    self.tbl.setItem(r, col, it)
+                    self.tbl.setItem(rr, col, it)
 
                 it.setBackground(base)
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
-                if r == r0:
+                if rr == r0:
                     it.setData(BookingBlockDelegate.ROLE_PART, "top")
-                elif r == r1:
+                elif rr == r1:
                     it.setData(BookingBlockDelegate.ROLE_PART, "bottom")
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
 
-            # Текст только в верхней ячейке блока:
             it0 = self.tbl.item(r0, col)
             if it0:
                 tenant_name = (getattr(b, "tenant_name", "") or "").strip()
@@ -553,6 +697,69 @@ class SchedulePage(QWidget):
                     it0.setText(f"{tenant_name}")
 
         self.tbl.resizeRowsToContents()
+
+    def _reload_list(self):
+        self.tbl_list.setRowCount(0)
+
+        if not self._resources:
+            return
+
+        anchor = self.dt_day.date().toPython()
+        d0, d1 = self._period_range(anchor)
+
+        start = datetime.combine(d0, time(0, 0), tzinfo=self.TZ)
+        end = datetime.combine(d1 + timedelta(days=1), time(0, 0), tzinfo=self.TZ)
+
+        include_cancelled = self.cb_cancelled.isChecked()
+        venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
+
+        try:
+            bookings = list_bookings_for_range(venue_ids, start, end, include_cancelled=include_cancelled)
+        except Exception as e:
+            _uilog("ERROR list_bookings_for_range: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Расписание", f"Ошибка загрузки списка бронирований:\n{e}")
+            return
+
+        bookings_sorted = sorted(bookings, key=lambda b: (getattr(b, "starts_at", datetime.min), getattr(b, "ends_at", datetime.min)))
+        self.tbl_list.setRowCount(len(bookings_sorted))
+
+        for row, b in enumerate(bookings_sorted):
+            starts_at = getattr(b, "starts_at", None)
+            ends_at = getattr(b, "ends_at", None)
+
+            dt_str = starts_at.strftime("%d.%m.%Y") if starts_at else ""
+            tenant = (getattr(b, "tenant_name", "") or "").strip()
+            title = (getattr(b, "title", "") or "").strip()
+            venue_id = int(getattr(b, "venue_id", 0) or 0)
+            unit_id = getattr(b, "venue_unit_id", None)
+            resource_name = self._resolve_resource_name(venue_id, unit_id)
+
+            time_str = ""
+            if starts_at and ends_at:
+                time_str = f"{starts_at:%H:%M}–{ends_at:%H:%M}"
+
+            it0 = QTableWidgetItem(dt_str)
+            it1 = QTableWidgetItem(tenant)
+            it2 = QTableWidgetItem(title)
+            it3 = QTableWidgetItem(resource_name)
+            it4 = QTableWidgetItem(time_str)
+
+            it0.setData(self.LIST_ROLE_BOOKING, b)
+
+            base = self._base_color_for_booking(b)
+            for it in (it0, it1, it2, it3, it4):
+                it.setBackground(base)
+
+            self.tbl_list.setItem(row, 0, it0)
+            self.tbl_list.setItem(row, 1, it1)
+            self.tbl_list.setItem(row, 2, it2)
+            self.tbl_list.setItem(row, 3, it3)
+            self.tbl_list.setItem(row, 4, it4)
+
+        self.tbl_list.resizeRowsToContents()
+
+    # -------- columns dialog --------
 
     def _on_columns(self):
         org_id = self.cmb_org.currentData()
@@ -643,8 +850,14 @@ class SchedulePage(QWidget):
         self._apply_hidden_columns(org_id)
         self.reload()
 
+    # -------- actions --------
+
     def _on_create(self):
         try:
+            if self._mode() != "grid":
+                QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
+                return
+
             sel = self._selected_multi_units()
             if not sel:
                 QMessageBox.information(
@@ -711,7 +924,7 @@ class SchedulePage(QWidget):
     def _on_edit(self):
         b = self._selected_booking()
         if not b:
-            QMessageBox.information(self, "Редактировать", "Выберите ячейку с бронью.")
+            QMessageBox.information(self, "Редактировать", "Выберите бронь.")
             return
         if getattr(b, "status", "") == "cancelled":
             QMessageBox.information(self, "Редактировать", "Отменённую бронь редактировать нельзя.")
@@ -758,7 +971,7 @@ class SchedulePage(QWidget):
     def _on_cancel(self):
         b = self._selected_booking()
         if not b:
-            QMessageBox.information(self, "Отмена", "Выберите ячейку с бронью.")
+            QMessageBox.information(self, "Отмена", "Выберите бронь.")
             return
         if getattr(b, "status", "") == "cancelled":
             QMessageBox.information(self, "Отмена", "Бронь уже отменена.")
