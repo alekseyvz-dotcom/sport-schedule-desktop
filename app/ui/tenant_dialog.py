@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
+
 from app.ui.tenant_rules_widget import TenantRulesWidget
 
 
@@ -50,9 +51,10 @@ QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #7fb3ff;
 }
 
-/* make comment fields smaller */
+/* Comment fields: very small */
 QTextEdit#smallText {
-    min-height: 54px;
+    min-height: 34px;
+    max-height: 54px;
 }
 
 QGroupBox {
@@ -79,11 +81,7 @@ QPushButton {
 QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
 QPushButton:pressed { background: #eef1f5; }
 
-/* scroll area look */
-QScrollArea {
-    border: none;
-    background: transparent;
-}
+QScrollArea { border: none; background: transparent; }
 """
 
 
@@ -125,7 +123,10 @@ class TenantDialog(QDialog):
         self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
         self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
 
-        self.resize(1100, 740)
+        # IMPORTANT: smaller default size so buttons are visible on laptop
+        self.resize(980, 640)
+        # and do not allow dialog to become taller than screen minus margin
+        self.setSizeGripEnabled(True)
 
         # ---- widgets (общие)
         self.ed_name = QLineEdit(self._data_in.get("name", "") or "")
@@ -146,7 +147,7 @@ class TenantDialog(QDialog):
         idx_rent = self.cmb_rent_kind.findData(self._rent_kind_in)
         self.cmb_rent_kind.setCurrentIndex(idx_rent if idx_rent >= 0 else 0)
 
-        # ---- widgets (юрлицо, но переносим ИНН/Email в "Основное")
+        # ---- widgets (юрлицо, но ИНН/Email в "Основное")
         self.ed_inn = QLineEdit(self._data_in.get("inn", "") or "")
         self.ed_email = QLineEdit(self._data_in.get("email", "") or "")
 
@@ -175,10 +176,14 @@ class TenantDialog(QDialog):
         idx = self.cmb_status.findData(cur_status)
         self.cmb_status.setCurrentIndex(idx if idx >= 0 else 0)
 
+        # Comments: very small, and also cap height explicitly
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
         self.ed_comment.setObjectName("smallText")
+        self.ed_comment.setFixedHeight(48)
+
         self.ed_notes = QTextEdit(self._data_in.get("notes", "") or "")
         self.ed_notes.setObjectName("smallText")
+        self.ed_notes.setFixedHeight(48)
 
         # ---- group: Основное (общие поля)
         gb_main = QGroupBox("Основное")
@@ -186,27 +191,23 @@ class TenantDialog(QDialog):
         fm_main.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         fm_main.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         fm_main.setHorizontalSpacing(12)
-        fm_main.setVerticalSpacing(10)
+        fm_main.setVerticalSpacing(8)
 
         fm_main.addRow("ФИО / Название *:", self.ed_name)
         fm_main.addRow("Тип контрагента:", self.cmb_tenant_kind)
         fm_main.addRow("Тип аренды:", self.cmb_rent_kind)
         fm_main.addRow("Телефон:", self.ed_phone)
         fm_main.addRow("Вид обязательств:", self.cmb_obligation)
-
-        # NEW: ИНН и Email в левую колонку (в "Основное")
         fm_main.addRow("ИНН:", self.ed_inn)
         fm_main.addRow("Email:", self.ed_email)
 
-        # ---- group: Реквизиты (юрлицо) — теперь без ИНН/Email, оставляем контейнер для будущих полей
+        # ---- group: Реквизиты (юрлицо) — пустой контейнер (оставлен на будущее)
         self.gb_legal = QGroupBox("Реквизиты (юрлицо)")
         fm_legal = QFormLayout(self.gb_legal)
         fm_legal.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         fm_legal.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         fm_legal.setHorizontalSpacing(12)
-        fm_legal.setVerticalSpacing(10)
-
-        # можно добавить сюда другие реквизиты, если появятся
+        fm_legal.setVerticalSpacing(8)
         fm_legal.addRow(QLabel(""), QLabel(""))
 
         # ---- group: Договор (юрлицо)
@@ -214,7 +215,7 @@ class TenantDialog(QDialog):
         grid = QGridLayout(self.gb_contract)
         grid.setContentsMargins(12, 16, 12, 12)
         grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(10)
+        grid.setVerticalSpacing(8)
 
         grid.addWidget(QLabel("№ договора:"), 0, 0)
         grid.addWidget(self.ed_contract_no, 0, 1)
@@ -235,18 +236,17 @@ class TenantDialog(QDialog):
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
 
-        # ---- group: Комментарии / примечания (общие) — сделаем компактнее
+        # ---- group: Комментарии / примечания (общие) — компактный
         gb_notes = QGroupBox("Комментарии")
         fm_notes = QFormLayout(gb_notes)
         fm_notes.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         fm_notes.setHorizontalSpacing(12)
-        fm_notes.setVerticalSpacing(8)
+        fm_notes.setVerticalSpacing(6)
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
-
         gb_notes.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
-        # ---- group: Правила расписания (общие) + QScrollArea
+        # ---- group: Правила расписания (общие) + QScrollArea (slightly smaller)
         gb_rules = QGroupBox("Правила расписания")
         rules_layout = QVBoxLayout(gb_rules)
         rules_layout.setContentsMargins(12, 16, 12, 12)
@@ -263,7 +263,7 @@ class TenantDialog(QDialog):
             is_admin=self._is_admin,
         )
         self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.rules_widget.setMinimumHeight(360)
+        self.rules_widget.setMinimumHeight(260)  # smaller
 
         scroll = QScrollArea(gb_rules)
         scroll.setWidgetResizable(True)
@@ -273,21 +273,21 @@ class TenantDialog(QDialog):
         scroll.setWidget(self.rules_widget)
 
         rules_layout.addWidget(scroll, 1)
-        gb_rules.setMinimumHeight(420)
+        gb_rules.setMinimumHeight(300)  # smaller
 
         # ---- layout: two columns (left/right)
         cols = QHBoxLayout()
-        cols.setContentsMargins(12, 12, 12, 8)
+        cols.setContentsMargins(12, 12, 12, 6)
         cols.setSpacing(12)
 
         left_col = QVBoxLayout()
-        left_col.setSpacing(12)
+        left_col.setSpacing(10)
         left_col.addWidget(gb_main)
         left_col.addWidget(gb_notes)
         left_col.addStretch(1)
 
         right_col = QVBoxLayout()
-        right_col.setSpacing(12)
+        right_col.setSpacing(10)
 
         self.gb_legal.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.gb_contract.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -303,7 +303,7 @@ class TenantDialog(QDialog):
         cols.addLayout(left_col, 1)
         cols.addLayout(right_col, 1)
 
-        # ---- buttons
+        # ---- buttons (always visible because dialog is smaller now)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn:
@@ -314,10 +314,10 @@ class TenantDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 8, 12, 12)
-        root.setSpacing(10)
-        root.addLayout(cols)
-        root.addWidget(buttons)
+        root.setContentsMargins(12, 8, 12, 10)
+        root.setSpacing(8)
+        root.addLayout(cols, 1)
+        root.addWidget(buttons, 0)
 
         self._apply_kind_ui()
 
@@ -326,7 +326,7 @@ class TenantDialog(QDialog):
         self.gb_legal.setVisible(not is_person)
         self.gb_contract.setVisible(not is_person)
 
-        # ИНН/Email в "Основное": для физлица делаем read-only и очищаем визуально (значения всё равно будут очищены в values())
+        # ИНН/Email: для физлица выключаем и очищаем
         self.ed_inn.setEnabled(not is_person)
         self.ed_email.setEnabled(not is_person)
         if is_person:
