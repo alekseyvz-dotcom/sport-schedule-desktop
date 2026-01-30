@@ -239,6 +239,7 @@ class TenantDialog(QDialog):
             tenant_id=self._tenant_id,
             contract_from=contract_from,
             contract_to=contract_to,
+            tenant_kind=self.cmb_tenant_kind.currentData(),  # NEW
             is_admin=self._is_admin,
         )
         rules_layout.addWidget(self.rules_widget)
@@ -284,6 +285,11 @@ class TenantDialog(QDialog):
         is_person = (self.cmb_tenant_kind.currentData() == "person")
         self.gb_legal.setVisible(not is_person)
         self.gb_contract.setVisible(not is_person)
+    
+        # NEW: чтобы дефолт для новых правил менялся сразу
+        if hasattr(self, "rules_widget") and hasattr(self.rules_widget, "set_tenant_kind"):
+            self.rules_widget.set_tenant_kind(self.cmb_tenant_kind.currentData())
+
 
     # ---------- helpers for multiselect combobox ----------
 
