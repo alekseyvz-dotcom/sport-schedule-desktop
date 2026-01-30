@@ -188,14 +188,16 @@ class OrgUsagePage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.tbl)
         splitter.addWidget(self.details)
-
-        # БЫЛО: (0=2, 1=3) => правая часть шире
-        # НАДО: правая примерно 1/4 => левый 3/4
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-
-        # Чтобы при первом показе было похоже на 3/1 (иначе Qt может дать им "поровну")
-        splitter.setSizes([900, 300])
+        
+        # Минимальная ширина правой панели, чтобы подписи/проценты помещались
+        self.details.setMinimumWidth(420)   # подбери: 380..480
+        
+        # Пропорции: левый шире, но правый не слишком узкий
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 2)
+        
+        # Стартовые размеры (под широкие экраны; можно подправить)
+        splitter.setSizes([800, 420])
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
