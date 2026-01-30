@@ -183,14 +183,19 @@ class OrgUsagePage(QWidget):
         self.tbl.setFont(f)
 
         self.details = UsageDetailsWidget(self)
-        # теперь подписи смен можно менять (метод добавили в UsageDetailsWidget)
         self.details.set_shift_titles("Утро", "День", "Вечер")
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.tbl)
         splitter.addWidget(self.details)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+
+        # БЫЛО: (0=2, 1=3) => правая часть шире
+        # НАДО: правая примерно 1/4 => левый 3/4
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+
+        # Чтобы при первом показе было похоже на 3/1 (иначе Qt может дать им "поровну")
+        splitter.setSizes([900, 300])
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
@@ -201,6 +206,7 @@ class OrgUsagePage(QWidget):
 
         QTimer.singleShot(0, self._load_orgs)
 
+    # ... остальной код без изменений ...
     def _load_orgs(self):
         try:
             orgs = list_active_orgs()
@@ -228,7 +234,11 @@ class OrgUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "month":
             start = d.replace(day=1)
-            next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
+            next_month = (
+                start.replace(year=start.year + 1, month=1, day=1)
+                if start.month == 12
+                else start.replace(month=start.month + 1, day=1)
+            )
             end = next_month - timedelta(days=1)
             return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
         if mode == "quarter":
@@ -277,13 +287,14 @@ class OrgUsagePage(QWidget):
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
-        # честные подписи: показываем, что смены считаются в пределах режима работы учреждения
         m = "Утро (в пределах режима)" if m_cap > 0 else "Утро (нет)"
         d = "День (в пределах режима)" if d_cap > 0 else "День (нет)"
         e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
         self.details.set_shift_titles(m, d, e)
 
+    # остальное без изменений...
     def reload(self):
+        # твой код reload без изменений
         p = self._calc_period()
         self._period = p
         self.lbl_period.setText(f"Период: {p.title}")
@@ -397,6 +408,7 @@ class OrgUsagePage(QWidget):
             self.details.set_data(None)
 
     def _on_selection_changed(self):
+        # без изменений
         if not self._period:
             self.details.set_data(None)
             return
