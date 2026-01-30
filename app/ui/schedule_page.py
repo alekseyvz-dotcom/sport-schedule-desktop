@@ -1054,8 +1054,7 @@ class SchedulePage(QWidget):
             QMessageBox.information(self, "Создать бронь", "Выберите слот.")
             return
     
-        col = it.column()
-        if col <= 0:
+        if it.column() <= 0:
             QMessageBox.information(self, "Создать бронь", "Выберите слот на площадке/зоне (не колонку 'Время').")
             return
     
@@ -1070,29 +1069,53 @@ class SchedulePage(QWidget):
         sel = self._selected_multi_units()
         if sel:
             cols, rmin, rmax = sel
-            # создаём по первой выбранной колонке (можно расширить на мульти-колонки позже)
-            col = cols[0]
             r0, r1 = rmin, rmax
         else:
+            cols = [it.column()]
             r0 = it.row()
             r1 = it.row()
+    
+        # не даём смешивать разные площадки
+        venue_ids = {int(self._resources[c - 1].venue_id) for c in cols}
+        if len(venue_ids) != 1:
+            QMessageBox.information(self, "Создать бронь", "Выберите зоны в рамках одной площадки.")
+            return
     
         starts_at = self._row_to_datetime(day, r0)
         ends_at = self._row_to_datetime(day, r1) + timedelta(minutes=self.SLOT_MINUTES)
     
-        rsrc = self._resources[col - 1]
-        venue_id = int(rsrc.venue_id)
-        venue_unit_id = int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None
-        venue_name = str(rsrc.venue_name)
+        # проверка: в выделении не должно быть существующих броней
+        for c in cols:
+            it_cell = self.tbl.item(r0, c)
+            if it_cell and it_cell.data(Qt.ItemDataRole.UserRole):
+                QMessageBox.information(self, "Создать бронь", "В выделении есть занятые слоты. Уберите их из выделения.")
+                return
     
-        # список зон для выбранной площадки (чтобы диалог показывал комбобокс "Зона")
+        # берём данные площадки из первой выбранной колонки
+        col0 = cols[0]
+        rsrc0 = self._resources[col0 - 1]
+        venue_id = int(rsrc0.venue_id)
+        venue_name = str(rsrc0.venue_name)
+    
+        # если выделено несколько зон — фиксируем зоны и только показываем список
+        multi_cols = (len(cols) > 1)
+    
+        # список выбранных зон для отображения в диалоге
+        selected_lines = [self._resources[c - 1].resource_name for c in cols]
+    
+        # список зон для выбранной площадки (показывать комбобокс "Зона" имеет смысл только при одиночном создании)
         venue_units = None
-        try:
-            units = list_venue_units(venue_id, include_inactive=False)
-            if units:
-                venue_units = [{"id": u.id, "name": u.name} for u in units]
-        except Exception:
-            venue_units = None
+        if not multi_cols:
+            try:
+                units = list_venue_units(venue_id, include_inactive=False)
+                if units:
+                    venue_units = [{"id": u.id, "name": u.name} for u in units]
+            except Exception:
+                venue_units = None
+    
+        # initial unit: если одиночное выделение — ставим unit из колонки
+        unit0 = rsrc0.venue_unit_id
+        venue_unit_id = int(unit0) if unit0 is not None else None
     
         dlg = BookingDialog(
             self,
@@ -1101,29 +1124,66 @@ class SchedulePage(QWidget):
             ends_at=ends_at,
             tenants=self._tenants,
             venue_name=venue_name,
-            venue_units=venue_units,
+            venue_units=venue_units,  # None при multi_cols => комбобокса "Зона" не будет
             initial={"venue_unit_id": venue_unit_id, "kind": "PD", "title": ""},
+            selection_title=(f"Выбрано зон: {len(selected_lines)}" if multi_cols else None),
+            selection_lines=(selected_lines if multi_cols else None),
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
     
         data = dlg.values()
     
-        try:
-            create_booking(
-                venue_id=venue_id,
-                venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
-                tenant_id=int(data["tenant_id"]) if data.get("tenant_id") is not None else None,
-                title=str(data.get("title") or ""),
-                kind=str(data.get("kind") or "PD"),
-                starts_at=starts_at,
-                ends_at=ends_at,
-            )
-        except Exception as e:
-            _uilog("ERROR create_booking: " + repr(e))
-            _uilog(traceback.format_exc())
-            QMessageBox.critical(self, "Создать бронь", f"Ошибка создания:\n{e}")
-            return
+        kind = str(data.get("kind") or "PD")
+        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+        title = str(data.get("title") or "")
+    
+        created = 0
+        skipped = 0
+        errors = []
+    
+        if multi_cols:
+            # создаём по одной брони на каждую выбранную зону/колонку
+            for c in cols:
+                rsrc = self._resources[c - 1]
+                unit_id = int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None
+                try:
+                    create_booking(
+                        venue_id=int(rsrc.venue_id),
+                        venue_unit_id=unit_id,
+                        tenant_id=tenant_id,
+                        title=title,
+                        kind=kind,
+                        starts_at=starts_at,
+                        ends_at=ends_at,
+                    )
+                    created += 1
+                except Exception as e:
+                    skipped += 1
+                    errors.append(str(e))
+    
+            if skipped:
+                msg = f"Создано: {created}\nПропущено: {skipped}"
+                if errors:
+                    msg += "\n\nПервые ошибки:\n" + "\n".join(errors[:6])
+                QMessageBox.information(self, "Создание бронирований", msg)
+        else:
+            # одиночное создание: берём venue_unit_id из диалога (если он показан)
+            try:
+                create_booking(
+                    venue_id=venue_id,
+                    venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
+                    tenant_id=tenant_id,
+                    title=title,
+                    kind=kind,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                )
+            except Exception as e:
+                _uilog("ERROR create_booking: " + repr(e))
+                _uilog(traceback.format_exc())
+                QMessageBox.critical(self, "Создать бронь", f"Ошибка создания:\n{e}")
+                return
     
         self.reload()
 
