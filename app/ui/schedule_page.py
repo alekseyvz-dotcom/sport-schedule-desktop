@@ -1013,18 +1013,135 @@ class SchedulePage(QWidget):
         self.reload()
 
     def _on_create(self):
-        # creation only in grid mode
         if self._mode() != "grid":
             QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
             return
-        # дальше — ваш код создания (оставьте из предыдущей версии)
-        # (не привожу тут, чтобы не раздувать ответ; вставьте ваш _on_create без изменений)
-        raise NotImplementedError("Вставьте ваш существующий _on_create сюда (без изменений).")
-
+    
+        if not self._resources:
+            QMessageBox.information(self, "Создать бронь", "Сначала выберите учреждение с площадками.")
+            return
+    
+        # определяем выбранный слот/ресурс
+        it = self.tbl.currentItem()
+        if not it:
+            QMessageBox.information(self, "Создать бронь", "Выберите слот в таблице.")
+            return
+    
+        row = it.row()
+        col = it.column()
+        if col <= 0:
+            QMessageBox.information(self, "Создать бронь", "Выберите слот на площадке/зоне (не колонку 'Время').")
+            return
+    
+        # если в слоте уже есть бронь — логичнее открыть редактирование
+        b = it.data(Qt.ItemDataRole.UserRole)
+        if b:
+            self._on_edit()
+            return
+    
+        day = self.dt_day.date().toPython()
+        starts_at = datetime.combine(day, self._time_slots()[row], tzinfo=self.TZ)
+        ends_at = starts_at + timedelta(minutes=self.SLOT_MINUTES)
+    
+        rsrc = self._resources[col - 1]
+        venue_id = int(rsrc.venue_id)
+        venue_unit_id = int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None
+    
+        dlg = BookingDialog(
+            self,
+            title="Создать бронирование",
+            tenants=self._tenants,
+            venue_id=venue_id,
+            venue_unit_id=venue_unit_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+    
+        v = dlg.values()
+        try:
+            create_booking(
+                venue_id=int(v["venue_id"]),
+                venue_unit_id=(int(v["venue_unit_id"]) if v.get("venue_unit_id") is not None else None),
+                tenant_id=(int(v["tenant_id"]) if v.get("tenant_id") else None),
+                title=str(v.get("title") or "").strip(),
+                kind=str(v.get("kind") or "PD"),
+                starts_at=v["starts_at"],
+                ends_at=v["ends_at"],
+                comment=str(v.get("comment") or "").strip() or None,
+            )
+        except Exception as e:
+            _uilog("ERROR create_booking: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Создать бронь", f"Ошибка создания:\n{e}")
+            return
+    
+        self.reload()
+    
+    
     def _on_edit(self):
-        # ваш _on_edit без изменений
-        raise NotImplementedError("Вставьте ваш существующий _on_edit сюда (без изменений).")
-
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Редактировать", "Выберите бронирование.")
+            return
+    
+        dlg = BookingDialog(
+            self,
+            title="Редактировать бронирование",
+            tenants=self._tenants,
+            initial=b,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+    
+        v = dlg.values()
+        try:
+            update_booking(
+                booking_id=int(getattr(b, "id")),
+                venue_id=int(v["venue_id"]),
+                venue_unit_id=(int(v["venue_unit_id"]) if v.get("venue_unit_id") is not None else None),
+                tenant_id=(int(v["tenant_id"]) if v.get("tenant_id") else None),
+                title=str(v.get("title") or "").strip(),
+                kind=str(v.get("kind") or "PD"),
+                starts_at=v["starts_at"],
+                ends_at=v["ends_at"],
+                status=str(v.get("status") or getattr(b, "status", "planned")),
+                comment=str(v.get("comment") or "").strip() or None,
+            )
+        except Exception as e:
+            _uilog("ERROR update_booking: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Редактировать", f"Ошибка сохранения:\n{e}")
+            return
+    
+        self.reload()
+    
+    
     def _on_cancel(self):
-        # ваш _on_cancel без изменений (работает и в списке, т.к. _selected_booking учитывает режим)
-        raise NotImplementedError("Вставьте ваш существующий _on_cancel сюда (без изменений).")
+        b = self._selected_booking()
+        if not b:
+            QMessageBox.information(self, "Отменить", "Выберите бронирование.")
+            return
+    
+        if (
+            QMessageBox.question(
+                self,
+                "Отмена бронирования",
+                "Отменить выбранное бронирование?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+    
+        try:
+            cancel_booking(int(getattr(b, "id")))
+        except Exception as e:
+            _uilog("ERROR cancel_booking: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Отменить", f"Ошибка отмены:\n{e}")
+            return
+    
+        self.reload()
