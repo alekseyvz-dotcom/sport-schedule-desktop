@@ -1,10 +1,9 @@
-# app/ui/main_window.py
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 from app.services.users_service import AuthUser
 from app.ui.tenants_page import TenantsPage
 from app.ui.orgs_venues_page import OrgsVenuesPage
 from app.ui.schedule_page import SchedulePage
-from app.ui.org_usage_page import OrgUsagePage
+from app.ui.analytics_page import AnalyticsPage
 from app.ui.welcome_login_page import WelcomeLoginPage
 
 
@@ -26,6 +25,6 @@ class MainWindow(QMainWindow):
         tabs.addTab(TenantsPage(user), "Контрагенты")
         tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
         tabs.addTab(SchedulePage(), "Расписание")
-        tabs.addTab(OrgUsagePage(self), "Загрузка учреждений")
+        tabs.addTab(AnalyticsPage(user), "Аналитика")
 
         self.setCentralWidget(tabs)
