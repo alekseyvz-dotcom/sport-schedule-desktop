@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QHeaderView,
     QAbstractItemView,
+    QStyle,
 )
 
 from app.services.users_service import AuthUser
@@ -73,13 +74,14 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_archive)
 
         # --- Table ---
-        # Оставляем 12 колонок как у тебя (чтобы минимум правок),
-        # но названия делаем нейтральнее: "ФИО/Название" + добавим "Тип" в статус/коммент не трогаем.
-        self.tbl = QTableWidget(0, 12)
+        # Добавили 2 колонки: Тип, Аренда
+        self.tbl = QTableWidget(0, 14)
         self.tbl.setHorizontalHeaderLabels(
             [
                 "ID",
                 "ФИО / Название",
+                "Тип",
+                "Аренда",
                 "ИНН",
                 "Телефон",
                 "Email",
@@ -109,9 +111,15 @@ class TenantsPage(QWidget):
 
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # ФИО/Название
-        for col in (2, 3, 4, 5, 6, 7, 8, 9, 10):
+
+        # Тип, Аренда
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+
+        for col in (4, 5, 6, 7, 8, 9, 10, 11, 12):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Комментарий
+
+        header.setSectionResizeMode(13, QHeaderView.ResizeMode.Stretch)  # Комментарий
 
         self.tbl.setStyleSheet(
             """
@@ -174,6 +182,13 @@ class TenantsPage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
+        # Иконки (используем стандартные значки Qt, чтобы не тянуть файлы)
+        style = self.style()
+        self._ico_person = style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon)     # можно заменить
+        self._ico_legal = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)    # можно заменить
+        self._ico_one_time = style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop) # можно заменить
+        self._ico_long = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)   # можно заменить
+
         self.reload()
 
     def _selected_tenant(self) -> Tenant | None:
@@ -185,6 +200,14 @@ class TenantsPage(QWidget):
             return None
         t = item.data(Qt.UserRole)
         return t if isinstance(t, Tenant) else None
+
+    @staticmethod
+    def _kind_text(kind: str) -> str:
+        return "ФЛ" if (kind or "") == "person" else "ЮЛ"
+
+    @staticmethod
+    def _rent_text(rent: str) -> str:
+        return "Разово" if (rent or "") == "one_time" else "Долгосрочно"
 
     def reload(self):
         try:
@@ -210,24 +233,32 @@ class TenantsPage(QWidget):
             it_active = QTableWidgetItem("Да" if t.is_active else "Нет")
             it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
+            tenant_kind = getattr(t, "tenant_kind", "legal") or "legal"
+            rent_kind = getattr(t, "rent_kind", "long_term") or "long_term"
+
+            it_kind = QTableWidgetItem(self._kind_text(tenant_kind))
+            it_kind.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            it_kind.setIcon(self._ico_person if tenant_kind == "person" else self._ico_legal)
+
+            it_rent = QTableWidgetItem(self._rent_text(rent_kind))
+            it_rent.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            it_rent.setIcon(self._ico_one_time if rent_kind == "one_time" else self._ico_long)
+
             self.tbl.setItem(r, 0, it_id)
             self.tbl.setItem(r, 1, QTableWidgetItem(t.name))
+            self.tbl.setItem(r, 2, it_kind)
+            self.tbl.setItem(r, 3, it_rent)
 
-            # Для физлица часть колонок будет пустая — это нормально
-            self.tbl.setItem(r, 2, QTableWidgetItem(t.inn or ""))
-            self.tbl.setItem(r, 3, QTableWidgetItem(t.phone or ""))
-            self.tbl.setItem(r, 4, QTableWidgetItem(t.email or ""))
-            self.tbl.setItem(r, 5, QTableWidgetItem(t.contact_name or ""))
-            self.tbl.setItem(r, 6, QTableWidgetItem(t.contract_no or ""))
-            self.tbl.setItem(
-                r, 7, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else "")
-            )
-            self.tbl.setItem(
-                r, 8, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else "")
-            )
-            self.tbl.setItem(r, 9, QTableWidgetItem(t.status or ""))
-            self.tbl.setItem(r, 10, it_active)
-            self.tbl.setItem(r, 11, QTableWidgetItem(t.comment or ""))
+            self.tbl.setItem(r, 4, QTableWidgetItem(t.inn or ""))
+            self.tbl.setItem(r, 5, QTableWidgetItem(t.phone or ""))
+            self.tbl.setItem(r, 6, QTableWidgetItem(t.email or ""))
+            self.tbl.setItem(r, 7, QTableWidgetItem(t.contact_name or ""))
+            self.tbl.setItem(r, 8, QTableWidgetItem(t.contract_no or ""))
+            self.tbl.setItem(r, 9, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
+            self.tbl.setItem(r, 10, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
+            self.tbl.setItem(r, 11, QTableWidgetItem(t.status or ""))
+            self.tbl.setItem(r, 12, it_active)
+            self.tbl.setItem(r, 13, QTableWidgetItem(t.comment or ""))
 
             if not t.is_active:
                 for c in range(self.tbl.columnCount()):
