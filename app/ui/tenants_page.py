@@ -73,11 +73,13 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_archive)
 
         # --- Table ---
+        # Оставляем 12 колонок как у тебя (чтобы минимум правок),
+        # но названия делаем нейтральнее: "ФИО/Название" + добавим "Тип" в статус/коммент не трогаем.
         self.tbl = QTableWidget(0, 12)
         self.tbl.setHorizontalHeaderLabels(
             [
                 "ID",
-                "Название",
+                "ФИО / Название",
                 "ИНН",
                 "Телефон",
                 "Email",
@@ -106,7 +108,7 @@ class TenantsPage(QWidget):
         header.setHighlightSections(False)
 
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Название
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # ФИО/Название
         for col in (2, 3, 4, 5, 6, 7, 8, 9, 10):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(11, QHeaderView.ResizeMode.Stretch)  # Комментарий
@@ -210,13 +212,19 @@ class TenantsPage(QWidget):
 
             self.tbl.setItem(r, 0, it_id)
             self.tbl.setItem(r, 1, QTableWidgetItem(t.name))
+
+            # Для физлица часть колонок будет пустая — это нормально
             self.tbl.setItem(r, 2, QTableWidgetItem(t.inn or ""))
             self.tbl.setItem(r, 3, QTableWidgetItem(t.phone or ""))
             self.tbl.setItem(r, 4, QTableWidgetItem(t.email or ""))
             self.tbl.setItem(r, 5, QTableWidgetItem(t.contact_name or ""))
             self.tbl.setItem(r, 6, QTableWidgetItem(t.contract_no or ""))
-            self.tbl.setItem(r, 7, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
-            self.tbl.setItem(r, 8, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
+            self.tbl.setItem(
+                r, 7, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else "")
+            )
+            self.tbl.setItem(
+                r, 8, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else "")
+            )
             self.tbl.setItem(r, 9, QTableWidgetItem(t.status or ""))
             self.tbl.setItem(r, 10, it_active)
             self.tbl.setItem(r, 11, QTableWidgetItem(t.comment or ""))
@@ -328,6 +336,8 @@ class TenantsPage(QWidget):
                 "attached_in_1c": t.attached_in_1c,
                 "has_ds": t.has_ds,
                 "notes": t.notes,
+                "tenant_kind": getattr(t, "tenant_kind", "legal"),
+                "rent_kind": getattr(t, "rent_kind", "long_term"),
             },
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
