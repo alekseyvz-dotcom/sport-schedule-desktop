@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QStyledItemDelegate,
     QStackedWidget,
+    QSplitter,
+    QProgressBar,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
@@ -57,32 +59,6 @@ class Resource:
     resource_name: str
 
 
-_TABLE_QSS = """
-QTableWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-
-    selection-background-color: rgba(127, 179, 255, 60);
-    selection-color: #111111;
-}
-QHeaderView::section {
-    background: #f6f7f9;
-    color: #111111;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #e6e6e6;
-    font-weight: 600;
-}
-QTableWidget::item {
-    padding: 6px 10px;
-}
-QTableWidget::item:selected {
-    /* не задаём background, чтобы Qt корректно смешивал selection и наш setBackground */
-}
-"""
-
-
 _PAGE_QSS = """
 QWidget { background: #fbfbfc; }
 QComboBox, QDateEdit {
@@ -104,11 +80,25 @@ QPushButton {
 QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
 QPushButton:pressed { background: #eef1f5; }
 QCheckBox { padding: 0 6px; }
-QLabel#sectionTitle {
-    color: #111111;
-    font-weight: 700;
-    padding: 0 4px;
+QLabel#sectionTitle { color: #111111; font-weight: 700; padding: 0 4px; }
+
+QTableWidget {
+    background: #ffffff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    selection-background-color: rgba(127,179,255,60);
+    selection-color: #111111;
+    gridline-color: #e9edf3;
 }
+QHeaderView::section {
+    background: #f6f7f9;
+    color: #111111;
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 1px solid #e6e6e6;
+    font-weight: 600;
+}
+QTableWidget::item { padding: 6px 10px; }
 """
 
 
@@ -116,7 +106,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     def paint(self, painter: QPainter, option, index):
-        # стандарт: фон/текст/selection
         super().paint(painter, option, index)
 
         rect = option.rect
@@ -142,21 +131,17 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
         painter.drawLine(rect.topLeft(), rect.bottomLeft())
         painter.drawLine(rect.topRight(), rect.bottomRight())
-
         painter.drawLine(rect.topLeft(), rect.topRight())
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
-        # рамка блока брони
         if part:
             border_pen = QPen(QColor("#5a6a7a"))
             border_pen.setWidth(2)
             painter.setPen(border_pen)
 
             r = rect.adjusted(1, 1, -1, -1)
-
             painter.drawLine(r.topLeft(), r.bottomLeft())
             painter.drawLine(r.topRight(), r.bottomRight())
-
             if part == "top":
                 painter.drawLine(r.topLeft(), r.topRight())
             elif part == "bottom":
@@ -181,6 +166,9 @@ class SchedulePage(QWidget):
 
         self._settings = QSettings("SportApp", "Schedule")
 
+        self._resources: List[Resource] = []
+        self._tenants: List[Dict] = []
+
         self.lbl_title = QLabel("Расписание")
         self.lbl_title.setObjectName("sectionTitle")
 
@@ -201,7 +189,7 @@ class SchedulePage(QWidget):
 
         self.cmb_period = QComboBox()
         self.cmb_period.addItem("День", "day")
-        self.cmb_period.addItem("Неделя", "week")       # с понедельника
+        self.cmb_period.addItem("Неделя (Пн–Вс)", "week")
         self.cmb_period.addItem("Месяц", "month")
         self.cmb_period.addItem("Квартал", "quarter")
         self.cmb_period.addItem("Год", "year")
@@ -223,6 +211,7 @@ class SchedulePage(QWidget):
         self.btn_refresh.clicked.connect(self.reload)
         self.btn_columns.clicked.connect(self._on_columns)
 
+        # top bar
         top = QHBoxLayout()
         top.setContentsMargins(12, 12, 12, 8)
         top.setSpacing(10)
@@ -242,6 +231,18 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_refresh)
         top.addWidget(self.btn_columns)
 
+        # meta line like analytics
+        self.lbl_period = QLabel("")
+        self.lbl_period.setStyleSheet("color:#334155; padding:0 4px;")
+
+        self.lbl_total = QLabel("")
+        self.lbl_total.setStyleSheet("color:#0f172a; font-weight:600; padding:0 4px;")
+
+        meta = QHBoxLayout()
+        meta.setContentsMargins(12, 0, 12, 0)
+        meta.addWidget(self.lbl_period, 1)
+        meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
+
         # --- GRID (слоты)
         self.tbl = QTableWidget()
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -251,7 +252,6 @@ class SchedulePage(QWidget):
         self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
-        self.tbl.setStyleSheet(_TABLE_QSS)
         self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))
 
         header = self.tbl.horizontalHeader()
@@ -263,29 +263,138 @@ class SchedulePage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
-        # --- LIST (таблица-список)
+        # --- LIST (лево) + DETAILS (право) как в аналитике
         self.tbl_list = QTableWidget()
         self._setup_list_table()
 
-        # --- stack
+        self.details = self._make_details_panel()
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter.addWidget(self.tbl_list)
+        self.splitter.addWidget(self.details)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+
+        # stack: grid OR (list+details)
         self.stack = QStackedWidget()
-        self.stack.addWidget(self.tbl)
-        self.stack.addWidget(self.tbl_list)
+        self.stack.addWidget(self.tbl)          # index 0
+        self.stack.addWidget(self.splitter)     # index 1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
         root.setSpacing(10)
         root.addLayout(top)
+        root.addLayout(meta)
         root.addWidget(self.stack, 1)
-
-        self._resources: List[Resource] = []
-        self._tenants: List[Dict] = []
 
         QTimer.singleShot(0, self._load_refs)
 
         last_view = str(self._settings.value("schedule/view_mode", "grid"))
         self.cmb_view.setCurrentIndex(0 if last_view == "grid" else 1)
         self._apply_view_mode()
+
+    # -------- small ui helpers --------
+
+    def _bold_font(self, base: Optional[QFont] = None) -> QFont:
+        f = QFont(base or self.font())
+        f.setBold(True)
+        return f
+
+    def _make_kpi(self, title: str) -> Tuple[QLabel, QLabel]:
+        t = QLabel(title)
+        t.setStyleSheet("color:#334155;")
+        v = QLabel("—")
+        v.setStyleSheet("color:#0f172a; font-weight:700;")
+        return t, v
+
+    def _make_details_panel(self) -> QWidget:
+        w = QWidget(self)
+        w.setStyleSheet(
+            """
+            QWidget#detailsCard {
+                background: #ffffff;
+                border: 1px solid #e6e6e6;
+                border-radius: 10px;
+            }
+            QLabel#detailsTitle {
+                color:#0f172a;
+                font-weight:700;
+                padding: 10px 12px 0 12px;
+            }
+            QLabel#detailsText {
+                color:#334155;
+                padding: 2px 12px;
+            }
+            """
+        )
+        w.setObjectName("detailsCard")
+
+        self.lbl_d_title = QLabel("Детали брони")
+        self.lbl_d_title.setObjectName("detailsTitle")
+
+        self.lbl_d_main = QLabel("Выберите строку слева")
+        self.lbl_d_main.setWordWrap(True)
+        self.lbl_d_main.setObjectName("detailsText")
+
+        self.lbl_d_extra = QLabel("")
+        self.lbl_d_extra.setWordWrap(True)
+        self.lbl_d_extra.setObjectName("detailsText")
+
+        # KPI row
+        k1t, self.kpi_total = self._make_kpi("Итого бронирований")
+        k2t, self.kpi_pd = self._make_kpi("ПД")
+        k3t, self.kpi_gz = self._make_kpi("ГЗ")
+        k4t, self.kpi_cancelled = self._make_kpi("Отменённые")
+
+        kpi = QHBoxLayout()
+        kpi.setContentsMargins(12, 8, 12, 8)
+        for t, v in ((k1t, self.kpi_total), (k2t, self.kpi_pd), (k3t, self.kpi_gz), (k4t, self.kpi_cancelled)):
+            box = QVBoxLayout()
+            box.addWidget(t)
+            box.addWidget(v)
+            kpi.addLayout(box, 1)
+
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        lay.addWidget(self.lbl_d_title)
+        lay.addLayout(kpi)
+        lay.addWidget(self.lbl_d_main)
+        lay.addWidget(self.lbl_d_extra)
+        lay.addStretch(1)
+        return w
+
+    def _make_progress(self, pct: float) -> QProgressBar:
+        pb = QProgressBar()
+        pb.setRange(0, 100)
+        pb.setValue(max(0, min(100, int(round(pct)))))
+        pb.setTextVisible(True)
+        pb.setFormat(f"{pct:.0f}%")
+
+        if pct >= 80:
+            chunk = "#ef4444"
+        elif pct >= 60:
+            chunk = "#f59e0b"
+        else:
+            chunk = "#22c55e"
+
+        pb.setStyleSheet(
+            f"""
+            QProgressBar {{
+                border: 1px solid #e6e6e6;
+                border-radius: 8px;
+                background: #ffffff;
+                text-align: center;
+                padding: 2px;
+                min-width: 90px;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 8px;
+                background: {chunk};
+            }}
+            """
+        )
+        return pb
 
     # -------- colors --------
 
@@ -326,21 +435,22 @@ class SchedulePage(QWidget):
         self.tbl_list.setAlternatingRowColors(False)
         self.tbl_list.setShowGrid(False)
         self.tbl_list.verticalHeader().setVisible(False)
-        self.tbl_list.setStyleSheet(_TABLE_QSS)
         self.tbl_list.itemDoubleClicked.connect(lambda *_: self._on_edit())
+        self.tbl_list.itemSelectionChanged.connect(self._update_details_from_selection)
 
-        self.tbl_list.setColumnCount(5)
-        self.tbl_list.setHorizontalHeaderLabels(["Дата", "Арендатор", "Событие", "Площадка", "Время"])
+        self.tbl_list.setColumnCount(7)
+        self.tbl_list.setHorizontalHeaderLabels(["Дата", "Время", "Арендатор", "Событие", "Площадка", "Тип", "Статус"])
 
         header = self.tbl_list.horizontalHeader()
-        header.setStretchLastSection(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
 
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
@@ -355,7 +465,7 @@ class SchedulePage(QWidget):
             return None
         return it.data(self.LIST_ROLE_BOOKING)
 
-    # -------- column settings --------
+    # -------- column settings (grid) --------
 
     def _resource_key(self, r: Resource) -> str:
         if r.venue_unit_id is not None:
@@ -427,6 +537,7 @@ class SchedulePage(QWidget):
             self._resources = []
             self._setup_table()
             self.tbl_list.setRowCount(0)
+            self.reload()
             return
 
         try:
@@ -457,7 +568,6 @@ class SchedulePage(QWidget):
                     )
 
             resources.sort(key=lambda r: (r.venue_name, r.resource_name))
-
             self._resources = resources
             self._apply_order_and_hidden(int(org_id))
 
@@ -548,9 +658,7 @@ class SchedulePage(QWidget):
         return it.data(Qt.ItemDataRole.UserRole)
 
     def _selected_booking(self):
-        if self._mode() == "list":
-            return self._selected_booking_from_list()
-        return self._selected_booking_from_grid()
+        return self._selected_booking_from_list() if self._mode() == "list" else self._selected_booking_from_grid()
 
     # -------- period helpers --------
 
@@ -559,33 +667,22 @@ class SchedulePage(QWidget):
 
         if p == "day":
             return anchor, anchor
-
         if p == "week":
-            # понедельник..воскресенье
             start = anchor - timedelta(days=anchor.weekday())
             end = start + timedelta(days=6)
             return start, end
-
         if p == "month":
             start = anchor.replace(day=1)
-            if start.month == 12:
-                next_m = start.replace(year=start.year + 1, month=1)
-            else:
-                next_m = start.replace(month=start.month + 1)
+            next_m = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
             end = next_m - timedelta(days=1)
             return start, end
-
         if p == "quarter":
             q = (anchor.month - 1) // 3
             start_month = q * 3 + 1
             start = anchor.replace(month=start_month, day=1)
-            if start_month == 10:
-                next_q = start.replace(year=start.year + 1, month=1)
-            else:
-                next_q = start.replace(month=start_month + 3)
+            next_q = start.replace(year=start.year + 1, month=1) if start_month == 10 else start.replace(month=start_month + 3)
             end = next_q - timedelta(days=1)
             return start, end
-
         if p == "year":
             return anchor.replace(month=1, day=1), anchor.replace(month=12, day=31)
 
@@ -603,6 +700,52 @@ class SchedulePage(QWidget):
             return f"Площадка {venue_id} — зона {venue_unit_id}"
         return f"Площадка {venue_id}"
 
+    def _kind_title(self, kind: str) -> str:
+        k = (kind or "").upper()
+        if k == "PD":
+            return "ПД"
+        if k == "GZ":
+            return "ГЗ"
+        return k or "—"
+
+    def _status_title(self, status: str) -> str:
+        s = (status or "").lower()
+        if s == "planned":
+            return "План"
+        if s == "done":
+            return "Проведено"
+        if s == "cancelled":
+            return "Отменено"
+        return s or "—"
+
+    def _status_color(self, status: str) -> QColor:
+        s = (status or "").lower()
+        if s == "cancelled":
+            return QColor("#ef4444")
+        if s == "done":
+            return QColor("#64748b")
+        return QColor("#0f172a")
+
+    def _update_details_from_selection(self):
+        b = self._selected_booking_from_list()
+        if not b:
+            self.lbl_d_main.setText("Выберите строку слева")
+            self.lbl_d_extra.setText("")
+            return
+
+        tenant = (getattr(b, "tenant_name", "") or "").strip()
+        title = (getattr(b, "title", "") or "").strip()
+        venue_id = int(getattr(b, "venue_id", 0) or 0)
+        unit_id = getattr(b, "venue_unit_id", None)
+        place = self._resolve_resource_name(venue_id, unit_id)
+
+        self.lbl_d_main.setText(
+            f"{b.starts_at:%d.%m.%Y} {b.starts_at:%H:%M}–{b.ends_at:%H:%M}\n"
+            f"Арендатор: {tenant}\n"
+            f"Событие: {title or '—'}"
+        )
+        self.lbl_d_extra.setText(f"Площадка: {place}\nТип: {self._kind_title(getattr(b, 'kind', ''))} | Статус: {self._status_title(getattr(b, 'status', ''))}")
+
     # -------- reload --------
 
     def reload(self):
@@ -611,7 +754,7 @@ class SchedulePage(QWidget):
         return self._reload_grid()
 
     def _reload_grid(self):
-        # очистка
+        # как было: очищаем и рисуем слоты по дню
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -691,10 +834,7 @@ class SchedulePage(QWidget):
             if it0:
                 tenant_name = (getattr(b, "tenant_name", "") or "").strip()
                 title = (getattr(b, "title", "") or "").strip()
-                if title:
-                    it0.setText(f"{tenant_name}\n{title}")
-                else:
-                    it0.setText(f"{tenant_name}")
+                it0.setText(f"{tenant_name}\n{title}" if title else f"{tenant_name}")
 
         self.tbl.resizeRowsToContents()
 
@@ -702,10 +842,18 @@ class SchedulePage(QWidget):
         self.tbl_list.setRowCount(0)
 
         if not self._resources:
+            self.lbl_period.setText("Период: —")
+            self.lbl_total.setText("")
+            self.kpi_total.setText("—")
+            self.kpi_pd.setText("—")
+            self.kpi_gz.setText("—")
+            self.kpi_cancelled.setText("—")
             return
 
         anchor = self.dt_day.date().toPython()
         d0, d1 = self._period_range(anchor)
+
+        self.lbl_period.setText(f"Период: {d0:%d.%m.%Y} – {d1:%d.%m.%Y}")
 
         start = datetime.combine(d0, time(0, 0), tzinfo=self.TZ)
         end = datetime.combine(d1 + timedelta(days=1), time(0, 0), tzinfo=self.TZ)
@@ -721,6 +869,32 @@ class SchedulePage(QWidget):
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки списка бронирований:\n{e}")
             return
 
+        # KPI totals
+        total = len(bookings)
+        pd = sum(1 for b in bookings if (getattr(b, "kind", "") or "").upper() == "PD")
+        gz = sum(1 for b in bookings if (getattr(b, "kind", "") or "").upper() == "GZ")
+        canc = sum(1 for b in bookings if (getattr(b, "status", "") or "").lower() == "cancelled")
+
+        self.kpi_total.setText(str(total))
+        self.kpi_pd.setText(str(pd))
+        self.kpi_gz.setText(str(gz))
+        self.kpi_cancelled.setText(str(canc))
+
+        # Capacity / Busy % for the period (rough, based on count? better by seconds)
+        busy_sec = 0
+        for b in bookings:
+            s = getattr(b, "starts_at", None)
+            e = getattr(b, "ends_at", None)
+            if s and e:
+                busy_sec += int((e - s).total_seconds())
+
+        days = (d1 - d0).days + 1
+        work_sec_per_day = int((datetime.combine(date.today(), self.WORK_END) - datetime.combine(date.today(), self.WORK_START)).total_seconds())
+        # capacity for all venues (not units) is tricky; we show "занято, ч" instead:
+        busy_hours = round(busy_sec / 3600.0, 1)
+        self.lbl_total.setText(f"Занято: {busy_hours} ч | Бронирований: {total}")
+
+        # Fill table with richer columns + status color
         bookings_sorted = sorted(bookings, key=lambda b: (getattr(b, "starts_at", datetime.min), getattr(b, "ends_at", datetime.min)))
         self.tbl_list.setRowCount(len(bookings_sorted))
 
@@ -729,37 +903,55 @@ class SchedulePage(QWidget):
             ends_at = getattr(b, "ends_at", None)
 
             dt_str = starts_at.strftime("%d.%m.%Y") if starts_at else ""
+            time_str = f"{starts_at:%H:%M}–{ends_at:%H:%M}" if starts_at and ends_at else ""
             tenant = (getattr(b, "tenant_name", "") or "").strip()
             title = (getattr(b, "title", "") or "").strip()
+
             venue_id = int(getattr(b, "venue_id", 0) or 0)
             unit_id = getattr(b, "venue_unit_id", None)
             resource_name = self._resolve_resource_name(venue_id, unit_id)
 
-            time_str = ""
-            if starts_at and ends_at:
-                time_str = f"{starts_at:%H:%M}–{ends_at:%H:%M}"
+            kind = self._kind_title(getattr(b, "kind", ""))
+            status = self._status_title(getattr(b, "status", ""))
 
             it0 = QTableWidgetItem(dt_str)
-            it1 = QTableWidgetItem(tenant)
-            it2 = QTableWidgetItem(title)
-            it3 = QTableWidgetItem(resource_name)
-            it4 = QTableWidgetItem(time_str)
+            it1 = QTableWidgetItem(time_str)
+            it2 = QTableWidgetItem(tenant)
+            it3 = QTableWidgetItem(title)
+            it4 = QTableWidgetItem(resource_name)
+            it5 = QTableWidgetItem(kind)
+            it6 = QTableWidgetItem(status)
 
             it0.setData(self.LIST_ROLE_BOOKING, b)
 
+            # background by kind/cancelled (as before)
             base = self._base_color_for_booking(b)
-            for it in (it0, it1, it2, it3, it4):
+            for it in (it0, it1, it2, it3, it4, it5, it6):
                 it.setBackground(base)
+
+            # align some cols
+            for it in (it1, it5, it6):
+                it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            # status color on "Статус"
+            it6.setForeground(self._status_color(getattr(b, "status", "")))
 
             self.tbl_list.setItem(row, 0, it0)
             self.tbl_list.setItem(row, 1, it1)
             self.tbl_list.setItem(row, 2, it2)
             self.tbl_list.setItem(row, 3, it3)
             self.tbl_list.setItem(row, 4, it4)
+            self.tbl_list.setItem(row, 5, it5)
+            self.tbl_list.setItem(row, 6, it6)
 
         self.tbl_list.resizeRowsToContents()
 
-    # -------- columns dialog --------
+        # select first row -> details update
+        if self.tbl_list.rowCount() > 0:
+            self.tbl_list.setCurrentCell(0, 0)
+            self._update_details_from_selection()
+
+    # -------- columns dialog (unchanged) --------
 
     def _on_columns(self):
         org_id = self.cmb_org.currentData()
