@@ -47,12 +47,14 @@ class TenantRulesWidget(QWidget):
         tenant_id: Optional[int],
         contract_from: Optional[date],
         contract_to: Optional[date],
+        tenant_kind: str = "legal",  # NEW: 'legal'|'person'
         is_admin: bool = False,
     ):
         super().__init__(parent)
         self._tenant_id = tenant_id
         self._contract_from = contract_from
         self._contract_to = contract_to
+        self._tenant_kind = (tenant_kind or "legal").strip()
         self._is_admin = bool(is_admin)
 
         # список [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
@@ -94,6 +96,16 @@ class TenantRulesWidget(QWidget):
             self._load_from_db()
         else:
             self._refresh()
+
+    def _default_rule_title(self) -> str:
+        # именно "Оферта" / "Аренда по договору" (без ФИО/названия)
+        return "Оферта" if self._tenant_kind == "person" else "Аренда по договору"
+
+    def set_tenant_kind(self, tenant_kind: str) -> None:
+        """
+        Чтобы TenantDialog мог динамически менять тип и это влияло на дефолт заголовка.
+        """
+        self._tenant_kind = (tenant_kind or "legal").strip()
 
     def _load_units_flat(self) -> List[Dict]:
         out: List[Dict] = []
@@ -194,6 +206,8 @@ class TenantRulesWidget(QWidget):
         v = dlg.values()
         unit_ids = v.get("venue_unit_ids") or [v["venue_unit_id"]]
 
+        title = (v.get("title") or "").strip() or self._default_rule_title()
+
         for uid in unit_ids:
             self._rules_local.append(
                 {
@@ -204,7 +218,7 @@ class TenantRulesWidget(QWidget):
                     "ends_at": v["ends_at"],
                     "valid_from": v["valid_from"],
                     "valid_to": v["valid_to"],
-                    "title": v["title"],
+                    "title": title,
                     "is_active": True,
                     "op": "new",
                 }
@@ -220,7 +234,11 @@ class TenantRulesWidget(QWidget):
 
         r = self._rules_local[idx]
         if r.get("op") == "deactivate" or not r.get("is_active", True):
-            QMessageBox.information(self, "Правила", "Правило отключено. Включение сделаем отдельной кнопкой при необходимости.")
+            QMessageBox.information(
+                self,
+                "Правила",
+                "Правило отключено. Включение сделаем отдельной кнопкой при необходимости.",
+            )
             return
 
         dlg = TenantRuleDialog(
@@ -236,9 +254,11 @@ class TenantRulesWidget(QWidget):
 
         v = dlg.values()
 
+        # если пользователь очистил title — подставим дефолт согласно типу контрагента
+        title = (v.get("title") or "").strip() or self._default_rule_title()
+
         # Простая стратегия без update_rule: если правило из БД — старое отключаем, новое добавляем
         if r.get("id"):
-            # локально помечаем деактивацию, реальную деактивацию сделает сохранение/кнопка отключить
             r["op"] = "deactivate"
             r["is_active"] = False
 
@@ -251,13 +271,12 @@ class TenantRulesWidget(QWidget):
                     "ends_at": v["ends_at"],
                     "valid_from": v["valid_from"],
                     "valid_to": v["valid_to"],
-                    "title": v["title"],
+                    "title": title,
                     "is_active": True,
                     "op": "new",
                 }
             )
         else:
-            # для новых (ещё не в БД) — просто меняем
             r.update(
                 {
                     "weekday": v["weekday"],
@@ -266,7 +285,7 @@ class TenantRulesWidget(QWidget):
                     "ends_at": v["ends_at"],
                     "valid_from": v["valid_from"],
                     "valid_to": v["valid_to"],
-                    "title": v["title"],
+                    "title": title,
                 }
             )
 
@@ -329,7 +348,6 @@ class TenantRulesWidget(QWidget):
 
         r = self._rules_local[idx]
 
-        # локальное (ещё не сохранено) — просто убрать
         if not r.get("id"):
             self._rules_local.pop(idx)
             self._refresh()
