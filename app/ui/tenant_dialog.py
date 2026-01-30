@@ -1,3 +1,4 @@
+# app/ui/tenant_dialog.py
 from __future__ import annotations
 
 from typing import Optional, Dict, List
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QGroupBox,
     QWidget,
+    QScrollArea,
+    QSizePolicy,
 )
 
 from app.ui.tenant_rules_widget import TenantRulesWidget
@@ -71,6 +74,12 @@ QPushButton {
 }
 QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
 QPushButton:pressed { background: #eef1f5; }
+
+/* scroll area look */
+QScrollArea {
+    border: none;
+    background: transparent;
+}
 """
 
 
@@ -112,7 +121,8 @@ class TenantDialog(QDialog):
         self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
         self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
 
-        self.resize(1060, 650)
+        # чуть выше по умолчанию (так правилам комфортнее)
+        self.resize(1100, 740)
 
         # ---- widgets (общие)
         self.ed_name = QLineEdit(self._data_in.get("name", "") or "")
@@ -225,7 +235,7 @@ class TenantDialog(QDialog):
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
 
-        # ---- group: Правила расписания (общие)
+        # ---- group: Правила расписания (общие) + QScrollArea
         gb_rules = QGroupBox("Правила расписания")
         rules_layout = QVBoxLayout(gb_rules)
         rules_layout.setContentsMargins(12, 16, 12, 12)
@@ -239,10 +249,21 @@ class TenantDialog(QDialog):
             tenant_id=self._tenant_id,
             contract_from=contract_from,
             contract_to=contract_to,
-            tenant_kind=self.cmb_tenant_kind.currentData(),  # NEW
+            tenant_kind=self.cmb_tenant_kind.currentData(),
             is_admin=self._is_admin,
         )
-        rules_layout.addWidget(self.rules_widget)
+        self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.rules_widget.setMinimumHeight(360)
+
+        scroll = QScrollArea(gb_rules)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(self.rules_widget)
+
+        rules_layout.addWidget(scroll, 1)
+        gb_rules.setMinimumHeight(420)
 
         # ---- layout: two columns (left/right)
         cols = QHBoxLayout()
@@ -253,12 +274,22 @@ class TenantDialog(QDialog):
         left_col.setSpacing(12)
         left_col.addWidget(gb_main)
         left_col.addWidget(gb_notes)
+        left_col.addStretch(1)
 
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
+
+        # Чтобы верхние группы не раздувались по высоте
+        self.gb_legal.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.gb_contract.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+
         right_col.addWidget(self.gb_legal)
         right_col.addWidget(self.gb_contract)
         right_col.addWidget(gb_rules, 1)
+
+        right_col.setStretchFactor(self.gb_legal, 0)
+        right_col.setStretchFactor(self.gb_contract, 0)
+        right_col.setStretchFactor(gb_rules, 1)
 
         cols.addLayout(left_col, 1)
         cols.addLayout(right_col, 1)
@@ -285,11 +316,10 @@ class TenantDialog(QDialog):
         is_person = (self.cmb_tenant_kind.currentData() == "person")
         self.gb_legal.setVisible(not is_person)
         self.gb_contract.setVisible(not is_person)
-    
+
         # NEW: чтобы дефолт для новых правил менялся сразу
         if hasattr(self, "rules_widget") and hasattr(self.rules_widget, "set_tenant_kind"):
             self.rules_widget.set_tenant_kind(self.cmb_tenant_kind.currentData())
-
 
     # ---------- helpers for multiselect combobox ----------
 
