@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time, datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from psycopg2.extras import RealDictCursor
 
@@ -22,6 +22,7 @@ class TenantRule:
     valid_to: date
     title: str
     is_active: bool
+
 
 @dataclass
 class GenerateReport:
@@ -136,39 +137,13 @@ def set_rule_active(rule_id: int, is_active: bool) -> None:
 
 
 def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
-    # weekday: 1..7 (Mon..Sun). Python date.weekday(): Mon=0..Sun=6
-    target = int(weekday) - 1
+    target = int(weekday) - 1  # Python: Mon=0..Sun=6
     d = valid_from
     while d <= valid_to:
         if d.weekday() == target:
             yield d
         d += timedelta(days=1)
 
-def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: timezone) -> GenerateReport:
-    created = 0
-    skipped = 0
-    errors: List[str] = []
-
-    for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
-        starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
-        ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
-        try:
-            create_booking(
-                venue_id=int(venue_id),
-                venue_unit_id=int(rule.venue_unit_id),
-                tenant_id=int(rule.tenant_id),
-                title=rule.title or "Аренда по договору",
-                kind="PD",
-                starts_at=starts_dt,
-                ends_at=ends_dt,
-            )
-            created += 1
-        except Exception as e:
-            # пересечение или любая другая причина — пропускаем, но пишем в отчёт
-            skipped += 1
-            errors.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
-
-    return GenerateReport(created=created, skipped=skipped, errors=errors)
 
 def get_venue_id_by_unit(venue_unit_id: int) -> int:
     conn = None
@@ -187,6 +162,71 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
         if conn:
             put_conn(conn)
 
+
+def _get_tenant_name_and_kind(tenant_id: int) -> Tuple[str, str]:
+    """
+    Возвращает (name, tenant_kind). tenant_kind: 'legal'|'person'
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT name, tenant_kind FROM public.tenants WHERE id=%s",
+                (int(tenant_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Контрагент tenant_id={tenant_id} не найден")
+            name = str(row.get("name") or "").strip()
+            kind = str(row.get("tenant_kind") or "legal").strip()
+            return name, kind
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def _default_booking_title(*, tenant_name: str, tenant_kind: str) -> str:
+    """
+    Заголовок брони, если в правиле title пустой.
+    Требование:
+      - юрлица: "<Название> — Аренда по договору"
+      - физлица: "<ФИО> — Оферта"
+    """
+    base = tenant_name.strip() or "Контрагент"
+    suffix = "Оферта" if tenant_kind == "person" else "Аренда по договору"
+    return f"{base} — {suffix}"
+
+
+def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: timezone) -> GenerateReport:
+    created = 0
+    skipped = 0
+    errors: List[str] = []
+
+    tenant_name, tenant_kind = _get_tenant_name_and_kind(rule.tenant_id)
+    fallback_title = _default_booking_title(tenant_name=tenant_name, tenant_kind=tenant_kind)
+
+    for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
+        starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
+        ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
+        try:
+            create_booking(
+                venue_id=int(venue_id),
+                venue_unit_id=int(rule.venue_unit_id),
+                tenant_id=int(rule.tenant_id),
+                title=(rule.title or "").strip() or fallback_title,
+                kind="PD",
+                starts_at=starts_dt,
+                ends_at=ends_dt,
+            )
+            created += 1
+        except Exception as e:
+            skipped += 1
+            errors.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
+
+    return GenerateReport(created=created, skipped=skipped, errors=errors)
+
+
 def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateReport:
     rules = list_rules_for_tenant(int(tenant_id), include_inactive=False)
     total_created = 0
@@ -202,6 +242,7 @@ def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateRep
 
     return GenerateReport(created=total_created, skipped=total_skipped, errors=errors)
 
+
 def delete_rule(rule_id: int) -> None:
     conn = None
     try:
@@ -214,5 +255,3 @@ def delete_rule(rule_id: int) -> None:
     finally:
         if conn:
             put_conn(conn)
-
-
