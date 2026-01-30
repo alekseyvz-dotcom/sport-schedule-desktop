@@ -519,21 +519,15 @@ class SchedulePage(QWidget):
         return self._selected_booking_from_list() if self._mode() == "list" else self._selected_booking_from_grid()
 
     def _row_to_datetime(self, day: date, row: int) -> datetime:
-        """
-        Преобразует индекс строки (слот) в datetime начала слота.
-        """
         slots = self._time_slots()
-        if row < 0 or row >= len(slots):
-            raise ValueError("row out of range")
+        row = max(0, min(row, len(slots) - 1))
         return datetime.combine(day, slots[row], tzinfo=self.TZ)
     
     
     def _selected_multi_units(self) -> Optional[Tuple[List[int], int, int]]:
         """
-        Возвращает (cols, rmin, rmax) по выделению в сетке:
-          cols  - список колонок (индексы QTableWidget), только ресурсные колонки (>=1)
-          rmin/rmax - min/max строка выделения
-        Ограничение: все выбранные колонки должны относиться к ОДНОЙ площадке (venue_id).
+        Возвращает (cols, rmin, rmax) по выделению в сетке слотов.
+        cols — индексы колонок таблицы self.tbl (>=1), rmin/rmax — строки.
         """
         ranges = self.tbl.selectedRanges()
         if not ranges:
@@ -548,23 +542,13 @@ class SchedulePage(QWidget):
             rmax = max(rmax, rg.bottomRow())
             for c in range(rg.leftColumn(), rg.rightColumn() + 1):
                 if c <= 0:
-                    continue  # пропускаем колонку "Время"
+                    continue
                 cols_set.add(c)
     
         if not cols_set or rmax < rmin:
             return None
     
-        cols = sorted(cols_set)
-    
-        # проверка: выбранные колонки должны быть одной площадки (venue_id)
-        venue_ids = set()
-        for c in cols:
-            rsrc = self._resources[c - 1]
-            venue_ids.add(int(rsrc.venue_id))
-        if len(venue_ids) != 1:
-            return None
-    
-        return cols, rmin, rmax
+        return sorted(cols_set), rmin, rmax
 
     # -------- data loading / period --------
 
@@ -1061,145 +1045,133 @@ class SchedulePage(QWidget):
         self.reload()
 
     def _on_create(self):
-        try:
-            if self._mode() != "grid":
-                QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
-                return
-
-            sel = self._selected_multi_units()
-            if not sel:
-                QMessageBox.information(
-                    self,
-                    "Создать бронь",
-                    "Выделите диапазон времени и 1+ колонок зон ОДНОЙ площадки (не колонку 'Время').",
-                )
-                return
-
+        if self._mode() != "grid":
+            QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
+            return
+    
+        if not self._resources:
+            QMessageBox.information(self, "Создать бронь", "Нет площадок/зон в выбранном учреждении.")
+            return
+    
+        day = self.dt_day.date().toPython()
+    
+        sel = self._selected_multi_units()
+        if sel:
             cols, rmin, rmax = sel
-            day = self.dt_day.date().toPython()
-
-            starts_at = self._row_to_datetime(day, rmin)
-            ends_at = self._row_to_datetime(day, rmax) + timedelta(minutes=self.SLOT_MINUTES)
-
-            if not self._tenants:
-                QMessageBox.warning(self, "Контрагенты", "Нет активных контрагентов. Сначала создайте контрагента.")
+            # поддержим простой кейс: создаём для первой выбранной колонки
+            col = cols[0]
+            r0, r1 = rmin, rmax
+        else:
+            it = self.tbl.currentItem()
+            if not it:
+                QMessageBox.information(self, "Создать бронь", "Выберите слот.")
                 return
-
-            venue_name = self._resources[cols[0] - 1].venue_name
-
-            dlg = BookingDialog(
-                self,
-                starts_at=starts_at,
-                ends_at=ends_at,
-                tenants=self._tenants,
-                venue_name=venue_name,
-                venue_units=None,
+            col = it.column()
+            if col <= 0:
+                QMessageBox.information(self, "Создать бронь", "Выберите слот на площадке/зоне (не колонку 'Время').")
+                return
+            r0 = it.row()
+            r1 = it.row()
+    
+        # если кликнули по существующей брони — редактируем
+        it0 = self.tbl.item(r0, col)
+        if it0 and it0.data(Qt.ItemDataRole.UserRole):
+            self._on_edit()
+            return
+    
+        starts_at = self._row_to_datetime(day, r0)
+        ends_at = self._row_to_datetime(day, r1) + timedelta(minutes=self.SLOT_MINUTES)
+    
+        rsrc = self._resources[col - 1]
+        venue_id = int(rsrc.venue_id)
+        venue_unit_id = int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None
+    
+        dlg = BookingDialog(
+            self,
+            title="Создать бронь",
+            tenants=self._tenants,
+            venue_id=venue_id,
+            venue_unit_id=venue_unit_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+    
+        data = dlg.values()
+        try:
+            create_booking(
+                venue_id=int(data["venue_id"]),
+                tenant_id=(int(data["tenant_id"]) if data.get("tenant_id") else None),
+                title=str(data.get("title") or ""),
+                kind=str(data.get("kind") or "PD"),
+                starts_at=data["starts_at"],
+                ends_at=data["ends_at"],
+                venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
             )
-
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                return
-
-            data = dlg.values()
-
-            created_ids: List[int] = []
-            for col in cols:
-                rsrc = self._resources[col - 1]
-                new_id = create_booking(
-                    venue_id=int(rsrc.venue_id),
-                    venue_unit_id=(int(rsrc.venue_unit_id) if rsrc.venue_unit_id is not None else None),
-                    tenant_id=data["tenant_id"],
-                    title=data["title"],
-                    kind=data["kind"],
-                    starts_at=starts_at,
-                    ends_at=ends_at,
-                )
-                created_ids.append(new_id)
-
-            QMessageBox.information(self, "Расписание", f"Создано бронирований: {len(created_ids)}")
-            self.reload()
-
         except Exception as e:
-            _uilog("UNHANDLED ERROR in _on_create: " + repr(e))
+            _uilog("ERROR create: " + repr(e))
             _uilog(traceback.format_exc())
-            QMessageBox.critical(
-                self,
-                "Создать бронь",
-                "Непредвиденная ошибка. Смотрите лог:\n"
-                f"{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n"
-                f"{repr(e)}",
-            )
+            QMessageBox.critical(self, "Создать бронь", f"Непредвиденная ошибка. Смотрите лог:\n{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n{e}")
+            return
+    
+        self.reload()
 
     def _on_edit(self):
         b = self._selected_booking()
         if not b:
-            QMessageBox.information(self, "Редактировать", "Выберите бронь.")
+            QMessageBox.information(self, "Редактировать", "Выберите бронирование.")
             return
-        if getattr(b, "status", "") == "cancelled":
-            QMessageBox.information(self, "Редактировать", "Отменённую бронь редактировать нельзя.")
-            return
-
-        rsrc = next((r for r in self._resources if r.venue_id == b.venue_id and r.venue_unit_id == b.venue_unit_id), None)
-        venue_name = rsrc.resource_name if rsrc else f"Площадка {b.venue_id}"
-
-        units = [{"id": u.id, "name": u.name} for u in list_venue_units(int(b.venue_id), include_inactive=False)]
-
+    
         dlg = BookingDialog(
             self,
-            title="Редактировать бронирование",
-            starts_at=b.starts_at,
-            ends_at=b.ends_at,
+            title="Редактировать бронь",
             tenants=self._tenants,
-            venue_name=venue_name,
-            venue_units=units,
-            initial={
-                "kind": getattr(b, "kind", "PD"),
-                "tenant_id": getattr(b, "tenant_id", None),
-                "venue_unit_id": getattr(b, "venue_unit_id", None),
-                "title": getattr(b, "title", ""),
-            },
+            initial=b,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-
+    
         data = dlg.values()
         try:
             update_booking(
-                int(b.id),
-                tenant_id=data["tenant_id"],
-                title=data["title"],
-                kind=data["kind"],
-                venue_unit_id=data["venue_unit_id"],
+                int(getattr(b, "id")),
+                tenant_id=(int(data["tenant_id"]) if data.get("tenant_id") else None),
+                title=str(data.get("title") or ""),
+                kind=str(data.get("kind") or "PD"),
+                venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать бронирование", f"Ошибка:\n{e}")
+            _uilog("ERROR update: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Редактировать", f"Непредвиденная ошибка. Смотрите лог:\n{os.path.join(tempfile.gettempdir(), 'schedule_debug.log')}\n\n{e}")
             return
-
+    
         self.reload()
 
     def _on_cancel(self):
         b = self._selected_booking()
         if not b:
-            QMessageBox.information(self, "Отмена", "Выберите бронь.")
+            QMessageBox.information(self, "Отменить", "Выберите бронирование.")
             return
-        if getattr(b, "status", "") == "cancelled":
-            QMessageBox.information(self, "Отмена", "Бронь уже отменена.")
-            return
-
+    
         if (
             QMessageBox.question(
                 self,
-                "Подтверждение",
-                f"Отменить бронь:\n{getattr(b, 'tenant_name', '')}\n{getattr(b, 'title', '')}\n"
-                f"{b.starts_at:%d.%m.%Y %H:%M} – {b.ends_at:%H:%M} ?",
+                "Отмена бронирования",
+                "Отменить выбранное бронирование?",
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
-
+    
         try:
-            cancel_booking(int(b.id))
+            cancel_booking(int(getattr(b, "id")))
         except Exception as e:
-            QMessageBox.critical(self, "Отмена брони", f"Ошибка:\n{e}")
+            _uilog("ERROR cancel: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(self, "Отменить", f"Ошибка отмены:\n{e}")
             return
-
+    
         self.reload()
+
