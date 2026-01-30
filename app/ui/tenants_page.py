@@ -112,29 +112,29 @@ class TenantsPage(QWidget):
         header = self.tbl.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setHighlightSections(False)
-
-        # ВАЖНО:
-        # 1) Даем пользователю раздвигать поля
-        # 2) Не используем массово ResizeToContents (иначе "ФИО" схлопывается)
+        
+        # 1) Пользователь может двигать
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-
-        # Узкие колонки можно по содержимому:
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Тип
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Аренда
+        
+        # 2) Последняя колонка (Комментарий) тянется и "съедает" остаток
+        header.setStretchLastSection(True)
+        
+        # Узкие колонки по содержимому
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)   # ID
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)   # Тип
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)   # Аренда
         header.setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)  # Активен
-
-        # Ключевые текстовые колонки — растягиваем, но ФИО дополнительно фиксируем минимумом
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # ФИО/Название
-        header.setSectionResizeMode(13, QHeaderView.ResizeMode.Stretch)  # Комментарий
-
-        # Чтобы колонка "ФИО / Название" НЕ становилась очень узкой:
-        header.setMinimumSectionSize(60)  # общий минимум, чтобы совсем в 0 не сжималось
-        self.tbl.setColumnWidth(1, self.NAME_MIN_WIDTH)
-        self.tbl.setColumnWidth(13, 220)
-
-        # Остальным задаем разумные стартовые ширины (и их можно менять мышью)
+        
+        # ВАЖНО: ФИО делаем НЕ Stretch, а Interactive (чтобы ширина не схлопывалась)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(13, QHeaderView.ResizeMode.Interactive)
+        
+        # Стартовые ширины
+        header.setMinimumSectionSize(80)
+        self.tbl.setColumnWidth(1, 420)   # ФИО/Название (сразу широко)
+        self.tbl.setColumnWidth(13, 260)  # Комментарий (можно, но он всё равно будет тянуться)
+        
+        # Остальным задаем разумные стартовые ширины
         self.tbl.setColumnWidth(4, 90)    # ИНН
         self.tbl.setColumnWidth(5, 120)   # Телефон
         self.tbl.setColumnWidth(6, 180)   # Email
@@ -143,6 +143,7 @@ class TenantsPage(QWidget):
         self.tbl.setColumnWidth(9, 95)    # Срок с
         self.tbl.setColumnWidth(10, 95)   # Срок по
         self.tbl.setColumnWidth(11, 120)  # Статус
+
 
         self.tbl.setStyleSheet(
             """
@@ -296,6 +297,7 @@ class TenantsPage(QWidget):
         self.tbl.setSortingEnabled(True)
 
         # На всякий случай: после перезагрузки еще раз удерживаем минимум ширины ФИО
+        self.tbl.horizontalHeader().setStretchLastSection(True)
         if self.tbl.columnWidth(1) < self.NAME_MIN_WIDTH:
             self.tbl.setColumnWidth(1, self.NAME_MIN_WIDTH)
 
