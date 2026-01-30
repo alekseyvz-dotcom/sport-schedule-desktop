@@ -39,6 +39,9 @@ from app.ui.tenant_dialog import TenantDialog
 class TenantsPage(QWidget):
     TZ = timezone(timedelta(hours=3))
 
+    # Минимальная ширина колонки "ФИО / Название" (чтобы всегда было читаемо)
+    NAME_MIN_WIDTH = 260
+
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self._user = user
@@ -74,7 +77,6 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_archive)
 
         # --- Table ---
-        # Добавили 2 колонки: Тип, Аренда
         self.tbl = QTableWidget(0, 14)
         self.tbl.setHorizontalHeaderLabels(
             [
@@ -104,22 +106,43 @@ class TenantsPage(QWidget):
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.doubleClicked.connect(self._on_edit)
 
+        # Горизонтальный скролл появится, если места мало (важно для "ФИО всегда читаемо")
+        self.tbl.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
         header = self.tbl.horizontalHeader()
-        header.setStretchLastSection(True)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setHighlightSections(False)
 
+        # ВАЖНО:
+        # 1) Даем пользователю раздвигать поля
+        # 2) Не используем массово ResizeToContents (иначе "ФИО" схлопывается)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+
+        # Узкие колонки можно по содержимому:
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # ФИО/Название
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Тип
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Аренда
+        header.setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)  # Активен
 
-        # Тип, Аренда
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-
-        for col in (4, 5, 6, 7, 8, 9, 10, 11, 12):
-            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-
+        # Ключевые текстовые колонки — растягиваем, но ФИО дополнительно фиксируем минимумом
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # ФИО/Название
         header.setSectionResizeMode(13, QHeaderView.ResizeMode.Stretch)  # Комментарий
+
+        # Чтобы колонка "ФИО / Название" НЕ становилась очень узкой:
+        header.setMinimumSectionSize(60)  # общий минимум, чтобы совсем в 0 не сжималось
+        self.tbl.setColumnWidth(1, self.NAME_MIN_WIDTH)
+        self.tbl.setColumnWidth(13, 220)
+
+        # Остальным задаем разумные стартовые ширины (и их можно менять мышью)
+        self.tbl.setColumnWidth(4, 90)    # ИНН
+        self.tbl.setColumnWidth(5, 120)   # Телефон
+        self.tbl.setColumnWidth(6, 180)   # Email
+        self.tbl.setColumnWidth(7, 150)   # Контакт
+        self.tbl.setColumnWidth(8, 120)   # № договора
+        self.tbl.setColumnWidth(9, 95)    # Срок с
+        self.tbl.setColumnWidth(10, 95)   # Срок по
+        self.tbl.setColumnWidth(11, 120)  # Статус
 
         self.tbl.setStyleSheet(
             """
@@ -254,8 +277,12 @@ class TenantsPage(QWidget):
             self.tbl.setItem(r, 6, QTableWidgetItem(t.email or ""))
             self.tbl.setItem(r, 7, QTableWidgetItem(t.contact_name or ""))
             self.tbl.setItem(r, 8, QTableWidgetItem(t.contract_no or ""))
-            self.tbl.setItem(r, 9, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
-            self.tbl.setItem(r, 10, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
+            self.tbl.setItem(
+                r, 9, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else "")
+            )
+            self.tbl.setItem(
+                r, 10, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else "")
+            )
             self.tbl.setItem(r, 11, QTableWidgetItem(t.status or ""))
             self.tbl.setItem(r, 12, it_active)
             self.tbl.setItem(r, 13, QTableWidgetItem(t.comment or ""))
@@ -267,6 +294,10 @@ class TenantsPage(QWidget):
                         it.setForeground(Qt.GlobalColor.darkGray)
 
         self.tbl.setSortingEnabled(True)
+
+        # На всякий случай: после перезагрузки еще раз удерживаем минимум ширины ФИО
+        if self.tbl.columnWidth(1) < self.NAME_MIN_WIDTH:
+            self.tbl.setColumnWidth(1, self.NAME_MIN_WIDTH)
 
     def _apply_rules_and_maybe_generate(self, tenant_id: int, rules_payload: list[dict]) -> None:
         try:
