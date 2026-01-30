@@ -8,11 +8,13 @@ from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
 
+
 def _tlog(msg: str) -> None:
     try:
         import os
         import tempfile
         from datetime import datetime
+
         path = os.path.join(tempfile.gettempdir(), "tenant_debug.log")
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} {msg}\n")
@@ -44,6 +46,9 @@ class Tenant:
     has_ds: bool
     notes: Optional[str]
 
+    tenant_kind: str  # 'legal' | 'person'
+    rent_kind: str  # 'long_term' | 'one_time'
+
 
 def list_tenants(search: str = "", include_inactive: bool = False) -> List[Tenant]:
     search = (search or "").strip()
@@ -67,7 +72,8 @@ def list_tenants(search: str = "", include_inactive: bool = False) -> List[Tenan
                     t.contact_name, t.obligation_kind, t.contract_no,
                     t.contract_date, t.contract_valid_from, t.contract_valid_to,
                     t.docs_delivery_method, t.status, t.contract_signed,
-                    t.attached_in_1c, t.has_ds, t.notes
+                    t.attached_in_1c, t.has_ds, t.notes,
+                    t.tenant_kind, t.rent_kind
                 FROM public.tenants t
             """
             if where:
@@ -97,6 +103,8 @@ def list_tenants(search: str = "", include_inactive: bool = False) -> List[Tenan
                     attached_in_1c=bool(r.get("attached_in_1c") or False),
                     has_ds=bool(r.get("has_ds") or False),
                     notes=r.get("notes"),
+                    tenant_kind=str(r.get("tenant_kind") or "legal"),
+                    rent_kind=str(r.get("rent_kind") or "long_term"),
                 )
                 for r in rows
             ]
@@ -117,7 +125,8 @@ def get_tenant(tenant_id: int) -> Tenant:
                     t.contact_name, t.obligation_kind, t.contract_no,
                     t.contract_date, t.contract_valid_from, t.contract_valid_to,
                     t.docs_delivery_method, t.status, t.contract_signed,
-                    t.attached_in_1c, t.has_ds, t.notes
+                    t.attached_in_1c, t.has_ds, t.notes,
+                    t.tenant_kind, t.rent_kind
                 FROM public.tenants t
                 WHERE t.id = %s
                 """,
@@ -147,6 +156,8 @@ def get_tenant(tenant_id: int) -> Tenant:
                 attached_in_1c=bool(r.get("attached_in_1c") or False),
                 has_ds=bool(r.get("has_ds") or False),
                 notes=r.get("notes"),
+                tenant_kind=str(r.get("tenant_kind") or "legal"),
+                rent_kind=str(r.get("rent_kind") or "long_term"),
             )
     finally:
         if conn:
@@ -157,6 +168,9 @@ def create_tenant(**data) -> int:
     name = (data.get("name") or "").strip()
     if not name:
         raise ValueError("Название контрагента не может быть пустым")
+
+    tenant_kind = (data.get("tenant_kind") or "legal").strip()
+    rent_kind = (data.get("rent_kind") or "long_term").strip()
 
     conn = None
     try:
@@ -169,14 +183,16 @@ def create_tenant(**data) -> int:
                     contact_name, obligation_kind, contract_no,
                     contract_date, contract_valid_from, contract_valid_to,
                     docs_delivery_method, status, contract_signed,
-                    attached_in_1c, has_ds, notes
+                    attached_in_1c, has_ds, notes,
+                    tenant_kind, rent_kind
                 )
                 VALUES (
                     %(name)s, %(inn)s, %(phone)s, %(email)s, %(comment)s, true,
                     %(contact_name)s, %(obligation_kind)s, %(contract_no)s,
                     %(contract_date)s, %(contract_valid_from)s, %(contract_valid_to)s,
                     %(docs_delivery_method)s, %(status)s, %(contract_signed)s,
-                    %(attached_in_1c)s, %(has_ds)s, %(notes)s
+                    %(attached_in_1c)s, %(has_ds)s, %(notes)s,
+                    %(tenant_kind)s, %(rent_kind)s
                 )
                 RETURNING id
                 """,
@@ -198,6 +214,8 @@ def create_tenant(**data) -> int:
                     "attached_in_1c": bool(data.get("attached_in_1c") or False),
                     "has_ds": bool(data.get("has_ds") or False),
                     "notes": (data.get("notes") or "").strip() or None,
+                    "tenant_kind": tenant_kind,
+                    "rent_kind": rent_kind,
                 },
             )
             new_id = int(cur.fetchone()[0])
@@ -218,6 +236,9 @@ def update_tenant(tenant_id: int, **data) -> None:
     name = (data.get("name") or "").strip()
     if not name:
         raise ValueError("Название контрагента не может быть пустым")
+
+    tenant_kind = (data.get("tenant_kind") or "legal").strip()
+    rent_kind = (data.get("rent_kind") or "long_term").strip()
 
     conn = None
     try:
@@ -249,7 +270,9 @@ def update_tenant(tenant_id: int, **data) -> None:
                     contract_signed=%(contract_signed)s,
                     attached_in_1c=%(attached_in_1c)s,
                     has_ds=%(has_ds)s,
-                    notes=%(notes)s
+                    notes=%(notes)s,
+                    tenant_kind=%(tenant_kind)s,
+                    rent_kind=%(rent_kind)s
                 WHERE id=%(id)s
                 """,
                 {
@@ -271,6 +294,8 @@ def update_tenant(tenant_id: int, **data) -> None:
                     "attached_in_1c": bool(data.get("attached_in_1c") or False),
                     "has_ds": bool(data.get("has_ds") or False),
                     "notes": (data.get("notes") or "").strip() or None,
+                    "tenant_kind": tenant_kind,
+                    "rent_kind": rent_kind,
                 },
             )
             rowcount = cur.rowcount
@@ -294,6 +319,7 @@ def update_tenant(tenant_id: int, **data) -> None:
         _tlog("update_tenant returning connection to pool")
         if conn:
             put_conn(conn)
+
 
 def set_tenant_active(tenant_id: int, is_active: bool):
     conn = None
