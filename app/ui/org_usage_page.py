@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, time, timedelta, timezone
+from datetime import date, timedelta, timezone
 from typing import List, Dict, Tuple, Optional
 
 from PySide6.QtCore import Qt, QTimer
@@ -87,8 +87,6 @@ def _hours(sec: int) -> float:
 
 
 class OrgUsagePage(QWidget):
-    WORK_START = time(8, 0)
-    WORK_END = time(22, 0)
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
@@ -153,7 +151,6 @@ class OrgUsagePage(QWidget):
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        # left: rating table
         self.tbl = QTableWidget(0, 7)
         self.tbl.setHorizontalHeaderLabels(
             [
@@ -185,7 +182,6 @@ class OrgUsagePage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
-        # right: details
         self.details = UsageDetailsWidget(self)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -293,8 +289,6 @@ class OrgUsagePage(QWidget):
                 tz=self.TZ,
                 org_id=(int(org_id) if org_id is not None else None),
                 include_cancelled=include_cancelled,
-                work_start=self.WORK_START,
-                work_end=self.WORK_END,
             )
         except Exception as e:
             QMessageBox.critical(self, "Загрузка учреждений", f"Ошибка расчёта:\n{e}")
@@ -312,7 +306,6 @@ class OrgUsagePage(QWidget):
             f"Занято {_hours(busy)}ч ({_pct(busy, cap):.1f}%)"
         )
 
-        # группировка: сначала строка итога по учреждению, потом площадки
         by_org: Dict[Tuple[int, str], List[UsageRow]] = {}
         for r in rows:
             by_org.setdefault((r.org_id, r.org_name), []).append(r)
@@ -330,7 +323,6 @@ class OrgUsagePage(QWidget):
         for (oid, oname) in org_keys:
             org_rows = by_org[(oid, oname)]
 
-            # org total row
             org_cap = sum(x.capacity_sec for x in org_rows)
             org_pd = sum(x.pd_sec for x in org_rows)
             org_gz = sum(x.gz_sec for x in org_rows)
@@ -345,7 +337,6 @@ class OrgUsagePage(QWidget):
             it_venue = QTableWidgetItem("ИТОГО по учреждению")
             it_venue.setFont(self._bold_font())
 
-            # сохраним метку "org total" в UserRole
             it_org.setData(Qt.ItemDataRole.UserRole, ("org", oid))
             it_venue.setData(Qt.ItemDataRole.UserRole, ("org", oid))
 
@@ -364,7 +355,6 @@ class OrgUsagePage(QWidget):
                     if c >= 3:
                         it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            # venues rows, sorted inside org
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
             for v in org_rows:
                 rr = self.tbl.rowCount()
@@ -391,10 +381,11 @@ class OrgUsagePage(QWidget):
                     if it:
                         it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        # выберем первую строку (чтобы справа сразу что-то было)
         if self.tbl.rowCount() > 0:
             self.tbl.setCurrentCell(0, 0)
             self._on_selection_changed()
+        else:
+            self.details.set_data(None)
 
     def _on_selection_changed(self):
         if not self._period:
@@ -417,6 +408,11 @@ class OrgUsagePage(QWidget):
             return
 
         kind, obj_id = tag
+
+        # ВАЖНО:
+        # Мы больше не показываем фиксированные "08–12/12–18/18–22" как фактические интервалы.
+        # UsageDetailsWidget должен отображать "утро/день/вечер" как доли в пределах режима работы.
+        # Если у вас там сейчас жёстко прошиты часы, просто поменяйте подписи на нейтральные.
 
         if kind == "venue":
             v = next((x for x in self._rows if int(x.venue_id) == int(obj_id)), None)
