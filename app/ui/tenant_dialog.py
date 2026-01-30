@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QLabel,
     QGroupBox,
+    QWidget,
 )
 
 from app.ui.tenant_rules_widget import TenantRulesWidget
@@ -108,23 +109,43 @@ class TenantDialog(QDialog):
         self._data_in = data or {}
         self._tenant_id: Optional[int] = self._data_in.get("id")
 
+        self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
+        self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
+
         self.resize(1060, 650)
 
-        # ---- widgets
+        # ---- widgets (общие)
         self.ed_name = QLineEdit(self._data_in.get("name", "") or "")
-        self.ed_inn = QLineEdit(self._data_in.get("inn", "") or "")
         self.ed_phone = QLineEdit(self._data_in.get("phone", "") or "")
+
+        # Тип контрагента
+        self.cmb_tenant_kind = QComboBox()
+        self.cmb_tenant_kind.addItem("Юридическое лицо", "legal")
+        self.cmb_tenant_kind.addItem("Физическое лицо", "person")
+        idx_kind = self.cmb_tenant_kind.findData(self._tenant_kind_in)
+        self.cmb_tenant_kind.setCurrentIndex(idx_kind if idx_kind >= 0 else 0)
+        self.cmb_tenant_kind.currentIndexChanged.connect(self._apply_kind_ui)
+
+        # Тип аренды
+        self.cmb_rent_kind = QComboBox()
+        self.cmb_rent_kind.addItem("Долгосрочно", "long_term")
+        self.cmb_rent_kind.addItem("Разово", "one_time")
+        idx_rent = self.cmb_rent_kind.findData(self._rent_kind_in)
+        self.cmb_rent_kind.setCurrentIndex(idx_rent if idx_rent >= 0 else 0)
+
+        # ---- widgets (только юрлицо)
+        self.ed_inn = QLineEdit(self._data_in.get("inn", "") or "")
         self.ed_email = QLineEdit(self._data_in.get("email", "") or "")
 
         self.ed_contact_name = QLineEdit(self._data_in.get("contact_name", "") or "")
         self.ed_contract_no = QLineEdit(self._data_in.get("contract_no", "") or "")
 
-        # Вид обязательств (multi)
+        # Вид обязательств (multi) — нужен и для физлица тоже
         self.cmb_obligation = QComboBox()
         self._setup_multiselect_combobox(self.cmb_obligation, _OBLIGATION_OPTIONS)
         self._set_multiselect_from_string(self.cmb_obligation, self._data_in.get("obligation_kind", "") or "")
 
-        # Способ передачи документов (single)
+        # Способ передачи документов (single) — только юрлицо
         self.cmb_delivery = QComboBox()
         self.cmb_delivery.addItems(_DELIVERY_OPTIONS)
         self._set_combobox_text(self.cmb_delivery, (self._data_in.get("docs_delivery_method", "") or "").strip())
@@ -141,26 +162,37 @@ class TenantDialog(QDialog):
         idx = self.cmb_status.findData(cur_status)
         self.cmb_status.setCurrentIndex(idx if idx >= 0 else 0)
 
-        # Чекбоксы (ДС / 1С / подписанный договор) — УБРАЛИ по вашему требованию
-
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
         self.ed_notes = QTextEdit(self._data_in.get("notes", "") or "")
 
-        # ---- group: Основное
+        # ---- group: Основное (общие поля)
         gb_main = QGroupBox("Основное")
         fm_main = QFormLayout(gb_main)
         fm_main.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         fm_main.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         fm_main.setHorizontalSpacing(12)
         fm_main.setVerticalSpacing(10)
-        fm_main.addRow("Название *:", self.ed_name)
-        fm_main.addRow("ИНН:", self.ed_inn)
-        fm_main.addRow("Телефон:", self.ed_phone)
-        fm_main.addRow("Email:", self.ed_email)
 
-        # ---- group: Договор / реквизиты
-        gb_contract = QGroupBox("Договор")
-        grid = QGridLayout(gb_contract)
+        fm_main.addRow("ФИО / Название *:", self.ed_name)
+        fm_main.addRow("Тип контрагента:", self.cmb_tenant_kind)
+        fm_main.addRow("Тип аренды:", self.cmb_rent_kind)
+        fm_main.addRow("Телефон:", self.ed_phone)
+        fm_main.addRow("Вид обязательств:", self.cmb_obligation)
+
+        # ---- group: Реквизиты (юрлицо) — отдельный контейнер, чтобы скрывать красиво
+        self.gb_legal = QGroupBox("Реквизиты (юрлицо)")
+        fm_legal = QFormLayout(self.gb_legal)
+        fm_legal.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        fm_legal.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        fm_legal.setHorizontalSpacing(12)
+        fm_legal.setVerticalSpacing(10)
+
+        fm_legal.addRow("ИНН:", self.ed_inn)
+        fm_legal.addRow("Email:", self.ed_email)
+
+        # ---- group: Договор / реквизиты (юрлицо)
+        self.gb_contract = QGroupBox("Договор")
+        grid = QGridLayout(self.gb_contract)
         grid.setContentsMargins(12, 16, 12, 12)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(10)
@@ -177,8 +209,6 @@ class TenantDialog(QDialog):
 
         grid.addWidget(QLabel("Контакт:"), 2, 0)
         grid.addWidget(self.ed_contact_name, 2, 1)
-        grid.addWidget(QLabel("Вид обязательств:"), 2, 2)
-        grid.addWidget(self.cmb_obligation, 2, 3)
 
         grid.addWidget(QLabel("Способ передачи документов:"), 3, 0)
         grid.addWidget(self.cmb_delivery, 3, 1, 1, 3)
@@ -186,7 +216,7 @@ class TenantDialog(QDialog):
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
 
-        # ---- group: Комментарии / примечания
+        # ---- group: Комментарии / примечания (общие)
         gb_notes = QGroupBox("Комментарии")
         fm_notes = QFormLayout(gb_notes)
         fm_notes.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
@@ -195,11 +225,12 @@ class TenantDialog(QDialog):
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
 
-        # ---- group: Правила расписания
+        # ---- group: Правила расписания (общие)
         gb_rules = QGroupBox("Правила расписания")
         rules_layout = QVBoxLayout(gb_rules)
         rules_layout.setContentsMargins(12, 16, 12, 12)
 
+        # Contract_from/contract_to для правил: если юрлицо — из договора, если физлицо — можно оставить пусто
         contract_from = _qdate_to_pydate(self.dt_valid_from.date())
         contract_to = _qdate_to_pydate(self.dt_valid_to.date())
 
@@ -224,7 +255,8 @@ class TenantDialog(QDialog):
 
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
-        right_col.addWidget(gb_contract)
+        right_col.addWidget(self.gb_legal)
+        right_col.addWidget(self.gb_contract)
         right_col.addWidget(gb_rules, 1)
 
         cols.addLayout(left_col, 1)
@@ -246,6 +278,13 @@ class TenantDialog(QDialog):
         root.addLayout(cols)
         root.addWidget(buttons)
 
+        self._apply_kind_ui()
+
+    def _apply_kind_ui(self) -> None:
+        is_person = (self.cmb_tenant_kind.currentData() == "person")
+        self.gb_legal.setVisible(not is_person)
+        self.gb_contract.setVisible(not is_person)
+
     # ---------- helpers for multiselect combobox ----------
 
     def _setup_multiselect_combobox(self, cmb: QComboBox, options: List[str]) -> None:
@@ -258,16 +297,12 @@ class TenantDialog(QDialog):
         cmb.lineEdit().setReadOnly(True)
         cmb.lineEdit().setPlaceholderText("Выберите...")
 
-        # добавляем элементы
         for opt in options:
             cmb.addItem(opt)
             idx = cmb.model().index(cmb.count() - 1, 0)
             cmb.model().setData(idx, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
 
-        # по клику в выпадающем списке переключаем галочку
         cmb.view().pressed.connect(lambda mi: self._toggle_combo_checkstate(cmb, mi))
-
-        # первичное отображение текста
         self._refresh_multiselect_text(cmb)
 
     def _toggle_combo_checkstate(self, cmb: QComboBox, model_index) -> None:
@@ -290,7 +325,6 @@ class TenantDialog(QDialog):
         return out
 
     def _set_multiselect_from_string(self, cmb: QComboBox, s: str) -> None:
-        # поддержим и "a,b" и "a; b"
         raw = (s or "").strip()
         if not raw:
             self._refresh_multiselect_text(cmb)
@@ -318,7 +352,6 @@ class TenantDialog(QDialog):
         if idx >= 0:
             cmb.setCurrentIndex(idx)
         else:
-            # если в данных была старая строка, которой нет в списке — добавим её
             cmb.addItem(text)
             cmb.setCurrentIndex(cmb.count() - 1)
 
@@ -340,38 +373,76 @@ class TenantDialog(QDialog):
     def _on_accept(self):
         name = self.ed_name.text().strip()
         if not name:
-            QMessageBox.warning(self, "Контрагент", "Введите название.")
+            QMessageBox.warning(self, "Контрагент", "Введите ФИО/название.")
             self.ed_name.setFocus()
             return
 
-        d_from = _qdate_to_pydate(self.dt_valid_from.date())
-        d_to = _qdate_to_pydate(self.dt_valid_to.date())
-        if d_from and d_to and d_to < d_from:
-            QMessageBox.warning(self, "Контрагент", "Срок действия: дата 'по' не может быть раньше даты 'с'.")
-            return
+        is_person = (self.cmb_tenant_kind.currentData() == "person")
+        if not is_person:
+            d_from = _qdate_to_pydate(self.dt_valid_from.date())
+            d_to = _qdate_to_pydate(self.dt_valid_to.date())
+            if d_from and d_to and d_to < d_from:
+                QMessageBox.warning(self, "Контрагент", "Срок действия: дата 'по' не может быть раньше даты 'с'.")
+                return
 
         self.accept()
 
     def values(self) -> Dict:
         obligation_list = self._multiselect_values(self.cmb_obligation)
-        obligation_str = ", ".join(obligation_list)  # сохраняем обратно в строку (как было поле obligation_kind)
+        obligation_str = ", ".join(obligation_list)
 
-        return {
+        tenant_kind = self.cmb_tenant_kind.currentData()
+        rent_kind = self.cmb_rent_kind.currentData()
+        is_person = (tenant_kind == "person")
+
+        base = {
             "name": self.ed_name.text().strip(),
-            "inn": self.ed_inn.text().strip(),
             "phone": self.ed_phone.text().strip(),
-            "email": self.ed_email.text().strip(),
-            "comment": self.ed_comment.toPlainText().strip(),
-            "contact_name": self.ed_contact_name.text().strip(),
             "obligation_kind": obligation_str,
-            "contract_no": self.ed_contract_no.text().strip(),
-            "contract_date": _qdate_to_pydate(self.dt_contract_date.date()),
-            "contract_valid_from": _qdate_to_pydate(self.dt_valid_from.date()),
-            "contract_valid_to": _qdate_to_pydate(self.dt_valid_to.date()),
-            "docs_delivery_method": self.cmb_delivery.currentText().strip(),
-            "status": self.cmb_status.currentData(),
+            "tenant_kind": tenant_kind,
+            "rent_kind": rent_kind,
+            "comment": self.ed_comment.toPlainText().strip(),
             "notes": self.ed_notes.toPlainText().strip(),
         }
+
+        if is_person:
+            # Минимальные поля, остальное чистим чтобы не было "хвостов"
+            base.update(
+                {
+                    "inn": None,
+                    "email": None,
+                    "contact_name": None,
+                    "contract_no": None,
+                    "contract_date": None,
+                    "contract_valid_from": None,
+                    "contract_valid_to": None,
+                    "docs_delivery_method": None,
+                    "status": "active",
+                    "contract_signed": False,
+                    "attached_in_1c": False,
+                    "has_ds": False,
+                }
+            )
+            return base
+
+        # Юрлицо
+        base.update(
+            {
+                "inn": self.ed_inn.text().strip(),
+                "email": self.ed_email.text().strip(),
+                "contact_name": self.ed_contact_name.text().strip(),
+                "contract_no": self.ed_contract_no.text().strip(),
+                "contract_date": _qdate_to_pydate(self.dt_contract_date.date()),
+                "contract_valid_from": _qdate_to_pydate(self.dt_valid_from.date()),
+                "contract_valid_to": _qdate_to_pydate(self.dt_valid_to.date()),
+                "docs_delivery_method": self.cmb_delivery.currentText().strip(),
+                "status": self.cmb_status.currentData(),
+                "contract_signed": False,
+                "attached_in_1c": False,
+                "has_ds": False,
+            }
+        )
+        return base
 
     def rules_payload(self) -> list[dict]:
         """
