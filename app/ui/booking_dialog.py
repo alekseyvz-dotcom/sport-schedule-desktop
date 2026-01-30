@@ -26,6 +26,8 @@ class BookingDialog(QDialog):
         venue_name: str,
         venue_units: Optional[List[Dict]] = None,  # [{id, name}]
         initial: Optional[Dict] = None,  # {kind, tenant_id, venue_unit_id, title}
+        selection_title: Optional[str] = None,      # NEW
+        selection_lines: Optional[List[str]] = None # NEW
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -39,6 +41,19 @@ class BookingDialog(QDialog):
             f"Время: <b>{starts_at:%d.%m.%Y %H:%M}</b> – <b>{ends_at:%H:%M}</b>"
         )
         self.lbl_info.setWordWrap(True)
+
+        # NEW: selection block (for multi-zone selection)
+        self.lbl_selection = QLabel("")
+        self.lbl_selection.setWordWrap(True)
+        self.lbl_selection.setVisible(False)
+
+        if selection_title or selection_lines:
+            lines = selection_lines or []
+            text = f"<b>{selection_title or ''}</b>"
+            if lines:
+                text += "<br>" + "<br>".join(f"• {s}" for s in lines)
+            self.lbl_selection.setText(text)
+            self.lbl_selection.setVisible(True)
 
         self.cmb_kind = QComboBox()
         self.cmb_kind.addItem("ПД", "PD")
@@ -84,7 +99,7 @@ class BookingDialog(QDialog):
         form.addRow("Контрагент:", self.cmb_tenant)
         if self._venue_units:
             form.addRow("Зона:", self.cmb_unit)
-        form.addRow("Название:", self.ed_title)  # больше не обязательное
+        form.addRow("Название:", self.ed_title)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -95,12 +110,12 @@ class BookingDialog(QDialog):
             ok_btn.setDefault(True)
             ok_btn.setAutoDefault(True)
 
-        # больше не валидируем title
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
         root.addWidget(self.lbl_info)
+        root.addWidget(self.lbl_selection)  # NEW
         root.addLayout(form)
         root.addWidget(self.buttons)
 
