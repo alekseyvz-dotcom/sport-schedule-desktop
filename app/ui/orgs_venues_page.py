@@ -102,6 +102,13 @@ QLabel#sectionTitle {
 
 
 class OrgsVenuesPage(QWidget):
+    """
+    Изменения под режим работы учреждения:
+      - при создании/редактировании: передаём work_start/work_end/is_24h из OrgDialog.values()
+      - при редактировании: прокидываем текущие значения в OrgDialog(data=...)
+      - (опционально) показываем режим работы в таблице (добавлен столбец)
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(_PAGE_QSS)
@@ -139,8 +146,9 @@ class OrgsVenuesPage(QWidget):
         org_top.addWidget(self.btn_org_edit)
         org_top.addWidget(self.btn_org_archive)
 
-        self.tbl_orgs = QTableWidget(0, 4)
-        self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Активен"])
+        # было 4 колонки, сделаем 5: добавим "Режим"
+        self.tbl_orgs = QTableWidget(0, 5)
+        self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Режим", "Активен"])
         self._style_table(self.tbl_orgs)
         self.tbl_orgs.itemSelectionChanged.connect(self.reload_venues)
         self.tbl_orgs.doubleClicked.connect(self._org_edit)
@@ -217,7 +225,6 @@ class OrgsVenuesPage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         tbl.setFont(f)
 
-        # дефолт: почти всё по содержимому, последний столбец тянется
         for c in range(tbl.columnCount()):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(tbl.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
@@ -242,6 +249,16 @@ class OrgsVenuesPage(QWidget):
             return None
         obj = item.data(Qt.UserRole)
         return obj if isinstance(obj, Venue) else None
+
+    def _org_work_str(self, o: SportOrg) -> str:
+        # поддерживает и старые SportOrg без полей (на случай если ещё не везде обновили)
+        if getattr(o, "is_24h", False):
+            return "24/7"
+        ws = getattr(o, "work_start", None)
+        we = getattr(o, "work_end", None)
+        if ws and we:
+            return f"{ws:%H:%M}–{we:%H:%M}"
+        return "—"
 
     # -------- reloaders
     def reload_orgs(self):
@@ -268,13 +285,17 @@ class OrgsVenuesPage(QWidget):
             it_id.setData(Qt.UserRole, o)
             it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
+            it_work = QTableWidgetItem(self._org_work_str(o))
+            it_work.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
             it_active = QTableWidgetItem("Да" if o.is_active else "Нет")
             it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self.tbl_orgs.setItem(r, 0, it_id)
             self.tbl_orgs.setItem(r, 1, QTableWidgetItem(o.name))
             self.tbl_orgs.setItem(r, 2, QTableWidgetItem(o.address or ""))
-            self.tbl_orgs.setItem(r, 3, it_active)
+            self.tbl_orgs.setItem(r, 3, it_work)
+            self.tbl_orgs.setItem(r, 4, it_active)
 
             if not o.is_active:
                 for c in range(self.tbl_orgs.columnCount()):
@@ -348,8 +369,16 @@ class OrgsVenuesPage(QWidget):
         if dlg.exec() != OrgDialog.Accepted:
             return
 
+        data = dlg.values()
         try:
-            new_id = create_org(**dlg.values())
+            new_id = create_org(
+                name=data["name"],
+                address=data["address"],
+                comment=data["comment"],
+                work_start=data["work_start"],
+                work_end=data["work_end"],
+                is_24h=data["is_24h"],
+            )
         except Exception as e:
             QMessageBox.critical(self, "Создать учреждение", f"Ошибка:\n{e}")
             return
@@ -367,13 +396,29 @@ class OrgsVenuesPage(QWidget):
         dlg = OrgDialog(
             self,
             title=f"Редактировать: {org.name}",
-            data={"name": org.name, "address": org.address, "comment": org.comment},
+            data={
+                "name": org.name,
+                "address": org.address,
+                "comment": org.comment,
+                "work_start": getattr(org, "work_start", None),
+                "work_end": getattr(org, "work_end", None),
+                "is_24h": getattr(org, "is_24h", False),
+            },
         )
         if dlg.exec() != OrgDialog.Accepted:
             return
 
+        data = dlg.values()
         try:
-            update_org(org.id, **dlg.values())
+            update_org(
+                org.id,
+                name=data["name"],
+                address=data["address"],
+                comment=data["comment"],
+                work_start=data["work_start"],
+                work_end=data["work_end"],
+                is_24h=data["is_24h"],
+            )
         except Exception as e:
             QMessageBox.critical(self, "Редактировать учреждение", f"Ошибка:\n{e}")
             return
@@ -407,7 +452,7 @@ class OrgsVenuesPage(QWidget):
 
         self.reload_orgs()
 
-    # -------- venue actions
+    # -------- venue actions (без изменений)
     def _venue_add(self):
         org = self._selected_org()
         if not org:
@@ -446,7 +491,7 @@ class OrgsVenuesPage(QWidget):
             self,
             title=f"Редактировать площадку: {v.name}",
             data={
-                "id": v.id,  # чтобы dialog подтянул текущую схему зон
+                "id": v.id,
                 "name": v.name,
                 "sport_type": v.sport_type,
                 "capacity": v.capacity,
