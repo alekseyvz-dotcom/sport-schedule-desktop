@@ -27,6 +27,79 @@ class Booking:
     tenant_name: str
     venue_unit_name: str
 
+def _row_to_booking(r: dict) -> Booking:
+    return Booking(
+        id=int(r["id"]),
+        venue_id=int(r["venue_id"]),
+        venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
+        tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
+        title=str(r.get("title") or ""),
+        kind=str(r.get("kind") or ""),
+        starts_at=r["starts_at"],
+        ends_at=r["ends_at"],
+        status=str(r.get("status") or "planned"),
+        tenant_name=str(r.get("tenant_name") or ""),
+        venue_unit_name=str(r.get("venue_unit_name") or ""),
+    )
+
+
+def list_bookings_for_range(
+    venue_ids: Iterable[int],
+    start: datetime,
+    end: datetime,
+    include_cancelled: bool = False,
+) -> List[Booking]:
+    """
+    Возвращает бронирования, пересекающиеся с интервалом [start, end).
+    Условие пересечения:
+      b.starts_at < end AND b.ends_at > start
+    """
+    venue_ids = [int(x) for x in venue_ids]
+    if not venue_ids:
+        return []
+
+    if end <= start:
+        raise ValueError("end должен быть позже start")
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = """
+                SELECT
+                    b.id,
+                    b.venue_id,
+                    b.venue_unit_id,
+                    b.tenant_id,
+                    b.title,
+                    b.activity AS kind,
+                    b.starts_at,
+                    b.ends_at,
+                    b.status,
+                    COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(vu.name, '') AS venue_unit_name
+                FROM public.bookings b
+                LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
+                WHERE b.venue_id = ANY(%s)
+                  AND b.starts_at < %s
+                  AND b.ends_at   > %s
+            """
+            params = [venue_ids, end, start]
+
+            if not include_cancelled:
+                sql += " AND b.status <> 'cancelled'"
+
+            sql += " ORDER BY b.starts_at"
+
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+            return [_row_to_booking(r) for r in rows]
+    finally:
+        if conn:
+            put_conn(conn)
+
 
 def list_bookings_for_day(
     venue_ids: Iterable[int],
@@ -74,26 +147,10 @@ def list_bookings_for_day(
             cur.execute(sql, params)
             rows = cur.fetchall()
 
-            return [
-                Booking(
-                    id=int(r["id"]),
-                    venue_id=int(r["venue_id"]),
-                    venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
-                    tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
-                    title=str(r.get("title") or ""),
-                    kind=str(r.get("kind") or ""),
-                    starts_at=r["starts_at"],
-                    ends_at=r["ends_at"],
-                    status=str(r.get("status") or "planned"),
-                    tenant_name=str(r.get("tenant_name") or ""),
-                    venue_unit_name=str(r.get("venue_unit_name") or ""),
-                )
-                for r in rows
-            ]
+            return [_row_to_booking(r) for r in rows]
     finally:
         if conn:
             put_conn(conn)
-
 
 def _log(msg: str) -> None:
     path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
