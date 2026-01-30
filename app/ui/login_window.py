@@ -1,17 +1,17 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton,
-    QLabel, QMessageBox, QHBoxLayout
+    QLabel, QMessageBox, QHBoxLayout, QApplication
 )
 
 from app.services.users_service import authenticate, AuthUser
+
 
 class LoginWindow(QWidget):
     logged_in = Signal(object)  # AuthUser
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Вход — Sport Schedule")
         self.setFixedWidth(420)
 
         self.lbl_status = QLabel("")
@@ -28,7 +28,7 @@ class LoginWindow(QWidget):
         self.btn_login.clicked.connect(self._on_login)
 
         self.btn_exit = QPushButton("Выход")
-        self.btn_exit.clicked.connect(self.close)
+        self.btn_exit.clicked.connect(QApplication.quit)
 
         form = QFormLayout()
         form.addRow("Логин:", self.ed_user)
