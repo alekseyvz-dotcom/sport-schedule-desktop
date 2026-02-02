@@ -2,12 +2,28 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QMessageBox, QCheckBox, QAbstractItemView, QHeaderView
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QCheckBox,
+    QAbstractItemView,
+    QHeaderView,
 )
 
+from app.services.ref_service import list_active_orgs
 from app.services.gz_service import (
-    GzCoach, list_coaches, create_coach, update_coach, set_coach_active
+    GzCoach,
+    list_coaches,
+    create_coach,
+    update_coach,
+    set_coach_active,
+    get_coach_org_ids,   # NEW
+    set_coach_orgs,      # NEW
 )
 from app.ui.gz_coach_dialog import GzCoachDialog
 
@@ -17,6 +33,8 @@ class GzCoachesWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Тренеры (ГЗ)")
         self.resize(760, 520)
+
+        self._orgs = []  # [{id, name}]
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск тренера…")
@@ -68,7 +86,16 @@ class GzCoachesWindow(QDialog):
         root.addWidget(self.tbl, 1)
         root.addLayout(bottom)
 
+        self._load_orgs()
         self.reload()
+
+    def _load_orgs(self):
+        try:
+            orgs = list_active_orgs()
+            self._orgs = [{"id": int(o.id), "name": str(o.name)} for o in orgs]
+        except Exception as e:
+            QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки учреждений:\n{e}")
+            self._orgs = []
 
     def _selected(self) -> GzCoach | None:
         row = self.tbl.currentRow()
@@ -111,15 +138,22 @@ class GzCoachesWindow(QDialog):
                         it.setForeground(Qt.GlobalColor.darkGray)
 
     def _on_add(self):
-        dlg = GzCoachDialog(self, "Создать тренера")
+        if not self._orgs:
+            QMessageBox.warning(self, "Тренеры", "Нет списка учреждений. Невозможно создать тренера.")
+            return
+
+        dlg = GzCoachDialog(self, "Создать тренера", orgs=self._orgs, selected_org_ids=[])
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
+
         v = dlg.values()
         try:
-            create_coach(v["full_name"], v.get("comment", ""))
+            new_id = create_coach(v["full_name"], v.get("comment", ""))
+            set_coach_orgs(new_id, v.get("org_ids") or [])
         except Exception as e:
             QMessageBox.critical(self, "Создать тренера", str(e))
             return
+
         self.reload()
 
     def _on_edit(self):
@@ -127,16 +161,34 @@ class GzCoachesWindow(QDialog):
         if not c:
             QMessageBox.information(self, "Тренеры", "Выберите тренера.")
             return
+        if not self._orgs:
+            QMessageBox.warning(self, "Тренеры", "Нет списка учреждений. Невозможно редактировать тренера.")
+            return
 
-        dlg = GzCoachDialog(self, "Редактировать тренера", data={"full_name": c.full_name, "comment": c.comment})
+        try:
+            selected_org_ids = get_coach_org_ids(c.id)
+        except Exception as e:
+            QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить объекты тренера:\n{e}")
+            return
+
+        dlg = GzCoachDialog(
+            self,
+            "Редактировать тренера",
+            data={"full_name": c.full_name, "comment": c.comment},
+            orgs=self._orgs,
+            selected_org_ids=selected_org_ids,
+        )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
+
         v = dlg.values()
         try:
             update_coach(c.id, v["full_name"], v.get("comment", ""))
+            set_coach_orgs(c.id, v.get("org_ids") or [])
         except Exception as e:
             QMessageBox.critical(self, "Редактировать тренера", str(e))
             return
+
         self.reload()
 
     def _on_toggle_active(self):
@@ -158,4 +210,5 @@ class GzCoachesWindow(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", str(e))
             return
+
         self.reload()
