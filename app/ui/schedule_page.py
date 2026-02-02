@@ -810,7 +810,10 @@ class SchedulePage(QWidget):
 
             it0 = self.tbl.item(r0, col)
             if it0:
+                kind = (getattr(b, "kind", "") or "").upper()
                 tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+                if kind == "GZ":
+                    tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
                 title = (getattr(b, "title", "") or "").strip()
                 it0.setText(f"{tenant_name}\n{title}" if title else f"{tenant_name}")
 
@@ -877,7 +880,10 @@ class SchedulePage(QWidget):
 
             dt_str = starts_at.strftime("%d.%m.%Y") if starts_at else ""
             time_str = f"{starts_at:%H:%M}–{ends_at:%H:%M}" if starts_at and ends_at else ""
+            kind_raw = (getattr(b, "kind", "") or "").upper()
             tenant = (getattr(b, "tenant_name", "") or "").strip()
+            if kind_raw == "GZ":
+                tenant = (getattr(b, "gz_group_name", "") or "").strip()
             title = (getattr(b, "title", "") or "").strip()
 
             venue_id = int(getattr(b, "venue_id", 0) or 0)
@@ -927,7 +933,10 @@ class SchedulePage(QWidget):
             self.lbl_d_extra.setText("")
             return
 
+        kind_raw = (getattr(b, "kind", "") or "").upper()
         tenant = (getattr(b, "tenant_name", "") or "").strip()
+        if kind_raw == "GZ":
+            tenant = (getattr(b, "gz_group_name", "") or "").strip()
         title = (getattr(b, "title", "") or "").strip()
 
         venue_id = int(getattr(b, "venue_id", 0) or 0)
@@ -1181,6 +1190,8 @@ class SchedulePage(QWidget):
         data = dlg.values()
     
         kind = str(data.get("kind") or "PD").upper()
+        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+        gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
         title = str(data.get("title") or "")
         
         tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
@@ -1204,6 +1215,7 @@ class SchedulePage(QWidget):
                         venue_id=int(rsrc.venue_id),
                         venue_unit_id=unit_id,
                         tenant_id=tenant_id,
+                        gz_group_id=gz_group_id,
                         title=title,
                         kind=kind,
                         starts_at=starts_at,
@@ -1226,6 +1238,7 @@ class SchedulePage(QWidget):
                     venue_id=venue_id,
                     venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
                     tenant_id=tenant_id,
+                    gz_group_id=gz_group_id,
                     title=title,
                     kind=kind,
                     starts_at=starts_at,
@@ -1281,6 +1294,7 @@ class SchedulePage(QWidget):
         initial = {
             "kind": getattr(b, "kind", "PD"),
             "tenant_id": getattr(b, "tenant_id", None),
+            "gz_group_id": getattr(b, "gz_group_id", None),
             "venue_unit_id": venue_unit_id,
             "title": getattr(b, "title", ""),
         }
@@ -1301,6 +1315,9 @@ class SchedulePage(QWidget):
             return
     
         data = dlg.values()
+        kind = str(data.get("kind") or "PD").upper()
+        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+        gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
         try:
             kind = str(data.get("kind") or "PD").upper()
             tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
@@ -1310,6 +1327,7 @@ class SchedulePage(QWidget):
             update_booking(
                 int(getattr(b, "id")),
                 tenant_id=tenant_id,
+                gz_group_id=gz_group_id,
                 title=str(data.get("title") or ""),
                 kind=kind,
                 venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
