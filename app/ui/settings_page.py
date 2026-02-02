@@ -13,9 +13,10 @@ from app.services.users_service import AuthUser
 from app.services.users_admin_service import (
     list_users, create_user, update_user, set_password,
     list_roles, list_org_permissions, save_org_permissions,
+    user_tabs_summary, list_tab_permissions, save_tab_permissions,
     OrgPermRow, AdminUserRow, RoleRow
 )
-from app.ui.settings_user_dialogs import UserEditDialog, PasswordDialog, OrgPermissionsDialog
+from app.ui.settings_user_dialogs import UserEditDialog, PasswordDialog, OrgPermissionsDialog, TabsPermissionsDialog
 
 
 _PAGE_QSS = """
@@ -84,8 +85,8 @@ class SettingsPage(QWidget):
         self.ed_search_user.setPlaceholderText("Поиск пользователя (логин/ФИО)…")
         self.ed_search_user.textChanged.connect(self._apply_user_filter)
 
-        self.tbl = QTableWidget(0, 5)
-        self.tbl.setHorizontalHeaderLabels(["id", "Логин", "ФИО", "Роль", "Активен"])
+        self.tbl = QTableWidget(0, 6)
+        self.tbl.setHorizontalHeaderLabels(["id", "Логин", "ФИО", "Роль", "Активен", "Разделы"])
         self.tbl.setColumnHidden(0, True)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -99,19 +100,22 @@ class SettingsPage(QWidget):
         self.btn_edit = QPushButton("Редактировать…")
         self.btn_password = QPushButton("Сменить пароль…")
         self.btn_perms = QPushButton("Права на учреждения…")
+        self.btn_tabs = QPushButton("Права на разделы…")
         self.btn_refresh = QPushButton("Обновить")
 
         self.btn_add.clicked.connect(self._add_user)
         self.btn_edit.clicked.connect(self._edit_user)
         self.btn_password.clicked.connect(self._change_password)
         self.btn_perms.clicked.connect(self._edit_org_perms)
+        self.btn_tabs.clicked.connect(self._edit_tabs_perms)
         self.btn_refresh.clicked.connect(self.reload)
-
+        
         btns = QHBoxLayout()
         btns.addWidget(self.btn_add)
         btns.addWidget(self.btn_edit)
         btns.addWidget(self.btn_password)
         btns.addWidget(self.btn_perms)
+        btns.addWidget(self.btn_tabs)
         btns.addStretch(1)
         btns.addWidget(self.btn_refresh)
 
@@ -156,6 +160,7 @@ class SettingsPage(QWidget):
             self.tbl.setItem(i, 2, QTableWidgetItem(u.full_name))
             self.tbl.setItem(i, 3, QTableWidgetItem(u.role_code))
             self.tbl.setItem(i, 4, QTableWidgetItem("Да" if u.is_active else "Нет"))
+            self.tbl.setItem(i, 5, QTableWidgetItem("Все" if u.role_code.lower() == "admin" else user_tabs_summary(u.id)))
         if users:
             self.tbl.selectRow(0)
 
@@ -278,4 +283,32 @@ class SettingsPage(QWidget):
             QMessageBox.information(self, "Готово", "Права сохранены")
         except Exception as e:
             QMessageBox.critical(self, "Права", str(e))
+
+    def _edit_tabs_perms(self):
+        u = self._selected_user()
+        if not u:
+            QMessageBox.information(self, "Пользователи", "Выберите пользователя.")
+            return
+    
+        if u.role_code.lower() == "admin":
+            QMessageBox.information(self, "Разделы", "Администратору доступны все разделы.")
+            return
+    
+        try:
+            perms = list_tab_permissions(u.id)
+        except Exception as e:
+            QMessageBox.critical(self, "Разделы", f"Ошибка загрузки прав:\n{e}")
+            return
+    
+        dlg = TabsPermissionsDialog(self, f"Права на разделы — {u.username}", perms)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+    
+        try:
+            save_tab_permissions(u.id, dlg.perms())
+            QMessageBox.information(self, "Готово", "Права на разделы сохранены")
+            self.reload()
+        except Exception as e:
+            QMessageBox.critical(self, "Разделы", str(e))
+
 
