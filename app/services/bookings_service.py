@@ -301,24 +301,10 @@ def get_booking(booking_id: int) -> Booking:
             r = cur.fetchone()
             if not r:
                 raise ValueError("Бронирование не найдено")
-
-            return Booking(
-                id=int(r["id"]),
-                venue_id=int(r["venue_id"]),
-                venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
-                tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
-                title=str(r.get("title") or ""),
-                kind=str(r.get("kind") or ""),
-                starts_at=r["starts_at"],
-                ends_at=r["ends_at"],
-                status=str(r.get("status") or "planned"),
-                tenant_name=str(r.get("tenant_name") or ""),
-                venue_unit_name=str(r.get("venue_unit_name") or ""),
-            )
+            return _row_to_booking(r)
     finally:
         if conn:
             put_conn(conn)
-
 
 def update_booking(
     booking_id: int,
@@ -329,12 +315,22 @@ def update_booking(
     kind: str,
     venue_unit_id: int | None,
 ) -> None:
-    # title НЕ обязателен
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
+
+    if kind == "PD":
+        if tenant_id is None:
+            raise ValueError("Для ПД нужно выбрать контрагента")
+        if gz_group_id is not None:
+            raise ValueError("Для ПД gz_group_id должен быть пустым")
+    if kind == "GZ":
+        if gz_group_id is None:
+            raise ValueError("Для ГЗ нужно выбрать группу")
+        if tenant_id is not None:
+            raise ValueError("Для ГЗ tenant_id должен быть пустым")
 
     conn = None
     try:
@@ -352,7 +348,8 @@ def update_booking(
                 """,
                 (
                     int(tenant_id) if tenant_id is not None else None,
-                    title,  # может быть ''
+                    int(gz_group_id) if gz_group_id is not None else None,
+                    title,
                     kind,
                     int(venue_unit_id) if venue_unit_id is not None else None,
                     int(booking_id),
@@ -364,7 +361,6 @@ def update_booking(
     except Exception as e:
         if conn:
             conn.rollback()
-
         pgcode = getattr(e, "pgcode", None)
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
@@ -372,7 +368,6 @@ def update_booking(
     finally:
         if conn:
             put_conn(conn)
-
 
 def cancel_booking(booking_id: int) -> None:
     conn = None
