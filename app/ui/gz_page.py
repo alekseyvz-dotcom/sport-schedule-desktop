@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta, timezone
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -11,13 +13,19 @@ from app.services.users_service import AuthUser
 from app.services.gz_service import (
     GzGroup, list_groups, list_coaches, create_group, update_group, set_group_active
 )
+from app.services.gz_rules_service import (
+    create_rule, set_rule_active, generate_bookings_for_group
+)
 from app.ui.gz_group_dialog import GzGroupDialog
 
 
 class GzPage(QWidget):
+    TZ = timezone(timedelta(hours=3))
+
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self._user = user
+        self._is_admin = (getattr(user, "role_code", "") == "admin")
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: тренер / год группы")
@@ -44,9 +52,8 @@ class GzPage(QWidget):
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        self.tbl = QTableWidget(0, 6)
-        self.tbl.setHorizontalHeaderLabels(["ID", "Тренер", "Год", "Примечание", "Активен", ""])
-        self.tbl.setColumnHidden(5, True)  # тех. колонка если надо
+        self.tbl = QTableWidget(0, 5)
+        self.tbl.setHorizontalHeaderLabels(["ID", "Тренер", "Год", "Примечание", "Активен"])
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -152,27 +159,81 @@ class GzPage(QWidget):
                     if it:
                         it.setForeground(Qt.GlobalColor.darkGray)
 
+    def _apply_rules_and_maybe_generate(self, gz_group_id: int, rules_payload: list[dict]) -> None:
+        try:
+            for r in rules_payload:
+                op = r.get("op", "keep")
+                if op == "new":
+                    create_rule(
+                        gz_group_id=int(gz_group_id),
+                        venue_unit_id=int(r["venue_unit_id"]),
+                        weekday=int(r["weekday"]),
+                        starts_at=r["starts_at"],
+                        ends_at=r["ends_at"],
+                        valid_from=r["valid_from"],
+                        valid_to=r["valid_to"],
+                        title=r.get("title", "") or "",
+                    )
+                elif op == "deactivate" and r.get("id"):
+                    set_rule_active(int(r["id"]), False)
+        except Exception as e:
+            QMessageBox.critical(self, "Правила ГЗ", f"Ошибка сохранения правил:\n{e}")
+            return
+
+        has_new = any(r.get("op") == "new" for r in rules_payload)
+        if not has_new:
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Генерация бронирований",
+                "Создать бронирования ГЗ по новым правилам до конца периода действия правила?\n\n"
+                "Если какие-то даты уже заняты — они будут пропущены.",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        try:
+            rep = generate_bookings_for_group(gz_group_id=int(gz_group_id), tz=self.TZ)
+        except Exception as e:
+            QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
+            return
+
+        msg = f"Создано бронирований: {rep.created}\nПропущено (занято/ошибка): {rep.skipped}"
+        if rep.errors:
+            msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
+            if len(rep.errors) > 8:
+                msg += f"\n... и ещё {len(rep.errors) - 8}"
+        QMessageBox.information(self, "Генерация бронирований", msg)
+
     def _on_add(self):
         try:
             coaches = list_coaches(include_inactive=False)
         except Exception as e:
-            QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить тренеров:\n{e}")
+            QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
             return
 
         if not coaches:
-            QMessageBox.information(self, "Гос. задание", "Сначала добавьте тренеров (позже добавим кнопку прямо тут).")
+            QMessageBox.information(self, "Гос. задание", "Добавьте хотя бы одного тренера.")
             return
 
-        dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches)
+        dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches, is_admin=self._is_admin)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+
         try:
             new_id = create_group(coach_id=data["coach_id"], group_year=data["group_year"], notes=data["notes"])
         except Exception as e:
-            QMessageBox.critical(self, "Создать группу", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Создать группу ГЗ", f"Ошибка:\n{e}")
             return
+
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(new_id, rules_payload)
 
         self.reload()
         self._select_row_by_id(new_id)
@@ -186,24 +247,30 @@ class GzPage(QWidget):
         try:
             coaches = list_coaches(include_inactive=False)
         except Exception as e:
-            QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить тренеров:\n{e}")
+            QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
             return
 
         dlg = GzGroupDialog(
             self,
-            title=f"Редактировать группу ГЗ",
+            title=f"Редактировать: {g.coach_name} — {g.group_year}",
             coaches=coaches,
-            data={"coach_id": g.coach_id, "group_year": g.group_year, "notes": g.notes},
+            is_admin=self._is_admin,
+            data={"id": g.id, "coach_id": g.coach_id, "group_year": g.group_year, "notes": g.notes},
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+
         try:
             update_group(g.id, coach_id=data["coach_id"], group_year=data["group_year"], notes=data["notes"])
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать группу", f"Ошибка:\n{e}")
+            QMessageBox.critical(self, "Редактировать группу ГЗ", f"Ошибка:\n{e}")
             return
+
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(g.id, rules_payload)
 
         self.reload()
         self._select_row_by_id(g.id)
@@ -217,7 +284,7 @@ class GzPage(QWidget):
         new_state = not g.is_active
         action = "восстановить" if new_state else "архивировать"
         if (
-            QMessageBox.question(self, "Подтверждение", f"Вы действительно хотите {action} группу «{g.coach_name} {g.group_year}»?")
+            QMessageBox.question(self, "Подтверждение", f"Вы действительно хотите {action} группу «{g.coach_name} — {g.group_year}»?")
             != QMessageBox.StandardButton.Yes
         ):
             return
