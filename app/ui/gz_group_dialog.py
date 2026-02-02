@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.gz_service import GzCoach
+from app.ui.gz_rules_widget import GzRulesWidget
 
 
 _QSS = """
