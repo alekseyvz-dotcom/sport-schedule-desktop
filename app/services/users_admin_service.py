@@ -23,6 +23,7 @@ class AdminUserRow:
 class OrgPermRow:
     org_id: int
     org_name: str
+    org_is_active: bool
     can_view: bool
     can_edit: bool
 
@@ -132,18 +133,17 @@ def list_roles() -> List[RoleRow]:
     finally:
         if conn:
             put_conn(conn)
-
-
-def list_org_permissions(user_id: int, *, only_active_orgs: bool = True) -> List[OrgPermRow]:
+            
+def list_org_permissions(user_id: int) -> List[OrgPermRow]:
     """
-    ВСЕ учреждения (активные или все) + флаги прав.
+    Всегда возвращаем ВСЕ учреждения (активные и неактивные) + права.
+    UI сам решает, показывать неактивные или нет.
     """
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT
                     o.id AS org_id,
                     o.name AS org_name,
@@ -153,17 +153,15 @@ def list_org_permissions(user_id: int, *, only_active_orgs: bool = True) -> List
                 FROM public.sport_orgs o
                 LEFT JOIN public.app_user_org_permissions p
                        ON p.org_id = o.id AND p.user_id = %s
-                WHERE (%s = false) OR (o.is_active = true)
                 ORDER BY o.is_active DESC, o.name
-                """,
-                (int(user_id), bool(only_active_orgs)),
-            )
+            """, (int(user_id),))
             rows = cur.fetchall()
             conn.commit()
             return [
                 OrgPermRow(
                     org_id=int(r["org_id"]),
                     org_name=str(r["org_name"]),
+                    org_is_active=bool(r["org_is_active"]),
                     can_view=bool(r["can_view"]),
                     can_edit=bool(r["can_edit"]),
                 )
