@@ -23,11 +23,27 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
 
         tabs = QTabWidget()
-        tabs.addTab(TenantsPage(user), "Контрагенты")
-        tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
-        tabs.addTab(SchedulePage(user), "Расписание")
-        tabs.addTab(AnalyticsPage(user), "Аналитика")
-        if user.role_code.lower() == "admin":
+        
+        if self._can_tab("tab.tenants"):
+            tabs.addTab(TenantsPage(user), "Контрагенты")
+        
+        if self._can_tab("tab.orgs"):
+            tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
+        
+        if self._can_tab("tab.schedule"):
+            tabs.addTab(SchedulePage(user), "Расписание")
+        
+        if self._can_tab("tab.analytics"):
+            tabs.addTab(AnalyticsPage(user), "Аналитика")
+        
+        if self._can_tab("tab.settings"):
             tabs.addTab(SettingsPage(user), "Настройки")
-
+        
         self.setCentralWidget(tabs)
+
+    def _can_tab(self, code: str) -> bool:
+        if not self.user:
+            return False
+        if (self.user.role_code or "").lower() == "admin":
+            return True
+        return code in (self.user.permissions or set())
