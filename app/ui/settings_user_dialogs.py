@@ -371,7 +371,6 @@ class PasswordDialog(QDialog):
     def password(self) -> str:
         return self.ed_pw1.text() or ""
 
-
 class OrgPermissionsDialog(QDialog):
     def __init__(
         self,
@@ -379,15 +378,15 @@ class OrgPermissionsDialog(QDialog):
         title: str,
         perms: List[OrgPermRow],
         *,
-        only_active_orgs: bool = True,
+        show_inactive: bool = False,
     ):
         super().__init__(parent)
         self.setStyleSheet(_DIALOG_QSS)
         self.setWindowTitle(title)
-        self.resize(820, 560)
+        self.resize(860, 600)
 
-        self._only_active_orgs = only_active_orgs
-        self._all_perms = perms[:]  # текущий набор (получен из сервиса)
+        # полный набор прав (включая неактивные) — это то, что будем сохранять
+        self._perms_all: List[OrgPermRow] = perms[:]
 
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dlgTitle")
@@ -396,41 +395,45 @@ class OrgPermissionsDialog(QDialog):
         self.ed_search.setPlaceholderText("Поиск учреждения…")
         self.ed_search.textChanged.connect(self._apply_filter)
 
-        self.ch_only_active = QCheckBox("Только активные учреждения")
-        self.ch_only_active.setChecked(only_active_orgs)
-        self.ch_only_active.stateChanged.connect(self._active_toggle_changed)
+        self.ch_show_inactive = QCheckBox("Показывать неактивные")
+        self.ch_show_inactive.setChecked(bool(show_inactive))
+        self.ch_show_inactive.stateChanged.connect(lambda *_: self._apply_filter())
 
-        self.tbl = QTableWidget(0, 4)
-        self.tbl.setHorizontalHeaderLabels(["org_id", "Учреждение", "Просмотр", "Редактирование"])
+        self.tbl = QTableWidget(0, 5)
+        self.tbl.setHorizontalHeaderLabels(["org_id", "Активно", "Учреждение", "Просмотр", "Редактирование"])
         self.tbl.setColumnHidden(0, True)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
 
         header = self.tbl.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
         self.btn_all_view = QPushButton("Просмотр всем")
         self.btn_all_edit = QPushButton("Редактирование всем")
         self.btn_none = QPushButton("Снять все")
+        self.btn_only_one = QPushButton("Доступ только к 1 учреждению…")
         self.btn_ok = QPushButton("Сохранить")
         self.btn_cancel = QPushButton("Отмена")
 
         self.btn_all_view.clicked.connect(lambda: self._set_all(view=True, edit=False))
         self.btn_all_edit.clicked.connect(lambda: self._set_all(view=True, edit=True))
         self.btn_none.clicked.connect(self._clear_all)
+        self.btn_only_one.clicked.connect(self._only_one_org)
         self.btn_ok.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
 
         top = QHBoxLayout()
         top.addWidget(self.ed_search, 1)
-        top.addWidget(self.ch_only_active, 0)
+        top.addWidget(self.ch_show_inactive, 0)
 
         footer = QHBoxLayout()
+        footer.addWidget(self.btn_only_one)
+        footer.addStretch(1)
         footer.addWidget(self.btn_all_view)
         footer.addWidget(self.btn_all_edit)
         footer.addWidget(self.btn_none)
-        footer.addStretch(1)
         footer.addWidget(self.btn_ok)
         footer.addWidget(self.btn_cancel)
 
@@ -442,75 +445,183 @@ class OrgPermissionsDialog(QDialog):
         root.addWidget(self.tbl, 1)
         root.addLayout(footer)
 
-        self._load(self._all_perms)
+        self._render_table_from_perms_all()
         self._apply_filter()
 
-    # ---- data load/render
+    # ---------- render / mapping ----------
 
-    def _load(self, perms: List[OrgPermRow]):
-        self.tbl.setRowCount(len(perms))
-        for r, p in enumerate(perms):
+    def _render_table_from_perms_all(self):
+        self.tbl.setRowCount(len(self._perms_all))
+
+        for r, p in enumerate(self._perms_all):
             self.tbl.setItem(r, 0, QTableWidgetItem(str(p.org_id)))
-            self.tbl.setItem(r, 1, QTableWidgetItem(p.org_name))
+            self.tbl.setItem(r, 1, QTableWidgetItem("Да" if p.org_is_active else "Нет"))
+            self.tbl.setItem(r, 2, QTableWidgetItem(p.org_name))
 
             ch_view = QCheckBox()
             ch_view.setChecked(bool(p.can_view))
-            self.tbl.setCellWidget(r, 2, ch_view)
+            self.tbl.setCellWidget(r, 3, ch_view)
 
             ch_edit = QCheckBox()
             ch_edit.setChecked(bool(p.can_edit))
-            self.tbl.setCellWidget(r, 3, ch_edit)
+            self.tbl.setCellWidget(r, 4, ch_edit)
 
-            # если edit включили — view включаем автоматически
+            # edit => view
             def sync_view(_state, rr=r):
-                cv: QCheckBox = self.tbl.cellWidget(rr, 2)  # type: ignore
-                ce: QCheckBox = self.tbl.cellWidget(rr, 3)  # type: ignore
+                cv: QCheckBox = self.tbl.cellWidget(rr, 3)  # type: ignore
+                ce: QCheckBox = self.tbl.cellWidget(rr, 4)  # type: ignore
                 if ce.isChecked() and not cv.isChecked():
                     cv.setChecked(True)
 
             ch_edit.stateChanged.connect(sync_view)
 
+            # неактивные — серым (но чекбоксы оставляем рабочими, если вы хотите запретить — скажите)
+            if not p.org_is_active:
+                gray = Qt.GlobalColor.darkGray
+                for c in (1, 2):
+                    self.tbl.item(r, c).setForeground(gray)
+
     def _apply_filter(self):
         q = (self.ed_search.text() or "").strip().lower()
+        show_inactive = bool(self.ch_show_inactive.isChecked())
+
         for r in range(self.tbl.rowCount()):
-            name = (self.tbl.item(r, 1).text() or "").lower()
-            hide = bool(q) and (q not in name)
+            name = (self.tbl.item(r, 2).text() or "").lower()
+            is_active = (self.tbl.item(r, 1).text() == "Да")
+
+            hide = False
+            if (not show_inactive) and (not is_active):
+                hide = True
+            if q and (q not in name):
+                hide = True
+
             self.tbl.setRowHidden(r, hide)
 
-    # ---- bulk actions
+    def _row_org_id(self, r: int) -> int:
+        return int(self.tbl.item(r, 0).text())
+
+    def _set_row(self, r: int, *, can_view: bool, can_edit: bool):
+        cv: QCheckBox = self.tbl.cellWidget(r, 3)  # type: ignore
+        ce: QCheckBox = self.tbl.cellWidget(r, 4)  # type: ignore
+        cv.setChecked(bool(can_view) or bool(can_edit))
+        ce.setChecked(bool(can_edit))
+
+    # ---------- bulk actions ----------
 
     def _set_all(self, *, view: bool, edit: bool):
         for r in range(self.tbl.rowCount()):
-            cv: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
-            ce: QCheckBox = self.tbl.cellWidget(r, 3)  # type: ignore
-            cv.setChecked(view)
-            ce.setChecked(edit)
+            # применяем ко всем, включая скрытые строки (важно!)
+            self._set_row(r, can_view=view, can_edit=edit)
 
     def _clear_all(self):
         for r in range(self.tbl.rowCount()):
-            cv: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
-            ce: QCheckBox = self.tbl.cellWidget(r, 3)  # type: ignore
-            cv.setChecked(False)
-            ce.setChecked(False)
+            self._set_row(r, can_view=False, can_edit=False)
 
-    # ---- active toggle
+    # ---------- "only one org" ----------
 
-    def _active_toggle_changed(self):
-        # UI-тоггл меняет только состояние; данные перезагружает SettingsPage
-        # Здесь просто подсказка пользователю.
-        pass
+    def _only_one_org(self):
+        # список всех учреждений для выбора (можно выбирать и неактивные — решите сами)
+        items = [f"{p.org_name} (id={p.org_id})" for p in self._perms_all]
+        if not items:
+            return
 
-    # ---- output
+        # маленький внутренний диалог выбора через QListWidget, чтобы было красиво и в стиле
+        dlg = QDialog(self)
+        dlg.setStyleSheet(_DIALOG_QSS)
+        dlg.setWindowTitle("Выберите учреждение")
+        dlg.resize(560, 460)
+
+        title = QLabel("Доступ только к 1 учреждению")
+        title.setObjectName("dlgTitle")
+
+        ed = QLineEdit()
+        ed.setPlaceholderText("Поиск…")
+
+        lst = QListWidget()
+        for p in self._perms_all:
+            it = QListWidgetItem(p.org_name + ("" if p.org_is_active else " (неактивно)"))
+            it.setData(Qt.ItemDataRole.UserRole, int(p.org_id))
+            lst.addItem(it)
+
+        ch_edit = QCheckBox("Дать право редактирования выбранного учреждения")
+        ch_edit.setChecked(True)
+
+        btn_ok = QPushButton("Применить")
+        btn_cancel = QPushButton("Отмена")
+        btn_ok.clicked.connect(dlg.accept)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        def apply_filter():
+            q = (ed.text() or "").strip().lower()
+            for i in range(lst.count()):
+                it = lst.item(i)
+                it.setHidden(bool(q) and (q not in (it.text() or "").lower()))
+
+        ed.textChanged.connect(apply_filter)
+
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(btn_ok)
+        footer.addWidget(btn_cancel)
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(10)
+        lay.addWidget(title)
+        lay.addWidget(ed)
+        lay.addWidget(lst, 1)
+        lay.addWidget(ch_edit)
+        lay.addLayout(footer)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        it = lst.currentItem()
+        if not it:
+            QMessageBox.warning(self, "Выбор", "Выберите учреждение.")
+            return
+
+        selected_org_id = int(it.data(Qt.ItemDataRole.UserRole))
+
+        # снимаем всё
+        self._clear_all()
+
+        # ставим выбранному
+        for r in range(self.tbl.rowCount()):
+            if self._row_org_id(r) == selected_org_id:
+                self._set_row(r, can_view=True, can_edit=bool(ch_edit.isChecked()))
+                break
+
+        # чтобы пользователь увидел выбранное даже если оно неактивное
+        self.ch_show_inactive.setChecked(True)
+        self._apply_filter()
+
+    # ---------- output ----------
 
     def perms(self) -> List[OrgPermRow]:
+        """
+        Возвращаем полный набор (включая скрытые строки), чтобы не терять права.
+        """
         out: List[OrgPermRow] = []
         for r in range(self.tbl.rowCount()):
             org_id = int(self.tbl.item(r, 0).text())
-            org_name = self.tbl.item(r, 1).text()
-            cv: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
-            ce: QCheckBox = self.tbl.cellWidget(r, 3)  # type: ignore
-            out.append(OrgPermRow(org_id=org_id, org_name=org_name, can_view=cv.isChecked(), can_edit=ce.isChecked()))
+            org_is_active = (self.tbl.item(r, 1).text() == "Да")
+            org_name = self.tbl.item(r, 2).text()
+
+            cv: QCheckBox = self.tbl.cellWidget(r, 3)  # type: ignore
+            ce: QCheckBox = self.tbl.cellWidget(r, 4)  # type: ignore
+
+            out.append(
+                OrgPermRow(
+                    org_id=org_id,
+                    org_name=org_name,
+                    org_is_active=org_is_active,
+                    can_view=cv.isChecked(),
+                    can_edit=ce.isChecked(),
+                )
+            )
         return out
 
-    def only_active_orgs(self) -> bool:
-        return bool(self.ch_only_active.isChecked())
+    def show_inactive(self) -> bool:
+        return bool(self.ch_show_inactive.isChecked())
+
