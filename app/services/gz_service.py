@@ -24,6 +24,52 @@ class GzGroup:
     notes: Optional[str]
     is_active: bool
 
+def update_coach(coach_id: int, full_name: str, comment: str = "") -> None:
+    full_name = (full_name or "").strip()
+    if not full_name:
+        raise ValueError("ФИО тренера не может быть пустым")
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.gz_coaches
+                SET full_name=%s, comment=%s
+                WHERE id=%s
+                """,
+                (full_name, (comment or "").strip() or None, int(coach_id)),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("Тренер не найден")
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def set_coach_active(coach_id: int, is_active: bool) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.gz_coaches SET is_active=%s WHERE id=%s",
+                (bool(is_active), int(coach_id)),
+            )
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
 
 def list_coaches(search: str = "", include_inactive: bool = False) -> List[GzCoach]:
     search = (search or "").strip()
