@@ -54,7 +54,7 @@ class Resource:
     resource_name: str
 
 
-from app.services.ref_service import list_active_orgs, list_active_venues, list_active_tenants
+from app.services.ref_service import list_active_venues, list_active_tenants
 from app.services.venue_units_service import list_venue_units
 from app.services.bookings_service import (
     list_bookings_for_day,
@@ -180,8 +180,9 @@ class SchedulePage(QWidget):
 
     LIST_ROLE_BOOKING = Qt.ItemDataRole.UserRole + 10
 
-    def __init__(self, parent=None):
+    def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.user = user
         self.setStyleSheet(_PAGE_QSS)
 
         self._settings = QSettings("SportApp", "Schedule")
@@ -333,7 +334,7 @@ class SchedulePage(QWidget):
 
         # restore last mode (so "кликаю на вкладку расписание" -> открывает последний выбранный вид)
         last_mode = str(self._settings.value("schedule/view_mode", "grid"))
-        self._set_mode(last_mode, persist=False)
+        self.(last_mode, persist=False)
 
     # -------- mode handling (fixes your issues) --------
 
@@ -341,39 +342,36 @@ class SchedulePage(QWidget):
         # if page is shown again, keep last selected mode
         super().showEvent(e)
         last_mode = str(self._settings.value("schedule/view_mode", "grid"))
-        self._set_mode(last_mode, persist=False)
+        self.(last_mode, persist=False)
 
     def _set_mode(self, mode: str, *, persist: bool = True) -> None:
         mode = "list" if mode == "list" else "grid"
         if persist:
             self._settings.setValue("schedule/view_mode", mode)
-
-        # switch stack
+    
         self.stack.setCurrentIndex(0 if mode == "grid" else 1)
-
-        # update tab buttons without recursion issues
+    
         self.btn_view_grid.blockSignals(True)
         self.btn_view_list.blockSignals(True)
         self.btn_view_grid.setChecked(mode == "grid")
         self.btn_view_list.setChecked(mode == "list")
         self.btn_view_grid.blockSignals(False)
         self.btn_view_list.blockSignals(False)
-
-        # show/hide list-only controls + meta
+    
         is_list = (mode == "list")
         self.cmb_period.setVisible(is_list)
         self.lbl_period_caption.setVisible(is_list)
         self.meta_row.setVisible(is_list)
-
-        # in grid mode: clear meta labels so no "old period" is shown anywhere
+    
         if not is_list:
             self.lbl_period.setText("")
             self.lbl_total.setText("")
-
-        # buttons behavior
-        self.btn_create.setEnabled(mode == "grid")
+    
         self.btn_columns.setEnabled(mode == "grid")
-
+    
+        # важно: учесть права на выбранное учреждение
+        self._apply_access_buttons()
+    
         self.reload()
 
     def _mode(self) -> str:
@@ -558,35 +556,50 @@ class SchedulePage(QWidget):
 
     def _load_refs(self):
         try:
-            orgs = list_active_orgs()
+            allowed_orgs = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
+            orgs = list_active_orgs_by_ids(allowed_orgs)
+    
             self.cmb_org.blockSignals(True)
             self.cmb_org.clear()
             for o in orgs:
                 self.cmb_org.addItem(o.name, o.id)
             self.cmb_org.blockSignals(False)
-
+    
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
         except Exception as e:
             _uilog("ERROR _load_refs: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Справочники", f"Ошибка загрузки справочников:\n{e}")
             return
-
+    
         self._on_org_changed()
 
     def _on_org_changed(self):
         org_id = self.cmb_org.currentData()
+    
         if org_id is None:
+            self.btn_create.setEnabled(False)
+            self.btn_edit.setEnabled(False)
+            self.btn_cancel.setEnabled(False)
             self._resources = []
             self._setup_table()
             self.tbl_list.setRowCount(0)
             self.reload()
             return
-
+    
+        org_id = int(org_id)
+    
+        acc = get_org_access(int(self.user.id), str(self.user.role_code), org_id)
+        can_edit = bool(acc.can_edit)
+    
+        self.btn_create.setEnabled(can_edit and self._mode() == "grid")
+        self.btn_edit.setEnabled(can_edit)
+        self.btn_cancel.setEnabled(can_edit)
+    
         try:
-            venues = list_active_venues(int(org_id))
+            venues = list_active_venues(org_id)
             resources: List[Resource] = []
-
+    
             for v in venues:
                 units = list_venue_units(v.id, include_inactive=False)
                 if units:
@@ -602,19 +615,19 @@ class SchedulePage(QWidget):
                         )
                 else:
                     resources.append(Resource(venue_id=v.id, venue_name=v.name, venue_unit_id=None, resource_name=v.name))
-
+    
             resources.sort(key=lambda r: (r.venue_name, r.resource_name))
             self._resources = resources
-            self._apply_order_and_hidden(int(org_id))
-
+            self._apply_order_and_hidden(org_id)
+    
         except Exception as e:
             _uilog("ERROR _on_org_changed: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки площадок:\n{e}")
             self._resources = []
-
+    
         self._setup_table()
-        self._apply_hidden_columns(int(org_id))
+        self._apply_hidden_columns(org_id)
         self.reload()
 
     def _period_range(self, anchor: date) -> tuple[date, date]:
@@ -1049,6 +1062,15 @@ class SchedulePage(QWidget):
         self.reload()
 
     def _on_create(self):
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            return
+    
+        acc = get_org_access(int(self.user.id), str(self.user.role_code), int(org_id))
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование расписания этого учреждения.")
+            return
+    
         if self._mode() != "grid":
             QMessageBox.information(self, "Создать бронь", "Создание доступно в режиме 'Слоты'.")
             return
@@ -1192,11 +1214,20 @@ class SchedulePage(QWidget):
         self.reload()
 
     def _on_edit(self):
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            return
+    
+        acc = get_org_access(int(self.user.id), str(self.user.role_code), int(org_id))
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование расписания этого учреждения.")
+            return
+    
         b = self._selected_booking()
         if not b:
             QMessageBox.information(self, "Редактировать", "Выберите бронирование.")
             return
-    
+
         venue_id = int(getattr(b, "venue_id"))
         venue_unit_id = getattr(b, "venue_unit_id", None)
         venue_unit_id = int(venue_unit_id) if venue_unit_id is not None else None
@@ -1259,6 +1290,14 @@ class SchedulePage(QWidget):
         self.reload()
 
     def _on_cancel(self):
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            return
+        
+        acc = get_org_access(int(self.user.id), str(self.user.role_code), int(org_id))
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование расписания этого учреждения.")
+            return
         b = self._selected_booking()
         if not b:
             QMessageBox.information(self, "Отменить", "Выберите бронирование.")
