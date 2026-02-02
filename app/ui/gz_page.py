@@ -17,6 +17,7 @@ from app.services.gz_rules_service import (
     create_rule, set_rule_active, generate_bookings_for_group
 )
 from app.ui.gz_group_dialog import GzGroupDialog
+from app.ui.gz_coaches_window import GzCoachesWindow
 
 
 class GzPage(QWidget):
@@ -35,10 +36,12 @@ class GzPage(QWidget):
         self.cb_inactive = QCheckBox("Архив")
         self.cb_inactive.stateChanged.connect(lambda *_: self.reload())
 
+        self.btn_coaches = QPushButton("Тренеры…")
         self.btn_add = QPushButton("Создать")
         self.btn_edit = QPushButton("Редактировать")
         self.btn_archive = QPushButton("Архивировать/восстановить")
 
+        self.btn_coaches.clicked.connect(self._on_coaches)
         self.btn_add.clicked.connect(self._on_add)
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_archive.clicked.connect(self._on_toggle_active)
@@ -48,6 +51,7 @@ class GzPage(QWidget):
         top.setSpacing(10)
         top.addWidget(self.ed_search, 1)
         top.addWidget(self.cb_inactive)
+        top.addWidget(self.btn_coaches)
         top.addWidget(self.btn_add)
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
@@ -119,6 +123,12 @@ class GzPage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
+        self.reload()
+
+    def _on_coaches(self):
+        dlg = GzCoachesWindow(self)
+        dlg.exec()
+        # после закрытия окна тренеров — обновим список групп
         self.reload()
 
     def _selected_group(self) -> GzGroup | None:
