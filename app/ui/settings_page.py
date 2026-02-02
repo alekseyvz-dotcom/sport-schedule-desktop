@@ -277,5 +277,5 @@ class SettingsPage(QWidget):
             save_org_permissions(u.id, new_perms)
             QMessageBox.information(self, "Готово", "Права сохранены")
         except Exception as e:
-        QMessageBox.critical(self, "Права", str(e))
+            QMessageBox.critical(self, "Права", str(e))
 
