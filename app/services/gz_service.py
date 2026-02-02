@@ -255,3 +255,27 @@ def set_group_active(group_id: int, is_active: bool) -> None:
     finally:
         if conn:
             put_conn(conn)
+
+def list_active_gz_groups_for_booking() -> List[Dict]:
+    """
+    [{id, name}] где name = 'ФИО — 2012'
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT g.id, c.full_name AS coach_name, g.group_year
+                FROM public.gz_groups g
+                JOIN public.gz_coaches c ON c.id = g.coach_id
+                WHERE g.is_active = true AND c.is_active = true
+                ORDER BY c.full_name, g.group_year
+                """
+            )
+            rows = cur.fetchall()
+            return [{"id": int(r["id"]), "name": f"{r['coach_name']} — {int(r['group_year'])}"} for r in rows]
+    finally:
+        if conn:
+            put_conn(conn)
+
