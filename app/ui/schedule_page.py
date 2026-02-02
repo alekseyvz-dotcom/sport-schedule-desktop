@@ -12,6 +12,8 @@ from app.services.access_service import list_allowed_org_ids, get_org_access
 from app.services.ref_service import list_active_orgs_by_ids
 from app.services.users_service import AuthUser
 
+from app.services.gz_service import list_active_gz_groups_for_booking
+
 from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QFont, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -184,6 +186,8 @@ class SchedulePage(QWidget):
         super().__init__(parent)
         self.user = user
         self.setStyleSheet(_PAGE_QSS)
+
+        self._gz_groups: List[Dict] = []
 
         self._settings = QSettings("SportApp", "Schedule")
 
@@ -580,6 +584,7 @@ class SchedulePage(QWidget):
             self.cmb_org.blockSignals(False)
     
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
+            self._gz_groups = list_active_gz_groups_for_booking()
         except Exception as e:
             _uilog("ERROR _load_refs: " + repr(e))
             _uilog(traceback.format_exc())
@@ -1163,8 +1168,9 @@ class SchedulePage(QWidget):
             starts_at=starts_at,
             ends_at=ends_at,
             tenants=self._tenants,
+            gz_groups=self._gz_groups,
             venue_name=venue_name,
-            venue_units=venue_units,  # None при multi_cols => комбобокса "Зона" не будет
+            venue_units=venue_units,
             initial={"venue_unit_id": venue_unit_id, "kind": "PD", "title": ""},
             selection_title=(f"Выбрано зон: {len(selected_lines)}" if multi_cols else None),
             selection_lines=(selected_lines if multi_cols else None),
@@ -1174,9 +1180,15 @@ class SchedulePage(QWidget):
     
         data = dlg.values()
     
-        kind = str(data.get("kind") or "PD")
-        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+        kind = str(data.get("kind") or "PD").upper()
         title = str(data.get("title") or "")
+        
+        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+        # gz_group_id пока никуда не сохраняем, но получаем:
+        gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
+
+        if kind == "GZ":
+            tenant_id = None
     
         created = 0
         skipped = 0
@@ -1279,20 +1291,27 @@ class SchedulePage(QWidget):
             starts_at=starts_at,
             ends_at=ends_at,
             tenants=self._tenants,
+            gz_groups=self._gz_groups,
             venue_name=venue_name,
             venue_units=venue_units,
             initial=initial,
         )
+
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
     
         data = dlg.values()
         try:
+            kind = str(data.get("kind") or "PD").upper()
+            tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
+            if kind == "GZ":
+                tenant_id = None
+            
             update_booking(
                 int(getattr(b, "id")),
-                tenant_id=int(data["tenant_id"]) if data.get("tenant_id") is not None else None,
+                tenant_id=tenant_id,
                 title=str(data.get("title") or ""),
-                kind=str(data.get("kind") or "PD"),
+                kind=kind,
                 venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
             )
         except Exception as e:
