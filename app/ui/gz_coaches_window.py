@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QAbstractItemView,
     QHeaderView,
+    QComboBox,
 )
 
 from app.services.ref_service import list_active_orgs
@@ -22,8 +23,9 @@ from app.services.gz_service import (
     create_coach,
     update_coach,
     set_coach_active,
-    get_coach_org_ids,   # NEW
-    set_coach_orgs,      # NEW
+    get_coach_org_ids,
+    set_coach_orgs,
+    list_coach_orgs_map,   # NEW
 )
 from app.ui.gz_coach_dialog import GzCoachDialog
 
@@ -32,7 +34,7 @@ class GzCoachesWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Тренеры (ГЗ)")
-        self.resize(760, 520)
+        self.resize(860, 560)
 
         self._orgs = []  # [{id, name}]
 
@@ -40,6 +42,10 @@ class GzCoachesWindow(QDialog):
         self.ed_search.setPlaceholderText("Поиск тренера…")
         self.ed_search.setClearButtonEnabled(True)
         self.ed_search.returnPressed.connect(self.reload)
+
+        self.cmb_org = QComboBox()
+        self.cmb_org.addItem("Все объекты", None)
+        self.cmb_org.currentIndexChanged.connect(lambda *_: self.reload())
 
         self.cb_inactive = QCheckBox("Архив")
         self.cb_inactive.stateChanged.connect(lambda *_: self.reload())
@@ -56,13 +62,15 @@ class GzCoachesWindow(QDialog):
 
         top = QHBoxLayout()
         top.addWidget(self.ed_search, 1)
+        top.addWidget(self.cmb_org)
         top.addWidget(self.cb_inactive)
         top.addWidget(self.btn_add)
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        self.tbl = QTableWidget(0, 4)
-        self.tbl.setHorizontalHeaderLabels(["ID", "ФИО", "Комментарий", "Активен"])
+        # было 4 колонки -> стало 5 (добавили "Объекты")
+        self.tbl = QTableWidget(0, 5)
+        self.tbl.setHorizontalHeaderLabels(["ID", "ФИО", "Объекты", "Комментарий", "Активен"])
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -73,7 +81,8 @@ class GzCoachesWindow(QDialog):
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
         bottom = QHBoxLayout()
         bottom.addStretch(1)
@@ -93,6 +102,14 @@ class GzCoachesWindow(QDialog):
         try:
             orgs = list_active_orgs()
             self._orgs = [{"id": int(o.id), "name": str(o.name)} for o in orgs]
+
+            self.cmb_org.blockSignals(True)
+            self.cmb_org.clear()
+            self.cmb_org.addItem("Все объекты", None)
+            for o in self._orgs:
+                self.cmb_org.addItem(o["name"], o["id"])
+            self.cmb_org.blockSignals(False)
+
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки учреждений:\n{e}")
             self._orgs = []
@@ -105,11 +122,16 @@ class GzCoachesWindow(QDialog):
         return it.data(Qt.ItemDataRole.UserRole) if it else None
 
     def reload(self):
+        org_id = self.cmb_org.currentData()
+        org_id = int(org_id) if org_id is not None else None
+
         try:
             rows = list_coaches(
                 search=self.ed_search.text(),
                 include_inactive=self.cb_inactive.isChecked(),
+                org_id=org_id,  # фильтр по объекту (если выбран)
             )
+            coach_orgs = list_coach_orgs_map(include_inactive_orgs=False)
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки:\n{e}")
             return
@@ -118,6 +140,8 @@ class GzCoachesWindow(QDialog):
         for c in rows:
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
+
+            orgs_str = ", ".join(coach_orgs.get(int(c.id), [])) or "—"
 
             it_id = QTableWidgetItem(str(c.id))
             it_id.setData(Qt.ItemDataRole.UserRole, c)
@@ -128,8 +152,9 @@ class GzCoachesWindow(QDialog):
 
             self.tbl.setItem(r, 0, it_id)
             self.tbl.setItem(r, 1, QTableWidgetItem(c.full_name))
-            self.tbl.setItem(r, 2, QTableWidgetItem(c.comment or ""))
-            self.tbl.setItem(r, 3, it_active)
+            self.tbl.setItem(r, 2, QTableWidgetItem(orgs_str))
+            self.tbl.setItem(r, 3, QTableWidgetItem(c.comment or ""))
+            self.tbl.setItem(r, 4, it_active)
 
             if not c.is_active:
                 for col in range(self.tbl.columnCount()):
