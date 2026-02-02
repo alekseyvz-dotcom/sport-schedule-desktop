@@ -6,6 +6,7 @@ from app.ui.schedule_page import SchedulePage
 from app.ui.analytics_page import AnalyticsPage
 from app.ui.welcome_login_page import WelcomeLoginPage
 from app.ui.settings_page import SettingsPage
+from app.ui.gz_page import GzPage
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +27,9 @@ class MainWindow(QMainWindow):
         
         if self._can_tab("tab.tenants"):
             tabs.addTab(TenantsPage(user), "Контрагенты")
+
+        if self._can_tab("tab.gz"):
+            tabs.addTab(GzPage(user), "Гос. задание")
         
         if self._can_tab("tab.orgs"):
             tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
