@@ -32,6 +32,12 @@ class RoleRow:
     code: str
     name: str
 
+@dataclass(frozen=True)
+class PermRow:
+    code: str
+    title: str
+    enabled: bool
+
 def list_users() -> List[AdminUserRow]:
     conn = None
     try:
@@ -190,6 +196,89 @@ def save_org_permissions(user_id: int, perms: List[OrgPermRow]) -> None:
                 """, (int(user_id), int(p.org_id), bool(p.can_view), bool(p.can_edit)))
 
             conn.commit()
+    finally:
+        if conn:
+            put_conn(conn)
+
+def list_tab_permissions(user_id: int) -> list[PermRow]:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT p.code, p.title,
+                       (up.user_id IS NOT NULL) AS enabled
+                FROM public.app_permissions p
+                LEFT JOIN public.app_user_permissions up
+                       ON up.perm_code = p.code AND up.user_id = %s
+                WHERE p.group_name = 'Разделы'
+                ORDER BY p.title
+                """,
+                (int(user_id),),
+            )
+            rows = cur.fetchall()
+            conn.commit()
+            return [PermRow(code=str(r["code"]), title=str(r["title"]), enabled=bool(r["enabled"])) for r in rows]
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def save_tab_permissions(user_id: int, perms: list[PermRow]) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            # удаляем только права группы "Разделы"
+            cur.execute(
+                """
+                DELETE FROM public.app_user_permissions up
+                USING public.app_permissions p
+                WHERE up.perm_code = p.code
+                  AND p.group_name = 'Разделы'
+                  AND up.user_id = %s
+                """,
+                (int(user_id),),
+            )
+            for p in perms:
+                if not p.enabled:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO public.app_user_permissions(user_id, perm_code)
+                    VALUES (%s, %s)
+                    """,
+                    (int(user_id), p.code),
+                )
+            conn.commit()
+    finally:
+        if conn:
+            put_conn(conn)
+
+def user_tabs_summary(user_id: int, limit: int = 3) -> str:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT p.title
+                FROM public.app_user_permissions up
+                JOIN public.app_permissions p ON p.code = up.perm_code
+                WHERE up.user_id = %s AND p.group_name = 'Разделы'
+                ORDER BY p.title
+                """,
+                (int(user_id),),
+            )
+            names = [str(r["title"]) for r in cur.fetchall()]
+            conn.commit()
+
+        if not names:
+            return "—"
+        if len(names) <= limit:
+            return ", ".join(names)
+        return f"{len(names)}: " + ", ".join(names[:limit]) + "…"
     finally:
         if conn:
             put_conn(conn)
