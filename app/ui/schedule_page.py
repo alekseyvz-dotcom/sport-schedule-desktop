@@ -584,7 +584,7 @@ class SchedulePage(QWidget):
             self.cmb_org.blockSignals(False)
     
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
-            self._gz_groups = list_active_gz_groups_for_booking()
+
         except Exception as e:
             _uilog("ERROR _load_refs: " + repr(e))
             _uilog(traceback.format_exc())
@@ -608,10 +608,11 @@ class SchedulePage(QWidget):
             return
     
         org_id = int(org_id)
+        
         try:
             self._gz_groups = list_active_gz_groups_for_booking(org_id=org_id)
         except Exception:
-            self._gz_groups = [
+            self._gz_groups = []
     
         acc = get_org_access(int(self.user.id), str(self.user.role_code), org_id)
         can_edit = bool(acc.can_edit)
