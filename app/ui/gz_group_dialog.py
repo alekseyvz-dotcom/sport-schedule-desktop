@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QTextEdit, QMessageBox
+    QComboBox, QTextEdit, QMessageBox, QGroupBox, QScrollArea
 )
 
 from app.services.gz_service import GzCoach
@@ -31,15 +31,35 @@ QPushButton {
 QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
 QPushButton:pressed { background: #eef1f5; }
 QLabel#title { font-weight: 700; color: #111111; }
+
+QGroupBox {
+    border: 1px solid #e6e6e6;
+    border-radius: 12px;
+    margin-top: 10px;
+    background: #ffffff;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #111111;
+    font-weight: 700;
+}
+
+QScrollArea { border: none; background: transparent; }
 """
 
 
 class GzGroupDialog(QDialog):
-    def __init__(self, parent, title: str, coaches: List[GzCoach], data: Optional[Dict] = None):
+    def __init__(self, parent, title: str, coaches: List[GzCoach], data: Optional[Dict] = None, *, is_admin: bool = False):
         super().__init__(parent)
         self.setStyleSheet(_QSS)
         self.setWindowTitle(title)
-        self.resize(560, 260)
+        self.resize(980, 620)
+
+        self._is_admin = bool(is_admin)
+        self._data_in = data or {}
+        self._group_id: Optional[int] = self._data_in.get("id")
 
         lbl = QLabel(title)
         lbl.setObjectName("title")
@@ -53,30 +73,48 @@ class GzGroupDialog(QDialog):
 
         self.ed_notes = QTextEdit()
         self.ed_notes.setPlaceholderText("Примечание…")
-        self.ed_notes.setFixedHeight(90)
+        self.ed_notes.setFixedHeight(70)
+
+        # --- rules widget
+        gb_rules = QGroupBox("Правила расписания (ГЗ)")
+        rules_lay = QVBoxLayout(gb_rules)
+        rules_lay.setContentsMargins(12, 16, 12, 12)
+
+        self.rules_widget = GzRulesWidget(self, gz_group_id=self._group_id, is_admin=self._is_admin)
+
+        scroll = QScrollArea(gb_rules)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.rules_widget)
+        rules_lay.addWidget(scroll, 1)
 
         btn_ok = QPushButton("Сохранить")
         btn_cancel = QPushButton("Отмена")
         btn_ok.clicked.connect(self._on_ok)
         btn_cancel.clicked.connect(self.reject)
 
+        # --- layout
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
         root.addWidget(lbl)
 
+        form = QGroupBox("Основное")
+        form_lay = QVBoxLayout(form)
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Тренер:"), 0)
         r1.addWidget(self.cmb_coach, 1)
-        root.addLayout(r1)
+        form_lay.addLayout(r1)
 
         r2 = QHBoxLayout()
         r2.addWidget(QLabel("Год группы:"), 0)
         r2.addWidget(self.ed_year, 1)
-        root.addLayout(r2)
+        form_lay.addLayout(r2)
 
-        root.addWidget(QLabel("Примечание:"))
-        root.addWidget(self.ed_notes)
+        form_lay.addWidget(QLabel("Примечание:"))
+        form_lay.addWidget(self.ed_notes)
+
+        root.addWidget(form)
+        root.addWidget(gb_rules, 1)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
@@ -107,3 +145,6 @@ class GzGroupDialog(QDialog):
             "group_year": int((self.ed_year.text() or "").strip()),
             "notes": (self.ed_notes.toPlainText() or "").strip(),
         }
+
+    def rules_payload(self) -> list[dict]:
+        return self.rules_widget.rules_payload()
