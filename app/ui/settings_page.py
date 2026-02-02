@@ -74,7 +74,7 @@ class SettingsPage(QWidget):
             return
 
         self._roles: List[RoleRow] = []
-        self._only_active_orgs: bool = True
+        self._show_inactive_orgs: bool = False
         self._all_users: List[AdminUserRow] = []
 
         title = QLabel("Настройки — Пользователи")
@@ -253,30 +253,29 @@ class SettingsPage(QWidget):
         if not u:
             QMessageBox.information(self, "Пользователи", "Выберите пользователя.")
             return
-
-        # загружаем права с текущим фильтром active
+    
         try:
-            perms = list_org_permissions(u.id, only_active_orgs=self._only_active_orgs)
+            perms = list_org_permissions(u.id)   # <-- теперь всегда все
         except Exception as e:
             QMessageBox.critical(self, "Права", f"Ошибка загрузки прав:\n{e}")
             return
-
+    
         dlg = OrgPermissionsDialog(
             self,
             title=f"Права на учреждения — {u.username}",
             perms=perms,
-            only_active_orgs=self._only_active_orgs,
+            show_inactive=self._show_inactive_orgs,
         )
         if dlg.exec() != dlg.DialogCode.Accepted:
-            # если пользователь менял чекбокс "только активные" — запомним всё равно
-            self._only_active_orgs = dlg.only_active_orgs()
+            self._show_inactive_orgs = dlg.show_inactive()
             return
-
-        self._only_active_orgs = dlg.only_active_orgs()
+    
+        self._show_inactive_orgs = dlg.show_inactive()
         new_perms = dlg.perms()
-
+    
         try:
             save_org_permissions(u.id, new_perms)
             QMessageBox.information(self, "Готово", "Права сохранены")
         except Exception as e:
-            QMessageBox.critical(self, "Права", str(e))
+        QMessageBox.critical(self, "Права", str(e))
+
