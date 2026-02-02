@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time, datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
@@ -16,7 +16,7 @@ class GzRule:
     id: int
     gz_group_id: int
     venue_unit_id: int
-    weekday: int          # 1..7 (Mon..Sun) как tenant_rules_service
+    weekday: int          # 1..7 (Mon..Sun)
     starts_at: time
     ends_at: time
     valid_from: date
@@ -113,18 +113,14 @@ def create_rule(
             rid = int(cur.fetchone()[0])
         conn.commit()
         return rid
-
     except Exception as e:
         if conn:
             conn.rollback()
-
         pgcode = getattr(e, "pgcode", None)
-        # 23P01 = exclusion_violation (пересечение у тренера или занятость, если вы вешали exclusion)
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError(
-                "Нельзя сохранить правило: пересечение по времени у этого тренера (другая группа ГЗ уже занимает этот интервал)."
+                "Пересечение правил: у этого тренера уже есть занятие в это время (другая группа ГЗ)."
             ) from e
-
         raise
     finally:
         if conn:
@@ -146,13 +142,18 @@ def set_rule_active(rule_id: int, is_active: bool) -> None:
             put_conn(conn)
 
 
-def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
-    target = int(weekday) - 1  # Python: Mon=0..Sun=6
-    d = valid_from
-    while d <= valid_to:
-        if d.weekday() == target:
-            yield d
-        d += timedelta(days=1)
+def delete_rule(rule_id: int) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.gz_group_rules WHERE id=%s", (int(rule_id),))
+                if cur.rowcount != 1:
+                    raise ValueError("Правило не найдено")
+    finally:
+        if conn:
+            put_conn(conn)
 
 
 def get_venue_id_by_unit(venue_unit_id: int) -> int:
@@ -160,10 +161,7 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT venue_id FROM public.venue_units WHERE id=%s",
-                (int(venue_unit_id),),
-            )
+            cur.execute("SELECT venue_id FROM public.venue_units WHERE id=%s", (int(venue_unit_id),))
             row = cur.fetchone()
             if not row:
                 raise ValueError(f"Не найдена зона venue_unit_id={venue_unit_id}")
@@ -173,10 +171,16 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
             put_conn(conn)
 
 
+def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
+    target = int(weekday) - 1  # Mon=0
+    d = valid_from
+    while d <= valid_to:
+        if d.weekday() == target:
+            yield d
+        d += timedelta(days=1)
+
+
 def _get_group_display(gz_group_id: int) -> Tuple[str, int]:
-    """
-    Возвращает (coach_name, group_year)
-    """
     conn = None
     try:
         conn = get_conn()
@@ -186,7 +190,7 @@ def _get_group_display(gz_group_id: int) -> Tuple[str, int]:
                 SELECT c.full_name AS coach_name, g.group_year
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
-                WHERE g.id = %s
+                WHERE g.id=%s
                 """,
                 (int(gz_group_id),),
             )
@@ -199,9 +203,8 @@ def _get_group_display(gz_group_id: int) -> Tuple[str, int]:
             put_conn(conn)
 
 
-def _default_booking_title(*, coach_name: str, group_year: int) -> str:
-    base = coach_name.strip() or "Тренер"
-    return f"ГЗ: {base} — {group_year}"
+def _default_booking_title(coach_name: str, group_year: int) -> str:
+    return f"ГЗ: {coach_name.strip() or 'Тренер'} — {group_year}"
 
 
 def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone) -> GenerateReport:
@@ -210,7 +213,7 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
     errors_list: List[str] = []
 
     coach_name, group_year = _get_group_display(rule.gz_group_id)
-    fallback_title = _default_booking_title(coach_name=coach_name, group_year=group_year)
+    fallback_title = _default_booking_title(coach_name, group_year)
 
     for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
         starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
@@ -247,17 +250,3 @@ def generate_bookings_for_group(*, gz_group_id: int, tz: timezone) -> GenerateRe
         errors_list.extend(rep.errors)
 
     return GenerateReport(created=total_created, skipped=total_skipped, errors=errors_list)
-
-
-def delete_rule(rule_id: int) -> None:
-    conn = None
-    try:
-        conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM public.gz_group_rules WHERE id=%s", (int(rule_id),))
-                if cur.rowcount != 1:
-                    raise ValueError("Правило не найдено")
-    finally:
-        if conn:
-            put_conn(conn)
