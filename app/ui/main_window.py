@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(TenantsPage(user), "Контрагенты")
         tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
-        tabs.addTab(SchedulePage(), "Расписание")
+        tabs.addTab(SchedulePage(user), "Расписание")
         tabs.addTab(AnalyticsPage(user), "Аналитика")
 
         self.setCentralWidget(tabs)
