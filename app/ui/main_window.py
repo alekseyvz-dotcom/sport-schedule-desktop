@@ -5,6 +5,7 @@ from app.ui.orgs_venues_page import OrgsVenuesPage
 from app.ui.schedule_page import SchedulePage
 from app.ui.analytics_page import AnalyticsPage
 from app.ui.welcome_login_page import WelcomeLoginPage
+from app.ui.settings_page import SettingsPage
 
 
 class MainWindow(QMainWindow):
@@ -26,5 +27,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
         tabs.addTab(SchedulePage(user), "Расписание")
         tabs.addTab(AnalyticsPage(user), "Аналитика")
+        if user.role_code.lower() == "admin":
+            tabs.addTab(SettingsPage(user), "Настройки")
 
         self.setCentralWidget(tabs)
