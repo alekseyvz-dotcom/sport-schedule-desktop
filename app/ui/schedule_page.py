@@ -597,6 +597,7 @@ class SchedulePage(QWidget):
         org_id = self.cmb_org.currentData()
     
         if org_id is None:
+            self._gz_groups = []
             self.btn_create.setEnabled(False)
             self.btn_edit.setEnabled(False)
             self.btn_cancel.setEnabled(False)
@@ -607,6 +608,10 @@ class SchedulePage(QWidget):
             return
     
         org_id = int(org_id)
+        try:
+            self._gz_groups = list_active_gz_groups_for_booking(org_id=org_id)
+        except Exception:
+            self._gz_groups = [
     
         acc = get_org_access(int(self.user.id), str(self.user.role_code), org_id)
         can_edit = bool(acc.can_edit)
