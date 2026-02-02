@@ -388,3 +388,31 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
     finally:
         if conn:
             put_conn(conn)
+
+def list_coach_orgs_map(*, include_inactive_orgs: bool = False) -> Dict[int, List[str]]:
+    """
+    Возвращает {coach_id: [org_name, ...]} (отсортировано по названию).
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = """
+                SELECT co.coach_id, o.name AS org_name
+                FROM public.gz_coach_orgs co
+                JOIN public.sport_orgs o ON o.id = co.org_id
+            """
+            if not include_inactive_orgs:
+                sql += " WHERE o.is_active = true"
+            sql += " ORDER BY co.coach_id, o.name"
+
+            cur.execute(sql)
+            rows = cur.fetchall()
+
+            out: Dict[int, List[str]] = {}
+            for r in rows:
+                out.setdefault(int(r["coach_id"]), []).append(str(r["org_name"]))
+            return out
+    finally:
+        if conn:
+            put_conn(conn)
