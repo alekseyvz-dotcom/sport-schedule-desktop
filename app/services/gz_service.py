@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Iterable
 
 from psycopg2.extras import RealDictCursor
-
 from app.db import get_conn, put_conn
 
 
@@ -19,11 +18,9 @@ class GzCoach:
 @dataclass(frozen=True)
 class GzGroup:
     id: int
-    org_id: int
-    org_name: str
     coach_id: int
     coach_name: str
-    group_year: str          # TEXT теперь
+    group_year: str           # TEXT (как вы хотите)
     notes: Optional[str]
     is_active: bool
 
@@ -107,8 +104,54 @@ def set_coach_active(coach_id: int, is_active: bool) -> None:
             put_conn(conn)
 
 
-def list_coaches(search: str = "", include_inactive: bool = False) -> List[GzCoach]:
+def get_coach_org_ids(coach_id: int) -> List[int]:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT org_id FROM public.gz_coach_orgs WHERE coach_id=%s ORDER BY org_id",
+                (int(coach_id),),
+            )
+            return [int(r[0]) for r in cur.fetchall()]
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def set_coach_orgs(coach_id: int, org_ids: Iterable[int]) -> None:
+    org_ids_list = sorted({int(x) for x in org_ids if x is not None})
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.gz_coach_orgs WHERE coach_id=%s", (int(coach_id),))
+            if org_ids_list:
+                cur.executemany(
+                    "INSERT INTO public.gz_coach_orgs(coach_id, org_id) VALUES (%s, %s)",
+                    [(int(coach_id), int(oid)) for oid in org_ids_list],
+                )
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def list_coaches(
+    search: str = "",
+    include_inactive: bool = False,
+    *,
+    org_id: Optional[int] = None,
+    org_ids: Optional[Iterable[int]] = None,
+) -> List[GzCoach]:
     search = (search or "").strip()
+    org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
+
     conn = None
     try:
         conn = get_conn()
@@ -122,7 +165,25 @@ def list_coaches(search: str = "", include_inactive: bool = False) -> List[GzCoa
                 where.append("c.full_name ILIKE %(q)s")
                 params["q"] = f"%{search}%"
 
-            sql = "SELECT c.id, c.full_name, c.comment, c.is_active FROM public.gz_coaches c"
+            joins = ""
+            if org_id is not None or org_ids_list is not None:
+                joins += " JOIN public.gz_coach_orgs co ON co.coach_id = c.id "
+
+                if org_id is not None:
+                    where.append("co.org_id = %(org_id)s")
+                    params["org_id"] = int(org_id)
+
+                if org_ids_list is not None:
+                    if not org_ids_list:
+                        return []
+                    where.append("co.org_id = ANY(%(org_ids)s)")
+                    params["org_ids"] = org_ids_list
+
+            sql = f"""
+                SELECT DISTINCT c.id, c.full_name, c.comment, c.is_active
+                FROM public.gz_coaches c
+                {joins}
+            """
             if where:
                 sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY c.full_name"
@@ -166,16 +227,18 @@ def list_groups(
                 where.append("g.is_active = true")
                 where.append("c.is_active = true")
 
-            if org_id is not None:
-                where.append("g.org_id = %(org_id)s")
-                params["org_id"] = int(org_id)
-
-            if org_ids_list is not None:
-                # если список пустой — сразу ничего
-                if not org_ids_list:
-                    return []
-                where.append("g.org_id = ANY(%(org_ids)s)")
-                params["org_ids"] = org_ids_list
+            # фильтр по объектам через привязку тренера
+            if org_id is not None or org_ids_list is not None:
+                where.append("EXISTS (SELECT 1 FROM public.gz_coach_orgs co WHERE co.coach_id = c.id"
+                             + (" AND co.org_id = %(org_id)s" if org_id is not None else "")
+                             + (" AND co.org_id = ANY(%(org_ids)s)" if org_ids_list is not None else "")
+                             + ")")
+                if org_id is not None:
+                    params["org_id"] = int(org_id)
+                if org_ids_list is not None:
+                    if not org_ids_list:
+                        return []
+                    params["org_ids"] = org_ids_list
 
             if search:
                 where.append("(c.full_name ILIKE %(q)s OR g.group_year ILIKE %(q)s)")
@@ -184,8 +247,6 @@ def list_groups(
             sql = """
                 SELECT
                     g.id,
-                    g.org_id,
-                    o.name AS org_name,
                     g.coach_id,
                     c.full_name AS coach_name,
                     g.group_year,
@@ -193,19 +254,16 @@ def list_groups(
                     g.is_active
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
-                JOIN public.sport_orgs o ON o.id = g.org_id
             """
             if where:
                 sql += " WHERE " + " AND ".join(where)
-            sql += " ORDER BY o.name, c.full_name, g.group_year"
+            sql += " ORDER BY c.full_name, g.group_year"
 
             cur.execute(sql, params)
             rows = cur.fetchall()
             return [
                 GzGroup(
                     id=int(r["id"]),
-                    org_id=int(r["org_id"]),
-                    org_name=str(r["org_name"]),
                     coach_id=int(r["coach_id"]),
                     coach_name=str(r["coach_name"]),
                     group_year=str(r["group_year"] or "").strip(),
@@ -219,10 +277,10 @@ def list_groups(
             put_conn(conn)
 
 
-def create_group(*, org_id: int, coach_id: int, group_year: str, notes: str = "") -> int:
+def create_group(coach_id: int, group_year: str, notes: str = "") -> int:
     group_year = (group_year or "").strip()
     if not group_year:
-        raise ValueError("Поле 'Группа' обязательно")
+        raise ValueError("Группа обязательна")
 
     conn = None
     try:
@@ -230,11 +288,11 @@ def create_group(*, org_id: int, coach_id: int, group_year: str, notes: str = ""
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO public.gz_groups(org_id, coach_id, group_year, notes, is_active)
-                VALUES (%s, %s, %s, %s, true)
+                INSERT INTO public.gz_groups(coach_id, group_year, notes, is_active)
+                VALUES (%s, %s, %s, true)
                 RETURNING id
                 """,
-                (int(org_id), int(coach_id), group_year, (notes or "").strip() or None),
+                (int(coach_id), group_year, (notes or "").strip() or None),
             )
             new_id = int(cur.fetchone()[0])
         conn.commit()
@@ -248,10 +306,10 @@ def create_group(*, org_id: int, coach_id: int, group_year: str, notes: str = ""
             put_conn(conn)
 
 
-def update_group(*, group_id: int, org_id: int, coach_id: int, group_year: str, notes: str = "") -> None:
+def update_group(group_id: int, coach_id: int, group_year: str, notes: str = "") -> None:
     group_year = (group_year or "").strip()
     if not group_year:
-        raise ValueError("Поле 'Группа' обязательно")
+        raise ValueError("Группа обязательна")
 
     conn = None
     try:
@@ -260,13 +318,10 @@ def update_group(*, group_id: int, org_id: int, coach_id: int, group_year: str, 
             cur.execute(
                 """
                 UPDATE public.gz_groups
-                SET org_id=%s,
-                    coach_id=%s,
-                    group_year=%s,
-                    notes=%s
+                SET coach_id=%s, group_year=%s, notes=%s
                 WHERE id=%s
                 """,
-                (int(org_id), int(coach_id), group_year, (notes or "").strip() or None, int(group_id)),
+                (int(coach_id), group_year, (notes or "").strip() or None, int(group_id)),
             )
             if cur.rowcount != 1:
                 raise ValueError("Группа не найдена")
@@ -299,57 +354,37 @@ def set_group_active(group_id: int, is_active: bool) -> None:
             put_conn(conn)
 
 
-def list_active_gz_groups_for_booking(
-    *,
-    org_id: Optional[int] = None,
-    org_ids: Optional[Iterable[int]] = None,
-) -> List[Dict]:
+def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[Dict]:
     """
-    [{id, name}]
-    name = 'Учреждение / Тренер — Группа'
+    [{id, name}] где name = 'ФИО — группа'
+    Фильтр: только группы тренеров, привязанных к org_id (если задан).
     """
-    org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
-
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            params: Dict[str, Any] = {}
             where = ["g.is_active = true", "c.is_active = true"]
 
-            params: Dict[str, Any] = {}
-
+            joins = ""
             if org_id is not None:
-                where.append("g.org_id = %(org_id)s")
+                joins = "JOIN public.gz_coach_orgs co ON co.coach_id = c.id"
+                where.append("co.org_id = %(org_id)s")
                 params["org_id"] = int(org_id)
 
-            if org_ids_list is not None:
-                if not org_ids_list:
-                    return []
-                where.append("g.org_id = ANY(%(org_ids)s)")
-                params["org_ids"] = org_ids_list
-
-            sql = f"""
-                SELECT
-                    g.id,
-                    o.name AS org_name,
-                    c.full_name AS coach_name,
-                    g.group_year
+            cur.execute(
+                f"""
+                SELECT g.id, c.full_name AS coach_name, g.group_year
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
-                JOIN public.sport_orgs o ON o.id = g.org_id
+                {joins}
                 WHERE {" AND ".join(where)}
-                ORDER BY o.name, c.full_name, g.group_year
-            """
-
-            cur.execute(sql, params)
+                ORDER BY c.full_name, g.group_year
+                """,
+                params,
+            )
             rows = cur.fetchall()
-            return [
-                {
-                    "id": int(r["id"]),
-                    "name": f"{r['org_name']} / {r['coach_name']} — {str(r['group_year'] or '').strip()}",
-                }
-                for r in rows
-            ]
+            return [{"id": int(r["id"]), "name": f"{r['coach_name']} — {str(r['group_year'] or '').strip()}"} for r in rows]
     finally:
         if conn:
             put_conn(conn)
