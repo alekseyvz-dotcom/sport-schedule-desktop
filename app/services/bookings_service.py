@@ -429,3 +429,72 @@ def cancel_future_bookings_like_rule(
     finally:
         if conn:
             put_conn(conn)
+
+def cancel_future_gz_bookings_like_rule(
+    *,
+    venue_unit_id: int,
+    weekday: int,          # 1..7 (Mon..Sun)
+    starts_at: time,
+    ends_at: time,
+    from_day: date,
+    title: str = "",
+) -> int:
+    """
+    Отменяет будущие бронирования ГЗ, похожие на правило.
+
+    Матчинг:
+      - venue_unit_id совпадает
+      - activity = 'GZ'
+      - status <> 'cancelled'
+      - starts_at::date >= from_day
+      - isodow(starts_at) == weekday
+      - starts_at::time == starts_at и ends_at::time == ends_at (точное совпадение времени)
+      - если title задан (не пустой) — дополнительно b.title == title
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            if (title or "").strip():
+                cur.execute(
+                    """
+                    UPDATE public.bookings
+                    SET status='cancelled'
+                    WHERE venue_unit_id = %s
+                      AND activity = 'GZ'::public.activity_type
+                      AND status <> 'cancelled'
+                      AND starts_at::date >= %s
+                      AND extract(isodow from starts_at) = %s
+                      AND starts_at::time = %s
+                      AND ends_at::time   = %s
+                      AND title = %s
+                    """,
+                    (int(venue_unit_id), from_day, int(weekday), starts_at, ends_at, (title or "").strip()),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE public.bookings
+                    SET status='cancelled'
+                    WHERE venue_unit_id = %s
+                      AND activity = 'GZ'::public.activity_type
+                      AND status <> 'cancelled'
+                      AND starts_at::date >= %s
+                      AND extract(isodow from starts_at) = %s
+                      AND starts_at::time = %s
+                      AND ends_at::time   = %s
+                    """,
+                    (int(venue_unit_id), from_day, int(weekday), starts_at, ends_at),
+                )
+
+            affected = int(cur.rowcount)
+        conn.commit()
+        return affected
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
