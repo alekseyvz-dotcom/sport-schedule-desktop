@@ -223,6 +223,7 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
                 venue_id=int(venue_id),
                 venue_unit_id=int(rule.venue_unit_id),
                 tenant_id=None,
+                gz_group_id=int(rule.gz_group_id),
                 title=(rule.title or "").strip() or fallback_title,
                 kind="GZ",
                 starts_at=starts_dt,
