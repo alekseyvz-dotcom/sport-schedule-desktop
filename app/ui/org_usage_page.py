@@ -263,7 +263,7 @@ class OrgUsagePage(QWidget):
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
 
-       if pct >= 100:
+        if pct >= 100:
             chunk = "#22c55e"  # green
         elif pct >= 71:
             chunk = "#facc15"  # yellow
