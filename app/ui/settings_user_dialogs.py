@@ -625,3 +625,84 @@ class OrgPermissionsDialog(QDialog):
     def show_inactive(self) -> bool:
         return bool(self.ch_show_inactive.isChecked())
 
+class TabsPermissionsDialog(QDialog):
+    def __init__(self, parent, title: str, perms: list):
+        super().__init__(parent)
+        self.setStyleSheet(_DIALOG_QSS)
+        self.setWindowTitle(title)
+        self.resize(640, 520)
+
+        self.lbl_title = QLabel(title)
+        self.lbl_title.setObjectName("dlgTitle")
+
+        self.ed_search = QLineEdit()
+        self.ed_search.setPlaceholderText("Поиск раздела…")
+        self.ed_search.textChanged.connect(self._apply_filter)
+
+        self.tbl = QTableWidget(0, 3)
+        self.tbl.setHorizontalHeaderLabels(["code", "Раздел", "Доступ"])
+        self.tbl.setColumnHidden(0, True)
+        self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+
+        header = self.tbl.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+        self.btn_all = QPushButton("Доступ всем")
+        self.btn_none = QPushButton("Снять все")
+        self.btn_ok = QPushButton("Сохранить")
+        self.btn_cancel = QPushButton("Отмена")
+
+        self.btn_all.clicked.connect(lambda: self._set_all(True))
+        self.btn_none.clicked.connect(lambda: self._set_all(False))
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+        root.addWidget(self.lbl_title)
+        root.addWidget(self.ed_search)
+        root.addWidget(self.tbl, 1)
+
+        footer = QHBoxLayout()
+        footer.addWidget(self.btn_all)
+        footer.addWidget(self.btn_none)
+        footer.addStretch(1)
+        footer.addWidget(self.btn_ok)
+        footer.addWidget(self.btn_cancel)
+        root.addLayout(footer)
+
+        self._load(perms)
+        self._apply_filter()
+
+    def _load(self, perms):
+        self.tbl.setRowCount(len(perms))
+        for r, p in enumerate(perms):
+            self.tbl.setItem(r, 0, QTableWidgetItem(str(p.code)))
+            self.tbl.setItem(r, 1, QTableWidgetItem(str(p.title)))
+
+            ch = QCheckBox()
+            ch.setChecked(bool(p.enabled))
+            self.tbl.setCellWidget(r, 2, ch)
+
+    def _apply_filter(self):
+        q = (self.ed_search.text() or "").strip().lower()
+        for r in range(self.tbl.rowCount()):
+            title = (self.tbl.item(r, 1).text() or "").lower()
+            self.tbl.setRowHidden(r, bool(q) and (q not in title))
+
+    def _set_all(self, enabled: bool):
+        for r in range(self.tbl.rowCount()):
+            ch: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
+            ch.setChecked(enabled)
+
+    def perms(self):
+        out = []
+        for r in range(self.tbl.rowCount()):
+            code = str(self.tbl.item(r, 0).text())
+            title = str(self.tbl.item(r, 1).text())
+            ch: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
+            out.append(type("X", (), {"code": code, "title": title, "enabled": ch.isChecked()})())
+        return out
+
