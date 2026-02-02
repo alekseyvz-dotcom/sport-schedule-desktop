@@ -334,15 +334,14 @@ class SchedulePage(QWidget):
 
         # restore last mode (so "кликаю на вкладку расписание" -> открывает последний выбранный вид)
         last_mode = str(self._settings.value("schedule/view_mode", "grid"))
-        self.(last_mode, persist=False)
-
+        self._set_mode(last_mode, persist=False)
     # -------- mode handling (fixes your issues) --------
 
     def showEvent(self, e):
         # if page is shown again, keep last selected mode
         super().showEvent(e)
         last_mode = str(self._settings.value("schedule/view_mode", "grid"))
-        self.(last_mode, persist=False)
+        self._set_mode(last_mode, persist=False)
 
     def _set_mode(self, mode: str, *, persist: bool = True) -> None:
         mode = "list" if mode == "list" else "grid"
@@ -376,6 +375,21 @@ class SchedulePage(QWidget):
 
     def _mode(self) -> str:
         return "list" if self.btn_view_list.isChecked() else "grid"
+
+    def _apply_access_buttons(self) -> None:
+        org_id = self.cmb_org.currentData()
+        if org_id is None:
+            self.btn_create.setEnabled(False)
+            self.btn_edit.setEnabled(False)
+            self.btn_cancel.setEnabled(False)
+            return
+    
+        acc = get_org_access(int(self.user.id), str(self.user.role_code), int(org_id))
+        can_edit = bool(acc.can_edit)
+    
+        self.btn_create.setEnabled(can_edit and self._mode() == "grid")
+        self.btn_edit.setEnabled(can_edit)
+        self.btn_cancel.setEnabled(can_edit)
 
     # -------- details panel and list setup (same approach as before) --------
 
