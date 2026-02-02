@@ -1194,13 +1194,6 @@ class SchedulePage(QWidget):
         gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
         title = str(data.get("title") or "")
         
-        tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
-        # gz_group_id пока никуда не сохраняем, но получаем:
-        gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
-
-        if kind == "GZ":
-            tenant_id = None
-    
         created = 0
         skipped = 0
         errors = []
@@ -1315,15 +1308,12 @@ class SchedulePage(QWidget):
             return
     
         data = dlg.values()
+        
         kind = str(data.get("kind") or "PD").upper()
         tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
         gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
+        
         try:
-            kind = str(data.get("kind") or "PD").upper()
-            tenant_id = int(data["tenant_id"]) if data.get("tenant_id") is not None else None
-            if kind == "GZ":
-                tenant_id = None
-            
             update_booking(
                 int(getattr(b, "id")),
                 tenant_id=tenant_id,
@@ -1333,6 +1323,7 @@ class SchedulePage(QWidget):
                 venue_unit_id=(int(data["venue_unit_id"]) if data.get("venue_unit_id") is not None else None),
             )
         except Exception as e:
+
             _uilog("ERROR update_booking: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Редактировать", f"Ошибка сохранения:\n{e}")
@@ -1373,4 +1364,3 @@ class SchedulePage(QWidget):
             return
     
         self.reload()
-
