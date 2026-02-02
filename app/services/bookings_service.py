@@ -19,12 +19,14 @@ class Booking:
     venue_id: int
     venue_unit_id: Optional[int]
     tenant_id: Optional[int]
+    gz_group_id: Optional[int]
     title: str
     kind: str  # 'PD' или 'GZ' (в БД это bookings.activity)
     starts_at: datetime
     ends_at: datetime
     status: str  # planned/cancelled/done
     tenant_name: str
+    gz_group_name: str
     venue_unit_name: str
 
 def _row_to_booking(r: dict) -> Booking:
@@ -33,15 +35,16 @@ def _row_to_booking(r: dict) -> Booking:
         venue_id=int(r["venue_id"]),
         venue_unit_id=(int(r["venue_unit_id"]) if r["venue_unit_id"] is not None else None),
         tenant_id=(int(r["tenant_id"]) if r["tenant_id"] is not None else None),
+        gz_group_id=(int(r["gz_group_id"]) if r.get("gz_group_id") is not None else None),
         title=str(r.get("title") or ""),
         kind=str(r.get("kind") or ""),
         starts_at=r["starts_at"],
         ends_at=r["ends_at"],
         status=str(r.get("status") or "planned"),
         tenant_name=str(r.get("tenant_name") or ""),
+        gz_group_name=str(r.get("gz_group_name") or ""),
         venue_unit_name=str(r.get("venue_unit_name") or ""),
     )
-
 
 def list_bookings_for_range(
     venue_ids: Iterable[int],
@@ -71,15 +74,19 @@ def list_bookings_for_range(
                     b.venue_id,
                     b.venue_unit_id,
                     b.tenant_id,
+                    b.gz_group_id,
                     b.title,
                     b.activity AS kind,
                     b.starts_at,
                     b.ends_at,
                     b.status,
                     COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(gc.full_name || ' — ' || gg.group_year::text, '') AS gz_group_name,
                     COALESCE(vu.name, '') AS venue_unit_name
                 FROM public.bookings b
                 LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.gz_groups gg ON gg.id = b.gz_group_id
+                LEFT JOIN public.gz_coaches gc ON gc.id = gg.coach_id
                 LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
                 WHERE b.venue_id = ANY(%s)
                   AND b.starts_at < %s
@@ -123,15 +130,19 @@ def list_bookings_for_day(
                     b.venue_id,
                     b.venue_unit_id,
                     b.tenant_id,
+                    b.gz_group_id,
                     b.title,
                     b.activity AS kind,
                     b.starts_at,
                     b.ends_at,
                     b.status,
                     COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(gc.full_name || ' — ' || gg.group_year::text, '') AS gz_group_name,
                     COALESCE(vu.name, '') AS venue_unit_name
                 FROM public.bookings b
                 LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.gz_groups gg ON gg.id = b.gz_group_id
+                LEFT JOIN public.gz_coaches gc ON gc.id = gg.coach_id
                 LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
                 WHERE b.venue_id = ANY(%s)
                   AND b.starts_at < %s
@@ -162,6 +173,7 @@ def create_booking(
     *,
     venue_id: int,
     tenant_id: int | None,
+    gz_group_id: int | None,
     title: str,
     kind: str,
     starts_at: datetime,
@@ -180,6 +192,16 @@ def create_booking(
 
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
+    if kind == "PD":
+        if tenant_id is None:
+            raise ValueError("Для ПД нужно выбрать контрагента")
+        if gz_group_id is not None:
+            raise ValueError("Для ПД gz_group_id должен быть пустым")
+    if kind == "GZ":
+        if gz_group_id is None:
+            raise ValueError("Для ГЗ нужно выбрать группу")
+        if tenant_id is not None:
+            raise ValueError("Для ГЗ tenant_id должен быть пустым")
     if ends_at <= starts_at:
         raise ValueError("Окончание должно быть позже начала")
 
@@ -207,15 +229,16 @@ def create_booking(
             cur.execute(
                 """
                 INSERT INTO public.bookings(
-                    venue_id, venue_unit_id, tenant_id, title, activity, starts_at, ends_at, status
+                    venue_id, venue_unit_id, tenant_id, gz_group_id, title, activity, starts_at, ends_at, status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'planned')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'planned')
                 RETURNING id
                 """,
                 (
                     int(venue_id),
                     int(venue_unit_id) if venue_unit_id is not None else None,
                     int(tenant_id) if tenant_id is not None else None,
+                    int(gz_group_id) if gz_group_id is not None else None,
                     title,  # может быть ''
                     kind,
                     starts_at,
@@ -257,15 +280,19 @@ def get_booking(booking_id: int) -> Booking:
                     b.venue_id,
                     b.venue_unit_id,
                     b.tenant_id,
+                    b.gz_group_id,
                     b.title,
                     b.activity AS kind,
                     b.starts_at,
                     b.ends_at,
                     b.status,
                     COALESCE(t.name, '') AS tenant_name,
+                    COALESCE(gc.full_name || ' — ' || gg.group_year::text, '') AS gz_group_name,
                     COALESCE(vu.name, '') AS venue_unit_name
                 FROM public.bookings b
                 LEFT JOIN public.tenants t ON t.id = b.tenant_id
+                LEFT JOIN public.gz_groups gg ON gg.id = b.gz_group_id
+                LEFT JOIN public.gz_coaches gc ON gc.id = gg.coach_id
                 LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
                 WHERE b.id=%s
                 """,
@@ -297,6 +324,7 @@ def update_booking(
     booking_id: int,
     *,
     tenant_id: int | None,
+    gz_group_id: int | None,
     title: str,
     kind: str,
     venue_unit_id: int | None,
@@ -316,6 +344,7 @@ def update_booking(
                 """
                 UPDATE public.bookings
                 SET tenant_id=%s,
+                    gz_group_id=%s,
                     title=%s,
                     activity=%s,
                     venue_unit_id=%s
