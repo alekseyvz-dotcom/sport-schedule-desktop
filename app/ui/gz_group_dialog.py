@@ -132,17 +132,15 @@ class GzGroupDialog(QDialog):
             self.ed_notes.setPlainText(str(data.get("notes") or ""))
 
     def _on_ok(self):
-        try:
-            int((self.ed_year.text() or "").strip())
-        except Exception:
-            QMessageBox.warning(self, "Проверка", "Год группы должен быть числом.")
+        if not (self.ed_year.text() or "").strip():
+            QMessageBox.warning(self, "Проверка", "Поле 'Группа' не может быть пустым.")
             return
         self.accept()
 
     def values(self) -> Dict:
         return {
             "coach_id": int(self.cmb_coach.currentData()),
-            "group_year": int((self.ed_year.text() or "").strip()),
+            "group_year": (self.ed_year.text() or "").strip(),  # теперь text
             "notes": (self.ed_notes.toPlainText() or "").strip(),
         }
 
