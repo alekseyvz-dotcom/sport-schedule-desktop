@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Dict, Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -11,7 +12,23 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialogButtonBox,
     QLabel,
+    QListView,
+    QAbstractItemView,
 )
+
+
+def _make_scrollable_combo(cmb: QComboBox, *, max_visible: int = 14) -> None:
+    """
+    Делает выпадающий список QComboBox гарантированно прокручиваемым на Windows/HiDPI.
+    """
+    view = QListView()
+    view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    cmb.setView(view)
+
+    # Ограничиваем высоту popup, чтобы Qt точно включил скролл
+    cmb.setMaxVisibleItems(int(max_visible))
 
 
 class BookingDialog(QDialog):
@@ -22,18 +39,21 @@ class BookingDialog(QDialog):
         title: str = "Создать бронирование",
         starts_at: datetime,
         ends_at: datetime,
-        tenants: List[Dict],  # [{id, name}]
         venue_name: str,
+        tenants: List[Dict],            # [{id, name}]
+        gz_groups: List[Dict],          # [{id, name}]  например: "Иванов И.И. — 2012"
         venue_units: Optional[List[Dict]] = None,  # [{id, name}]
-        initial: Optional[Dict] = None,  # {kind, tenant_id, venue_unit_id, title}
-        selection_title: Optional[str] = None,      # NEW
-        selection_lines: Optional[List[str]] = None # NEW
+        initial: Optional[Dict] = None,            # {kind, tenant_id|gz_group_id, venue_unit_id, title}
+        selection_title: Optional[str] = None,
+        selection_lines: Optional[List[str]] = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
 
         self._venue_units = venue_units or []
+        self._tenants = tenants or []
+        self._gz_groups = gz_groups or []
         initial = initial or {}
 
         self.lbl_info = QLabel(
@@ -42,11 +62,9 @@ class BookingDialog(QDialog):
         )
         self.lbl_info.setWordWrap(True)
 
-        # NEW: selection block (for multi-zone selection)
         self.lbl_selection = QLabel("")
         self.lbl_selection.setWordWrap(True)
         self.lbl_selection.setVisible(False)
-
         if selection_title or selection_lines:
             lines = selection_lines or []
             text = f"<b>{selection_title or ''}</b>"
@@ -56,14 +74,16 @@ class BookingDialog(QDialog):
             self.lbl_selection.setVisible(True)
 
         self.cmb_kind = QComboBox()
-        self.cmb_kind.addItem("ПД", "PD")
-        self.cmb_kind.addItem("ГЗ", "GZ")
+        self.cmb_kind.addItem("ПД (контрагент)", "PD")
+        self.cmb_kind.addItem("ГЗ (гос. задание)", "GZ")
 
-        self.cmb_tenant = QComboBox()
-        for t in tenants:
-            self.cmb_tenant.addItem(t["name"], t["id"])
+        self.cmb_subject = QComboBox()  # тут будет либо tenant, либо gz_group
+        _make_scrollable_combo(self.cmb_subject, max_visible=14)
+
+        self.lbl_subject = QLabel("Контрагент:")
 
         self.cmb_unit = QComboBox()
+        _make_scrollable_combo(self.cmb_unit, max_visible=12)
         if self._venue_units:
             for u in self._venue_units:
                 self.cmb_unit.addItem(u["name"], u["id"])
@@ -74,16 +94,27 @@ class BookingDialog(QDialog):
         self.ed_title = QLineEdit()
         self.ed_title.setPlaceholderText("Необязательно. Например: Тренировка / Секция / Аренда")
 
-        # --- apply initial values (for edit mode) ---
+        self.cmb_kind.currentIndexChanged.connect(self._rebuild_subjects)
+
+        # --- initial ---
         k = (initial.get("kind") or "PD").upper()
         i = self.cmb_kind.findData(k)
         self.cmb_kind.setCurrentIndex(i if i >= 0 else 0)
 
-        tenant_id = initial.get("tenant_id")
-        if tenant_id is not None:
-            i = self.cmb_tenant.findData(int(tenant_id))
-            if i >= 0:
-                self.cmb_tenant.setCurrentIndex(i)
+        self._rebuild_subjects()
+
+        if k == "GZ":
+            gid = initial.get("gz_group_id")
+            if gid is not None:
+                i = self.cmb_subject.findData(int(gid))
+                if i >= 0:
+                    self.cmb_subject.setCurrentIndex(i)
+        else:
+            tid = initial.get("tenant_id")
+            if tid is not None:
+                i = self.cmb_subject.findData(int(tid))
+                if i >= 0:
+                    self.cmb_subject.setCurrentIndex(i)
 
         unit_id = initial.get("venue_unit_id")
         if self._venue_units and unit_id is not None:
@@ -92,11 +123,11 @@ class BookingDialog(QDialog):
                 self.cmb_unit.setCurrentIndex(i)
 
         self.ed_title.setText((initial.get("title") or "").strip())
-        # --- end initial values ---
+        # --- end initial ---
 
         form = QFormLayout()
         form.addRow("Тип занятости:", self.cmb_kind)
-        form.addRow("Контрагент:", self.cmb_tenant)
+        form.addRow(self.lbl_subject, self.cmb_subject)
         if self._venue_units:
             form.addRow("Зона:", self.cmb_unit)
         form.addRow("Название:", self.ed_title)
@@ -104,7 +135,6 @@ class BookingDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-
         ok_btn = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn:
             ok_btn.setDefault(True)
@@ -115,15 +145,43 @@ class BookingDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(self.lbl_info)
-        root.addWidget(self.lbl_selection)  # NEW
+        root.addWidget(self.lbl_selection)
         root.addLayout(form)
         root.addWidget(self.buttons)
 
+    def _rebuild_subjects(self):
+        kind = (self.cmb_kind.currentData() or "PD").upper()
+
+        self.cmb_subject.blockSignals(True)
+        self.cmb_subject.clear()
+
+        if kind == "GZ":
+            self.lbl_subject.setText("Гос. задание (группа):")
+            for g in self._gz_groups:
+                self.cmb_subject.addItem(g["name"], g["id"])
+        else:
+            self.lbl_subject.setText("Контрагент:")
+            for t in self._tenants:
+                self.cmb_subject.addItem(t["name"], t["id"])
+
+        self.cmb_subject.blockSignals(False)
+
     def values(self) -> Dict:
         unit_id = self.cmb_unit.currentData()
-        return {
-            "kind": self.cmb_kind.currentData(),
-            "tenant_id": int(self.cmb_tenant.currentData()),
+        kind = (self.cmb_kind.currentData() or "PD").upper()
+        subject_id = self.cmb_subject.currentData()
+
+        out = {
+            "kind": kind,
             "venue_unit_id": (int(unit_id) if unit_id is not None else None),
             "title": self.ed_title.text().strip(),
         }
+
+        if kind == "GZ":
+            out["gz_group_id"] = int(subject_id) if subject_id is not None else None
+            out["tenant_id"] = None
+        else:
+            out["tenant_id"] = int(subject_id) if subject_id is not None else None
+            out["gz_group_id"] = None
+
+        return out
