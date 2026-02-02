@@ -26,6 +26,10 @@ class OrgPermRow:
     can_view: bool
     can_edit: bool
 
+@dataclass(frozen=True)
+class RoleRow:
+    code: str
+    name: str
 
 def list_users() -> List[AdminUserRow]:
     conn = None
@@ -116,40 +120,44 @@ def set_password(user_id: int, new_password: str) -> None:
             put_conn(conn)
 
 
-def list_roles() -> List[str]:
+def list_roles() -> List[RoleRow]:
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT code FROM public.roles ORDER BY code")
+            cur.execute("SELECT code, name FROM public.roles ORDER BY name, code")
             rows = cur.fetchall()
             conn.commit()
-            return [str(r["code"]) for r in rows]
+            return [RoleRow(code=str(r["code"]), name=str(r["name"])) for r in rows]
     finally:
         if conn:
             put_conn(conn)
 
 
-def list_org_permissions(user_id: int) -> List[OrgPermRow]:
+def list_org_permissions(user_id: int, *, only_active_orgs: bool = True) -> List[OrgPermRow]:
     """
-    Возвращаем ВСЕ учреждения + флажки прав пользователя (LEFT JOIN).
+    ВСЕ учреждения (активные или все) + флаги прав.
     """
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     o.id AS org_id,
                     o.name AS org_name,
+                    o.is_active AS org_is_active,
                     COALESCE(p.can_view, false) AS can_view,
                     COALESCE(p.can_edit, false) AS can_edit
                 FROM public.sport_orgs o
                 LEFT JOIN public.app_user_org_permissions p
                        ON p.org_id = o.id AND p.user_id = %s
-                WHERE o.is_active = true
-                ORDER BY o.name
-            """, (int(user_id),))
+                WHERE (%s = false) OR (o.is_active = true)
+                ORDER BY o.is_active DESC, o.name
+                """,
+                (int(user_id), bool(only_active_orgs)),
+            )
             rows = cur.fetchall()
             conn.commit()
             return [
@@ -164,7 +172,6 @@ def list_org_permissions(user_id: int) -> List[OrgPermRow]:
     finally:
         if conn:
             put_conn(conn)
-
 
 def save_org_permissions(user_id: int, perms: List[OrgPermRow]) -> None:
     """
