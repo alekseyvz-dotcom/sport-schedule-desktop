@@ -11,10 +11,10 @@ from app.db import get_conn, put_conn
 
 @dataclass(frozen=True)
 class TenantUsageRow:
-    tenant_id: Optional[int]          # может быть NULL в bookings
-    tenant_name: str                  # "Без арендатора" если NULL
-    tenant_kind: str                  # legal/person/unknown
-    rent_kind: str                    # long_term/one_time/unknown
+    tenant_id: Optional[int]  # может быть NULL в bookings
+    tenant_name: str  # "Без арендатора" если NULL
+    tenant_kind: str  # legal/person/unknown
+    rent_kind: str  # long_term/one_time/unknown
 
     pd_sec: int
     gz_sec: int
@@ -32,6 +32,18 @@ def list_usage_by_tenants(
     include_cancelled: bool = False,
     only_active_tenants: bool = False,
 ) -> List[TenantUsageRow]:
+    """
+    Аналитика по арендаторам (tenant).
+
+    Важно: считает "доле-секунды" (fraction * seconds), чтобы брони по четвертям/половинам
+    не завышали итог.
+      Q1..Q4 => 0.25
+      H1/H2  => 0.5
+      main или venue_unit_id NULL => 1.0
+
+    Здесь НЕ делаем клип до 1.0, потому что арендатор может параллельно занимать несколько
+    площадок/юнитов — это нормальная суммарная нагрузка арендатора.
+    """
     if end_dt <= start_dt:
         raise ValueError("end_dt <= start_dt")
 
@@ -46,9 +58,11 @@ def list_usage_by_tenants(
                         b.activity,
                         b.status,
                         GREATEST(b.starts_at, %(start_dt)s) AS s,
-                        LEAST(b.ends_at, %(end_dt)s) AS e
+                        LEAST(b.ends_at, %(end_dt)s) AS e,
+                        u.code AS unit_code
                     FROM public.bookings b
                     JOIN public.venues v ON v.id = b.venue_id
+                    LEFT JOIN public.venue_units u ON u.id = b.venue_unit_id
                     WHERE b.starts_at < %(end_dt)s
                       AND b.ends_at > %(start_dt)s
             """
@@ -68,7 +82,13 @@ def list_usage_by_tenants(
                         tenant_id,
                         activity,
                         status,
-                        EXTRACT(EPOCH FROM (e - s))::bigint AS sec
+                        unit_code,
+                        EXTRACT(EPOCH FROM (e - s))::bigint AS raw_sec,
+                        CASE
+                            WHEN unit_code ILIKE 'Q%%' THEN 0.25
+                            WHEN unit_code ILIKE 'H%%' THEN 0.50
+                            ELSE 1.00
+                        END AS fraction
                     FROM b0
                     WHERE e > s
                 ),
@@ -85,7 +105,9 @@ def list_usage_by_tenants(
                         b1.tenant_id,
                         b1.activity,
                         b1.status,
-                        b1.sec
+
+                        -- ВЗВЕШЕННЫЕ секунды:
+                        (b1.raw_sec * b1.fraction)::bigint AS sec
                     FROM b1
                 )
                 SELECT
@@ -122,7 +144,6 @@ def list_usage_by_tenants(
             """
 
             if only_active_tenants:
-                # показываем "виртуальные" строки всегда, а реальных — только активных
                 sql += " WHERE (b2.tenant_key IN ('GZ','NONE') OR t.is_active = true)"
 
             sql += """
@@ -157,4 +178,3 @@ def list_usage_by_tenants(
     finally:
         if conn:
             put_conn(conn)
-
