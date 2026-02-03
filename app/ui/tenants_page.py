@@ -385,62 +385,62 @@ class TenantsPage(QWidget):
         self.reload()
         self._select_row_by_id(new_id)
 
-    def _on_edit(self):
-        try:
-            if not self._can_edit:
-                QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование контрагентов.")
-                return
+    def _on_edit(self, *_):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование контрагентов.")
+            return
     
-            t = self._selected_tenant()
-            if not t:
-                QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
-                return
+        t = self._selected_tenant()
+        if not t:
+            QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
+            return
     
-            dlg = TenantDialog(
-                self,
-                title=f"Редактировать: {t.name}",
-                is_admin=self._is_admin,
-                data={
-                    "id": t.id,
-                    "name": t.name,
-                    "inn": getattr(t, "inn", None),
-                    "phone": getattr(t, "phone", None),
-                    "email": getattr(t, "email", None),
-                    "comment": getattr(t, "comment", None),
-                    "contact_name": getattr(t, "contact_name", None),
-                    "obligation_kind": getattr(t, "obligation_kind", None),
-                    "contract_no": getattr(t, "contract_no", None),
-                    "contract_date": getattr(t, "contract_date", None),
-                    "contract_valid_from": getattr(t, "contract_valid_from", None),
-                    "contract_valid_to": getattr(t, "contract_valid_to", None),
-                    "docs_delivery_method": getattr(t, "docs_delivery_method", None),
-                    "status": getattr(t, "status", None),
-                    "contract_signed": getattr(t, "contract_signed", None),
-                    "attached_in_1c": getattr(t, "attached_in_1c", None),
-                    "has_ds": getattr(t, "has_ds", None),
-                    "notes": getattr(t, "notes", None),
-                    "tenant_kind": getattr(t, "tenant_kind", "legal"),
-                    "rent_kind": getattr(t, "rent_kind", "long_term"),
-                },
-            )
+        dlg = TenantDialog(
+            self,
+            title=f"Редактировать: {t.name}",
+            is_admin=self._is_admin,
+            data={
+                "id": t.id,
+                "name": t.name,
+                "inn": t.inn,
+                "phone": t.phone,
+                "email": t.email,
+                "comment": t.comment,
+                "contact_name": t.contact_name,
+                "obligation_kind": t.obligation_kind,
+                "contract_no": t.contract_no,
+                "contract_date": t.contract_date,
+                "contract_valid_from": t.contract_valid_from,
+                "contract_valid_to": t.contract_valid_to,
+                "docs_delivery_method": t.docs_delivery_method,
+                "status": t.status,
+                "contract_signed": t.contract_signed,
+                "attached_in_1c": t.attached_in_1c,
+                "has_ds": t.has_ds,
+                "notes": t.notes,
+                "tenant_kind": t.tenant_kind,
+                "rent_kind": t.rent_kind,
+            },
+        )
     
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                return
-
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+    
         data = dlg.values()
         rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
-
+    
         try:
             update_tenant(user_id=self._user.id, role_code=self._user.role_code, tenant_id=t.id, **data)
         except Exception as e:
-            QMessageBox.critical(self, "Редактирование", f"Ошибка при открытии диалога:\n{type(e).__name__}: {e}")
-            raise
-
+            QMessageBox.critical(self, "Редактировать контрагента", f"Ошибка:\n{e}")
+            return
+    
         if rules_payload:
             self._apply_rules_and_maybe_generate(t.id, rules_payload)
-
+    
         self.reload()
         self._select_row_by_id(t.id)
+
 
     def _on_toggle_active(self):
         if not self._can_edit:
