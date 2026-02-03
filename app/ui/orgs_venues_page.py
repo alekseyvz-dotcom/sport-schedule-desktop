@@ -107,11 +107,10 @@ QLabel#sectionTitle {
 
 class OrgsVenuesPage(QWidget):
     """
-    Страница учреждений/площадок с учётом прав:
-      - список учреждений фильтруется по can_view (через обновлённый list_orgs)
-      - редактирование/архивирование доступно только при can_edit
-      - создание учреждения — только admin (как в create_org)
-      - для площадок UI ограничиваем по can_edit учреждения (сервис venues желательно тоже защитить)
+    Страница учреждений/площадок с учётом прав (can_view/can_edit на уровне org):
+      - list_orgs фильтруется по can_view (в orgs_service)
+      - редактирование/архивирование учреждения — только can_edit (проверка и в UI, и в сервисе)
+      - площадки: list/create/update/archive защищены в venues_service (требуют user_id/role_code)
     """
 
     def __init__(self, user: AuthUser, parent=None):
@@ -235,10 +234,10 @@ class OrgsVenuesPage(QWidget):
             return
 
         acc = self._org_access(org.id)
+
         self.btn_org_edit.setEnabled(acc.can_edit)
         self.btn_org_archive.setEnabled(acc.can_edit)
 
-        # Площадки завязаны на право редактирования учреждения
         self.btn_venue_add.setEnabled(acc.can_edit)
         self.btn_venue_edit.setEnabled(acc.can_edit)
         self.btn_venue_archive.setEnabled(acc.can_edit)
@@ -366,7 +365,12 @@ class OrgsVenuesPage(QWidget):
         selected_id = selected.id if selected else None
 
         try:
-            venues = list_venues(org.id, include_inactive=self.cb_venue_inactive.isChecked())
+            venues = list_venues(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                include_inactive=self.cb_venue_inactive.isChecked(),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Площадки", f"Ошибка загрузки:\n{e}")
             return
@@ -520,7 +524,7 @@ class OrgsVenuesPage(QWidget):
 
         self.reload_orgs()
 
-    # -------- venue actions (UI-гейт по правам учреждения)
+    # -------- venue actions (venues_service уже проверяет права, но UI-гейт оставим)
     def _venue_add(self):
         org = self._selected_org()
         if not org:
@@ -539,6 +543,8 @@ class OrgsVenuesPage(QWidget):
         data = dlg.values()
         try:
             new_id = create_venue(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
                 org_id=org.id,
                 name=data["name"],
                 sport_type=data["sport_type"],
@@ -587,6 +593,8 @@ class OrgsVenuesPage(QWidget):
         data = dlg.values()
         try:
             update_venue(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
                 venue_id=v.id,
                 name=data["name"],
                 sport_type=data["sport_type"],
@@ -630,7 +638,12 @@ class OrgsVenuesPage(QWidget):
             return
 
         try:
-            set_venue_active(v.id, new_state)
+            set_venue_active(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                venue_id=v.id,
+                is_active=new_state,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
