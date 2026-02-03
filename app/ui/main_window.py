@@ -15,6 +15,8 @@ class MainWindow(QMainWindow):
         self.user: AuthUser | None = None
         self.setWindowTitle("ИАС ФУТБОЛ")
 
+        self.statusBar().showMessage("Разработал Алексей Зезюкин")
+
         self.welcome = WelcomeLoginPage()
         self.welcome.logged_in.connect(self.on_logged_in)
         self.setCentralWidget(self.welcome)
