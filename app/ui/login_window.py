@@ -24,6 +24,12 @@ QLabel#status {
     padding: 2px 2px;
 }
 
+QLabel#copyright {
+    color: #64748b;
+    padding: 6px 2px 2px 2px;
+    font-size: 12px;
+}
+
 QLineEdit {
     background: #ffffff;
     border: 1px solid #e6e6e6;
@@ -76,17 +82,13 @@ class LoginWindow(QWidget):
         self.lbl_logo.setObjectName("logo")
         self.lbl_logo.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
 
-        # Путь: от текущего файла -> вверх -> вверх -> assets/logo.png
-        # app/ui/login_window.py -> app/ui -> app -> (root) -> assets/logo.png
         logo_path = resource_path(os.path.join("assets", "logo.png"))
         pix = QPixmap(logo_path)
 
         if not pix.isNull():
-            # ширина логотипа (можете поменять на 120/160)
             pix = pix.scaledToWidth(140, Qt.SmoothTransformation)
             self.lbl_logo.setPixmap(pix)
         else:
-            # если файла нет/не найден — просто не показываем пустую область
             self.lbl_logo.setVisible(False)
 
         # ---- Inputs & buttons ----
@@ -114,15 +116,21 @@ class LoginWindow(QWidget):
         btns.addStretch(1)
         btns.addWidget(self.btn_login)
 
+        # ---- Copyright ----
+        self.lbl_copyright = QLabel("Разработал Алексей Зезюкин")
+        self.lbl_copyright.setObjectName("copyright")
+        self.lbl_copyright.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
 
-        root.addWidget(self.lbl_logo)  # <-- логотип сверху
+        root.addWidget(self.lbl_logo)
         root.addWidget(self.ed_user)
         root.addWidget(self.ed_pass)
         root.addWidget(self.lbl_status)
         root.addLayout(btns)
+        root.addWidget(self.lbl_copyright)  # <-- в самый низ
 
         self.ed_user.returnPressed.connect(self._on_login)
         self.ed_pass.returnPressed.connect(self._on_login)
