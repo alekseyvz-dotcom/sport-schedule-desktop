@@ -123,11 +123,11 @@ QHeaderView::section {
 QTableWidget::item { padding: 6px 10px; }
 """
 
-
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     def paint(self, painter: QPainter, option, index):
+        # Qt сам нарисует фон/текст/selection
         super().paint(painter, option, index)
 
         rect = option.rect
@@ -138,24 +138,18 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        grid_color = QColor("#e9edf3")
+        # 1) СЕТКА: рисуем ТОЛЬКО для пустых слотов.
+        if not has_booking:
+            grid_pen = QPen(QColor("#e9edf3"))
+            grid_pen.setWidth(1)
+            painter.setPen(grid_pen)
+            # тонкие линии по границам ячейки (как grid)
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+            painter.drawLine(rect.topLeft(), rect.topRight())
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
-        if has_booking:
-            bg = index.data(Qt.ItemDataRole.BackgroundRole)
-            if isinstance(bg, QColor):
-                grid_color = bg
-            else:
-                grid_color = QColor("#9bd7ff")
-
-        grid_pen = QPen(grid_color)
-        grid_pen.setWidth(1)
-        painter.setPen(grid_pen)
-
-        painter.drawLine(rect.topLeft(), rect.bottomLeft())
-        painter.drawLine(rect.topRight(), rect.bottomRight())
-        painter.drawLine(rect.topLeft(), rect.topRight())
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-
+        # 2) РАМКА БЛОКА: рисуем для брони (по top/middle/bottom)
         if part:
             border_pen = QPen(QColor("#5a6a7a"))
             border_pen.setWidth(2)
@@ -170,7 +164,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
                 painter.drawLine(r.bottomLeft(), r.bottomRight())
 
         painter.restore()
-
 
 class SchedulePage(QWidget):
     WORK_START = time(8, 0)
