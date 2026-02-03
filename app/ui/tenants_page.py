@@ -138,6 +138,8 @@ class TenantsPage(QWidget):
         self.tbl.setColumnWidth(10, 95)
         self.tbl.setColumnWidth(11, 120)
 
+        self.tbl.setColumnHidden(0, True)
+
         self.tbl.setStyleSheet(
             """
             QTableWidget {
