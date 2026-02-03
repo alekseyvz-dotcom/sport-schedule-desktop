@@ -71,11 +71,16 @@ class GzGroupDialog(QDialog):
         data: Optional[Dict] = None,
         *,
         is_admin: bool = False,
+        user_id: int,
+        role_code: str,
     ):
         super().__init__(parent)
         self.setStyleSheet(_QSS)
         self.setWindowTitle(title)
         self.resize(980, 620)
+
+        self._user_id = int(user_id)
+        self._role_code = str(role_code or "")
 
         self._is_admin = bool(is_admin)
         self._data_in = data or {}
@@ -142,6 +147,8 @@ class GzGroupDialog(QDialog):
             is_admin=self._is_admin,
             group_period_from=self.dt_from.date().toPython(),
             group_period_to=self.dt_to.date().toPython(),
+            user_id=self._user_id,
+            role_code=self._role_code,
         )
 
         # обновляем период в rules_widget при изменении дат в группе
