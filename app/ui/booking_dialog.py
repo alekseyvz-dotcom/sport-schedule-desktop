@@ -1,7 +1,8 @@
+# app/ui/booking_dialog.py
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -18,16 +19,11 @@ from PySide6.QtWidgets import (
 
 
 def _make_scrollable_combo(cmb: QComboBox, *, max_visible: int = 14) -> None:
-    """
-    Делает выпадающий список QComboBox гарантированно прокручиваемым на Windows/HiDPI.
-    """
     view = QListView()
     view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     cmb.setView(view)
-
-    # Ограничиваем высоту popup, чтобы Qt точно включил скролл
     cmb.setMaxVisibleItems(int(max_visible))
 
 
@@ -41,11 +37,12 @@ class BookingDialog(QDialog):
         ends_at: datetime,
         venue_name: str,
         tenants: List[Dict],            # [{id, name}]
-        gz_groups: List[Dict],          # [{id, name}]  например: "Иванов И.И. — 2012"
+        gz_groups: List[Dict],          # [{id, name}]
         venue_units: Optional[List[Dict]] = None,  # [{id, name}]
         initial: Optional[Dict] = None,            # {kind, tenant_id|gz_group_id, venue_unit_id, title}
         selection_title: Optional[str] = None,
         selection_lines: Optional[List[str]] = None,
+        allowed_kinds: Optional[Set[str]] = None,  # {"PD","GZ"}; если None -> оба
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -55,6 +52,10 @@ class BookingDialog(QDialog):
         self._tenants = tenants or []
         self._gz_groups = gz_groups or []
         initial = initial or {}
+
+        self._allowed_kinds = {k.upper() for k in (allowed_kinds or {"PD", "GZ"})}
+        if not self._allowed_kinds:
+            self._allowed_kinds = {"PD", "GZ"}
 
         self.lbl_info = QLabel(
             f"Площадка: <b>{venue_name}</b><br>"
@@ -74,10 +75,13 @@ class BookingDialog(QDialog):
             self.lbl_selection.setVisible(True)
 
         self.cmb_kind = QComboBox()
-        self.cmb_kind.addItem("ПД (контрагент)", "PD")
-        self.cmb_kind.addItem("ГЗ (гос. задание)", "GZ")
+        if "PD" in self._allowed_kinds:
+            self.cmb_kind.addItem("ПД (контрагент)", "PD")
+        if "GZ" in self._allowed_kinds:
+            self.cmb_kind.addItem("ГЗ (гос. задание)", "GZ")
+        self.cmb_kind.setEnabled(self.cmb_kind.count() > 1)
 
-        self.cmb_subject = QComboBox()  # тут будет либо tenant, либо gz_group
+        self.cmb_subject = QComboBox()
         _make_scrollable_combo(self.cmb_subject, max_visible=14)
 
         self.lbl_subject = QLabel("Контрагент:")
@@ -99,11 +103,15 @@ class BookingDialog(QDialog):
         # --- initial ---
         k = (initial.get("kind") or "PD").upper()
         i = self.cmb_kind.findData(k)
-        self.cmb_kind.setCurrentIndex(i if i >= 0 else 0)
+        if i >= 0:
+            self.cmb_kind.setCurrentIndex(i)
+        else:
+            self.cmb_kind.setCurrentIndex(0)
 
         self._rebuild_subjects()
 
-        if k == "GZ":
+        kind_now = (self.cmb_kind.currentData() or "PD").upper()
+        if kind_now == "GZ":
             gid = initial.get("gz_group_id")
             if gid is not None:
                 i = self.cmb_subject.findData(int(gid))
