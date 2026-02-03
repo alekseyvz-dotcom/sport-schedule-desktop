@@ -1,4 +1,3 @@
-# app/services/gz_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +7,28 @@ from typing import List, Optional, Dict, Any, Iterable
 from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
+
+
+GZ_EDIT_ROLES = {"admin"}  # при необходимости расширьте: {"admin", "manager"}
+
+
+def _norm_role(role_code: str) -> str:
+    return (role_code or "").strip().lower()
+
+
+def _admin(role_code: str) -> bool:
+    return _norm_role(role_code) == "admin"
+
+
+def _require_gz_view(*, user_id: int, role_code: str) -> None:
+    if not user_id:
+        raise PermissionError("Недостаточно прав: просмотр ГЗ запрещён")
+
+
+def _require_gz_edit(*, user_id: int, role_code: str) -> None:
+    _require_gz_view(user_id=user_id, role_code=role_code)
+    if _norm_role(role_code) not in GZ_EDIT_ROLES:
+        raise PermissionError("Недостаточно прав: редактирование ГЗ запрещено")
 
 
 @dataclass(frozen=True)
@@ -34,9 +55,6 @@ class GzGroup:
 # ---------------- helpers (access) ----------------
 
 def list_accessible_org_ids(*, user_id: int) -> List[int]:
-    """
-    Org ids, которые доступны пользователю (can_view=true).
-    """
     conn = None
     try:
         conn = get_conn()
@@ -56,13 +74,26 @@ def list_accessible_org_ids(*, user_id: int) -> List[int]:
             put_conn(conn)
 
 
-def _admin(role_code: str) -> bool:
-    return (role_code or "").lower() == "admin"
+def _require_org_access_for_edit(*, user_id: int, role_code: str, org_ids: Iterable[int]) -> None:
+    """
+    Для не-admin запрещаем привязку/редактирование тренера на "чужих" org.
+    """
+    if _admin(role_code):
+        return
+
+    allowed = set(list_accessible_org_ids(user_id=int(user_id)))
+    requested = {int(x) for x in org_ids if x is not None}
+    if not requested:
+        raise PermissionError("Нужно выбрать хотя бы одно доступное учреждение")
+    if not requested.issubset(allowed):
+        raise PermissionError("Нельзя назначить тренера на учреждения, к которым нет доступа")
 
 
 # ---------------- coaches ----------------
 
-def create_coach(full_name: str, comment: str = "") -> int:
+def create_coach(*, user_id: int, role_code: str, full_name: str, comment: str = "") -> int:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     full_name = (full_name or "").strip()
     if not full_name:
         raise ValueError("ФИО тренера не может быть пустым")
@@ -91,7 +122,9 @@ def create_coach(full_name: str, comment: str = "") -> int:
             put_conn(conn)
 
 
-def update_coach(coach_id: int, full_name: str, comment: str = "") -> None:
+def update_coach(*, user_id: int, role_code: str, coach_id: int, full_name: str, comment: str = "") -> None:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     full_name = (full_name or "").strip()
     if not full_name:
         raise ValueError("ФИО тренера не может быть пустым")
@@ -120,7 +153,9 @@ def update_coach(coach_id: int, full_name: str, comment: str = "") -> None:
             put_conn(conn)
 
 
-def set_coach_active(coach_id: int, is_active: bool) -> None:
+def set_coach_active(*, user_id: int, role_code: str, coach_id: int, is_active: bool) -> None:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -129,6 +164,8 @@ def set_coach_active(coach_id: int, is_active: bool) -> None:
                 "UPDATE public.gz_coaches SET is_active=%s WHERE id=%s",
                 (bool(is_active), int(coach_id)),
             )
+            if cur.rowcount != 1:
+                raise ValueError("Тренер не найден")
         conn.commit()
     except Exception:
         if conn:
@@ -139,7 +176,9 @@ def set_coach_active(coach_id: int, is_active: bool) -> None:
             put_conn(conn)
 
 
-def get_coach_org_ids(coach_id: int) -> List[int]:
+def get_coach_org_ids(*, user_id: int, role_code: str, coach_id: int) -> List[int]:
+    _require_gz_view(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -148,13 +187,23 @@ def get_coach_org_ids(coach_id: int) -> List[int]:
                 "SELECT org_id FROM public.gz_coach_orgs WHERE coach_id=%s ORDER BY org_id",
                 (int(coach_id),),
             )
-            return [int(r[0]) for r in cur.fetchall()]
+            orgs = [int(r[0]) for r in cur.fetchall()]
+
+        # для не-admin возвращаем только те org, которые доступны пользователю
+        if _admin(role_code):
+            return orgs
+
+        allowed = set(list_accessible_org_ids(user_id=int(user_id)))
+        return [oid for oid in orgs if oid in allowed]
     finally:
         if conn:
             put_conn(conn)
 
 
-def set_coach_orgs(coach_id: int, org_ids: Iterable[int]) -> None:
+def set_coach_orgs(*, user_id: int, role_code: str, coach_id: int, org_ids: Iterable[int]) -> None:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+    _require_org_access_for_edit(user_id=user_id, role_code=role_code, org_ids=org_ids)
+
     org_ids_list = sorted({int(x) for x in org_ids if x is not None})
 
     conn = None
@@ -186,17 +235,12 @@ def list_coaches(
     user_id: Optional[int] = None,
     role_code: str = "",
 ) -> List[GzCoach]:
-    """
-    Фильтрация тренеров:
-      - admin: как раньше (все, +опционально org_id/org_ids)
-      - не admin:
-          * если user_id задан — ограничиваем доступными org'ами пользователя (can_view=true)
-          * дополнительно можно передать org_id/org_ids (пересекается с доступными)
-    """
+    if user_id is not None:
+        _require_gz_view(user_id=int(user_id), role_code=role_code)
+
     search = (search or "").strip()
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
 
-    # доступные org'и пользователя
     accessible_orgs: Optional[List[int]] = None
     if not _admin(role_code):
         if user_id is None:
@@ -219,7 +263,6 @@ def list_coaches(
                 params["q"] = f"%{search}%"
 
             joins = ""
-            # фильтр по учреждениям всегда через co, если есть хоть какое-то ограничение
             need_org_filter = (org_id is not None) or (org_ids_list is not None) or (accessible_orgs is not None)
             if need_org_filter:
                 joins += " JOIN public.gz_coach_orgs co ON co.coach_id = c.id "
@@ -274,13 +317,9 @@ def list_groups(
     user_id: Optional[int] = None,
     role_code: str = "",
 ) -> List[GzGroup]:
-    """
-    Фильтрация групп:
-      - admin: как раньше (все, +опционально org_id/org_ids)
-      - не admin:
-          * если user_id задан — ограничиваем доступными org'ами пользователя (can_view=true)
-          * дополнительно можно передать org_id/org_ids (пересекается с доступными)
-    """
+    if user_id is not None:
+        _require_gz_view(user_id=int(user_id), role_code=role_code)
+
     search = (search or "").strip()
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
 
@@ -303,8 +342,6 @@ def list_groups(
                 where.append("g.is_active = true")
                 where.append("c.is_active = true")
 
-            # фильтр по учреждениям через привязку тренера
-            # делаем JOIN, чтобы не городить EXISTS со смешанными условиями
             joins = ""
             need_org_filter = (org_id is not None) or (org_ids_list is not None) or (accessible_orgs is not None)
             if need_org_filter:
@@ -369,14 +406,18 @@ def list_groups(
 
 
 def create_group(
+    *,
+    user_id: int,
+    role_code: str,
     coach_id: int,
     group_year: str,
     notes: str = "",
-    *,
     is_free: bool = False,
     period_from: Optional[date] = None,
     period_to: Optional[date] = None,
 ) -> int:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     group_year = (group_year or "").strip()
     if not group_year:
         raise ValueError("Группа обязательна")
@@ -415,15 +456,19 @@ def create_group(
 
 
 def update_group(
+    *,
+    user_id: int,
+    role_code: str,
     group_id: int,
     coach_id: int,
     group_year: str,
     notes: str = "",
-    *,
     is_free: bool = False,
     period_from: Optional[date] = None,
     period_to: Optional[date] = None,
 ) -> None:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     group_year = (group_year or "").strip()
     if not group_year:
         raise ValueError("Группа обязательна")
@@ -463,7 +508,9 @@ def update_group(
             put_conn(conn)
 
 
-def set_group_active(group_id: int, is_active: bool) -> None:
+def set_group_active(*, user_id: int, role_code: str, group_id: int, is_active: bool) -> None:
+    _require_gz_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -472,6 +519,8 @@ def set_group_active(group_id: int, is_active: bool) -> None:
                 "UPDATE public.gz_groups SET is_active=%s WHERE id=%s",
                 (bool(is_active), int(group_id)),
             )
+            if cur.rowcount != 1:
+                raise ValueError("Группа не найдена")
         conn.commit()
     except Exception:
         if conn:
@@ -483,9 +532,7 @@ def set_group_active(group_id: int, is_active: bool) -> None:
 
 
 def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[Dict]:
-    """
-    [{id, name, is_free}]
-    """
+    # как было (это просто справочник)
     conn = None
     try:
         conn = get_conn()
@@ -524,11 +571,7 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
             put_conn(conn)
 
 
-def list_coach_orgs_map(
-    *,
-    include_inactive_orgs: bool = False,
-    org_ids: Optional[Iterable[int]] = None,
-) -> Dict[int, List[str]]:
+def list_coach_orgs_map(*, include_inactive_orgs: bool = False, org_ids: Optional[Iterable[int]] = None) -> Dict[int, List[str]]:
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
 
     conn = None
