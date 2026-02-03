@@ -401,8 +401,7 @@ def set_group_active(group_id: int, is_active: bool) -> None:
 
 def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[Dict]:
     """
-    [{id, name}] где name = 'ФИО — группа'
-    Фильтр: только группы тренеров, привязанных к org_id (если задан).
+    [{id, name, is_free}]
     """
     conn = None
     try:
@@ -419,7 +418,7 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
 
             cur.execute(
                 f"""
-                SELECT g.id, c.full_name AS coach_name, g.group_year
+                SELECT g.id, c.full_name AS coach_name, g.group_year, g.is_free
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
                 {joins}
@@ -429,7 +428,14 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
                 params,
             )
             rows = cur.fetchall()
-            return [{"id": int(r["id"]), "name": f"{r['coach_name']} — {str(r['group_year'] or '').strip()}"} for r in rows]
+            return [
+                {
+                    "id": int(r["id"]),
+                    "name": f"{r['coach_name']} — {str(r['group_year'] or '').strip()}",
+                    "is_free": bool(r.get("is_free", False)),
+                }
+                for r in rows
+            ]
     finally:
         if conn:
             put_conn(conn)
