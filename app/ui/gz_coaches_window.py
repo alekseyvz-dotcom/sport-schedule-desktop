@@ -29,7 +29,7 @@ from app.services.gz_service import (
     set_coach_active,
     get_coach_org_ids,
     set_coach_orgs,
-    list_coach_orgs_map,
+    list_coach_orgs_map,  # важно: функция должна быть обновлена и принимать org_ids=
 )
 from app.ui.gz_coach_dialog import GzCoachDialog
 
@@ -42,7 +42,7 @@ class GzCoachesWindow(QDialog):
         self.setWindowTitle("Тренеры (ГЗ)")
         self.resize(860, 560)
 
-        self._orgs = []  # [{id, name}] только разрешённые пользователю
+        self._orgs: list[dict] = []  # [{id, name}] только разрешённые пользователю
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск тренера…")
@@ -103,6 +103,12 @@ class GzCoachesWindow(QDialog):
         self._load_orgs()
         self.reload()
 
+    def _allowed_org_ids_list(self) -> list[int]:
+        return [int(o["id"]) for o in (self._orgs or [])]
+
+    def _allowed_org_ids_set(self) -> set[int]:
+        return {int(o["id"]) for o in (self._orgs or [])}
+
     def _load_orgs(self):
         try:
             allowed_ids = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
@@ -133,24 +139,29 @@ class GzCoachesWindow(QDialog):
         org_id = self.cmb_org.currentData()
         org_id = int(org_id) if org_id is not None else None
 
-        allowed_org_ids = {int(o["id"]) for o in self._orgs}
+        allowed_org_ids_list = self._allowed_org_ids_list()
+        allowed_org_ids_set = self._allowed_org_ids_set()
+
+        # если в комбобоксе каким-то образом оказался "чужой" org_id
+        if org_id is not None and org_id not in allowed_org_ids_set:
+            self.tbl.setRowCount(0)
+            return
 
         try:
             rows = list_coaches(
                 search=self.ed_search.text(),
                 include_inactive=self.cb_inactive.isChecked(),
-                org_id=org_id,
+                org_id=org_id,                     # конкретный объект (если выбран)
+                org_ids=allowed_org_ids_list,      # ограничение доступными объектами
             )
 
-            # карту "coach_id -> [org_name,...]" от сервиса фильтруем по разрешённым org_id
-            coach_orgs_full = list_coach_orgs_map(include_inactive_orgs=False)  # coach_id -> [org_name]
+            # показываем в колонке "Объекты" только доступные пользователю учреждения
+            coach_orgs = list_coach_orgs_map(
+                include_inactive_orgs=False,
+                org_ids=allowed_org_ids_list,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки:\n{e}")
-            return
-
-        # Если выбран фильтр по учреждению — не даём выбрать "чужое" значение
-        if org_id is not None and org_id not in allowed_org_ids:
-            self.tbl.setRowCount(0)
             return
 
         self.tbl.setRowCount(0)
@@ -158,10 +169,7 @@ class GzCoachesWindow(QDialog):
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
 
-            # ВНИМАНИЕ: list_coach_orgs_map возвращает только имена.
-            # Если у вас есть возможность — лучше сделать в gz_service версию, которая отдаёт org_id + name.
-            # Пока безопаснее просто показывать "как есть", а фильтр по org делаем через allowed_org_ids выше.
-            orgs_str = ", ".join(coach_orgs_full.get(int(c.id), [])) or "—"
+            orgs_str = ", ".join(coach_orgs.get(int(c.id), [])) or "—"
 
             it_id = QTableWidgetItem(str(c.id))
             it_id.setData(Qt.ItemDataRole.UserRole, c)
@@ -192,9 +200,14 @@ class GzCoachesWindow(QDialog):
             return
 
         v = dlg.values()
+
+        # защита от подмены/ошибки: сохраняем только разрешённые org_ids
+        allowed = self._allowed_org_ids_set()
+        org_ids = [int(x) for x in (v.get("org_ids") or []) if int(x) in allowed]
+
         try:
             new_id = create_coach(v["full_name"], v.get("comment", ""))
-            set_coach_orgs(new_id, v.get("org_ids") or [])
+            set_coach_orgs(new_id, org_ids)
         except Exception as e:
             QMessageBox.critical(self, "Создать тренера", str(e))
             return
@@ -210,11 +223,11 @@ class GzCoachesWindow(QDialog):
             QMessageBox.warning(self, "Тренеры", "Нет доступных учреждений. Невозможно редактировать тренера.")
             return
 
+        allowed = self._allowed_org_ids_set()
+
         try:
             selected_org_ids = get_coach_org_ids(c.id)
-            # ограничим только теми org, что доступны пользователю
-            allowed = {int(o["id"]) for o in self._orgs}
-            selected_org_ids = [oid for oid in selected_org_ids if int(oid) in allowed]
+            selected_org_ids = [int(oid) for oid in selected_org_ids if int(oid) in allowed]
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить объекты тренера:\n{e}")
             return
@@ -230,9 +243,11 @@ class GzCoachesWindow(QDialog):
             return
 
         v = dlg.values()
+        org_ids = [int(x) for x in (v.get("org_ids") or []) if int(x) in allowed]
+
         try:
             update_coach(c.id, v["full_name"], v.get("comment", ""))
-            set_coach_orgs(c.id, v.get("org_ids") or [])
+            set_coach_orgs(c.id, org_ids)
         except Exception as e:
             QMessageBox.critical(self, "Редактировать тренера", str(e))
             return
