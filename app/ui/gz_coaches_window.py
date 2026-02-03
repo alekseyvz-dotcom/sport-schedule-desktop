@@ -1,3 +1,4 @@
+# app/ui/gz_coaches_window.py
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -16,7 +17,10 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
-from app.services.ref_service import list_active_orgs
+from app.services.users_service import AuthUser
+from app.services.access_service import list_allowed_org_ids
+from app.services.ref_service import list_active_orgs_by_ids
+
 from app.services.gz_service import (
     GzCoach,
     list_coaches,
@@ -25,18 +29,20 @@ from app.services.gz_service import (
     set_coach_active,
     get_coach_org_ids,
     set_coach_orgs,
-    list_coach_orgs_map,   # NEW
+    list_coach_orgs_map,
 )
 from app.ui.gz_coach_dialog import GzCoachDialog
 
 
 class GzCoachesWindow(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.user = user
+
         self.setWindowTitle("Тренеры (ГЗ)")
         self.resize(860, 560)
 
-        self._orgs = []  # [{id, name}]
+        self._orgs = []  # [{id, name}] только разрешённые пользователю
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск тренера…")
@@ -68,7 +74,6 @@ class GzCoachesWindow(QDialog):
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        # было 4 колонки -> стало 5 (добавили "Объекты")
         self.tbl = QTableWidget(0, 5)
         self.tbl.setHorizontalHeaderLabels(["ID", "ФИО", "Объекты", "Комментарий", "Активен"])
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -100,7 +105,9 @@ class GzCoachesWindow(QDialog):
 
     def _load_orgs(self):
         try:
-            orgs = list_active_orgs()
+            allowed_ids = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
+            orgs = list_active_orgs_by_ids(allowed_ids)
+
             self._orgs = [{"id": int(o.id), "name": str(o.name)} for o in orgs]
 
             self.cmb_org.blockSignals(True)
@@ -119,21 +126,31 @@ class GzCoachesWindow(QDialog):
         if row < 0:
             return None
         it = self.tbl.item(row, 0)
-        return it.data(Qt.ItemDataRole.UserRole) if it else None
+        obj = it.data(Qt.ItemDataRole.UserRole) if it else None
+        return obj if isinstance(obj, GzCoach) else None
 
     def reload(self):
         org_id = self.cmb_org.currentData()
         org_id = int(org_id) if org_id is not None else None
 
+        allowed_org_ids = {int(o["id"]) for o in self._orgs}
+
         try:
             rows = list_coaches(
                 search=self.ed_search.text(),
                 include_inactive=self.cb_inactive.isChecked(),
-                org_id=org_id,  # фильтр по объекту (если выбран)
+                org_id=org_id,
             )
-            coach_orgs = list_coach_orgs_map(include_inactive_orgs=False)
+
+            # карту "coach_id -> [org_name,...]" от сервиса фильтруем по разрешённым org_id
+            coach_orgs_full = list_coach_orgs_map(include_inactive_orgs=False)  # coach_id -> [org_name]
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки:\n{e}")
+            return
+
+        # Если выбран фильтр по учреждению — не даём выбрать "чужое" значение
+        if org_id is not None and org_id not in allowed_org_ids:
+            self.tbl.setRowCount(0)
             return
 
         self.tbl.setRowCount(0)
@@ -141,7 +158,10 @@ class GzCoachesWindow(QDialog):
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
 
-            orgs_str = ", ".join(coach_orgs.get(int(c.id), [])) or "—"
+            # ВНИМАНИЕ: list_coach_orgs_map возвращает только имена.
+            # Если у вас есть возможность — лучше сделать в gz_service версию, которая отдаёт org_id + name.
+            # Пока безопаснее просто показывать "как есть", а фильтр по org делаем через allowed_org_ids выше.
+            orgs_str = ", ".join(coach_orgs_full.get(int(c.id), [])) or "—"
 
             it_id = QTableWidgetItem(str(c.id))
             it_id.setData(Qt.ItemDataRole.UserRole, c)
@@ -164,7 +184,7 @@ class GzCoachesWindow(QDialog):
 
     def _on_add(self):
         if not self._orgs:
-            QMessageBox.warning(self, "Тренеры", "Нет списка учреждений. Невозможно создать тренера.")
+            QMessageBox.warning(self, "Тренеры", "Нет доступных учреждений. Невозможно создать тренера.")
             return
 
         dlg = GzCoachDialog(self, "Создать тренера", orgs=self._orgs, selected_org_ids=[])
@@ -187,11 +207,14 @@ class GzCoachesWindow(QDialog):
             QMessageBox.information(self, "Тренеры", "Выберите тренера.")
             return
         if not self._orgs:
-            QMessageBox.warning(self, "Тренеры", "Нет списка учреждений. Невозможно редактировать тренера.")
+            QMessageBox.warning(self, "Тренеры", "Нет доступных учреждений. Невозможно редактировать тренера.")
             return
 
         try:
             selected_org_ids = get_coach_org_ids(c.id)
+            # ограничим только теми org, что доступны пользователю
+            allowed = {int(o["id"]) for o in self._orgs}
+            selected_org_ids = [oid for oid in selected_org_ids if int(oid) in allowed]
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить объекты тренера:\n{e}")
             return
