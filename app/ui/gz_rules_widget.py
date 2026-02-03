@@ -109,15 +109,29 @@ class GzRulesWidget(QWidget):
             venues = list_active_venues(int(org.id))
             for v in venues:
                 units = list_venue_units(int(v.id), include_inactive=False)
-                for u in units:
+    
+                if units:
+                    for u in units:
+                        out.append(
+                            {
+                                "id": int(u.id),
+                                "venue_id": int(v.id),
+                                "sort_order": int(getattr(u, "sort_order", 0)),
+                                "label": f"{org.name} / {v.name} — {u.name}",
+                            }
+                        )
+                else:
+                    # ВАЖНО: площадка без зон — добавляем "виртуальную" зону.
+                    # Лучше всего завести РЕАЛЬНУЮ запись в venue_units в БД (см. пункт 2).
                     out.append(
                         {
-                            "id": int(u.id),
+                            "id": -int(v.id),              # временный id (см. ниже)
                             "venue_id": int(v.id),
-                            "sort_order": int(getattr(u, "sort_order", 0)),
-                            "label": f"{org.name} / {v.name} — {u.name}",
+                            "sort_order": 0,
+                            "label": f"{org.name} / {v.name} — (без зон)",
                         }
                     )
+    
         return out
 
     def _load_from_db(self):
