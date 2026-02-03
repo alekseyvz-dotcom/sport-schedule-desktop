@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush
@@ -21,10 +21,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QAbstractItemView,
     QHeaderView,
-    QSplitter,
     QSizePolicy,
 )
-
 
 from app.services.users_service import AuthUser
 from app.services.ref_service import list_active_orgs
@@ -158,7 +156,6 @@ class DonutChart(QWidget):
         w = self.width()
         h = self.height()
 
-        # title
         p.setPen(QColor("#0f172a"))
         f = p.font()
         f.setPointSize(11)
@@ -166,7 +163,6 @@ class DonutChart(QWidget):
         p.setFont(f)
         p.drawText(12, 22, self._title)
 
-        # subtitle
         if self._subtitle:
             p.setPen(QColor("#64748b"))
             f2 = p.font()
@@ -175,7 +171,6 @@ class DonutChart(QWidget):
             p.setFont(f2)
             p.drawText(12, 40, self._subtitle)
 
-        # donut area
         top = 48
         size = min(w - 24, h - top - 12)
         if size < 80:
@@ -183,7 +178,6 @@ class DonutChart(QWidget):
 
         rect = QRectF((w - size) / 2, top, size, size)
 
-        # background ring
         pen_bg = QPen(self.col_bg)
         pen_bg.setWidth(max(10, int(size * 0.12)))
         p.setPen(pen_bg)
@@ -191,7 +185,6 @@ class DonutChart(QWidget):
         p.drawArc(rect, 0, 360 * 16)
 
         if self._total <= 0:
-            # center label
             p.setPen(QColor("#334155"))
             f3 = p.font()
             f3.setPointSize(10)
@@ -200,7 +193,6 @@ class DonutChart(QWidget):
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, "нет данных")
             return
 
-        # arcs
         start = 90 * 16  # top
         pd_angle = -int(360 * 16 * (self._pd / self._total))
         gz_angle = -int(360 * 16 * (self._gz / self._total))
@@ -215,7 +207,6 @@ class DonutChart(QWidget):
         p.setPen(pen_gz)
         p.drawArc(rect, start + pd_angle, gz_angle)
 
-        # center text
         p.setPen(QColor("#0f172a"))
         fc = p.font()
         fc.setPointSize(12)
@@ -246,7 +237,6 @@ class BarListChart(QWidget):
         self.col_bar2 = QColor("#93c5fd")
         self.col_text = QColor("#0f172a")
         self.col_muted = QColor("#64748b")
-        self.col_grid = QColor("#e5e7eb")
 
     def set_data(self, *, title: str, items: List[Tuple[str, int]], total_sec: int) -> None:
         self._title = title
@@ -262,7 +252,6 @@ class BarListChart(QWidget):
         w = self.width()
         h = self.height()
 
-        # title
         p.setPen(self.col_text)
         ft = p.font()
         ft.setPointSize(11)
@@ -287,22 +276,18 @@ class BarListChart(QWidget):
             p.drawText(left, top + 24, "нет данных")
             return
 
-        # layout
         row_h = max(22, min(34, area_h // max(1, len(self._items))))
         bar_h = int(row_h * 0.55)
         gap = row_h - bar_h
 
-        # max in list for scaling
         max_val = max(v for _, v in self._items) if self._items else 1
 
-        # bar region
         name_w = int(w * 0.42)
         pct_w = 70
         bar_x0 = left + name_w
         bar_x1 = w - right - pct_w
         bar_w = max(80, bar_x1 - bar_x0)
 
-        # fonts
         fn = p.font()
         fn.setPointSize(9)
         fn.setBold(False)
@@ -310,27 +295,26 @@ class BarListChart(QWidget):
         for i, (name, val) in enumerate(self._items):
             y = top + i * row_h + gap // 2
 
-            # name (trim)
             p.setPen(self.col_text)
             p.setFont(fn)
             shown = name
-            # simple trim by chars to avoid font-metrics complexity
             if len(shown) > 36:
                 shown = shown[:33] + "…"
-            p.drawText(QRectF(left, y - 2, name_w - 8, row_h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, shown)
+            p.drawText(
+                QRectF(left, y - 2, name_w - 8, row_h),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                shown,
+            )
 
-            # bar bg
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(QColor("#eef2ff") if i % 2 == 0 else QColor("#eff6ff")))
             p.drawRoundedRect(QRectF(bar_x0, y + (row_h - bar_h) / 2, bar_w, bar_h), 6, 6)
 
-            # bar value
             frac = 0.0 if max_val <= 0 else (val / max_val)
             fill_w = max(0.0, bar_w * frac)
             p.setBrush(QBrush(self.col_bar if i == 0 else self.col_bar2))
             p.drawRoundedRect(QRectF(bar_x0, y + (row_h - bar_h) / 2, fill_w, bar_h), 6, 6)
 
-            # percent label (of total)
             share = _pct(val, self._total)
             p.setPen(self.col_muted)
             p.drawText(
@@ -415,7 +399,6 @@ class TenantUsagePage(QWidget):
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        # --- Charts row (cards)
         self.chart_donut = DonutChart(self)
         self.chart_top = BarListChart(self)
 
@@ -425,21 +408,9 @@ class TenantUsagePage(QWidget):
         charts_row.addWidget(self.chart_donut, 1)
         charts_row.addWidget(self.chart_top, 2)
 
-        # --- Table (keep it, but improve columns and add share bar)
         self.tbl = QTableWidget(0, 10)
         self.tbl.setHorizontalHeaderLabels(
-            [
-                "Арендатор",
-                "Тип",
-                "Аренда",
-                "ПД, ч",
-                "ГЗ, ч",
-                "Итого, ч",
-                "Доля",
-                "Доля, %",
-                "Брони",
-                "Отмены",
-            ]
+            ["Арендатор", "Тип", "Аренда", "ПД, ч", "ГЗ, ч", "Итого, ч", "Доля", "Доля, %", "Брони", "Отмены"]
         )
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -523,9 +494,55 @@ class TenantUsagePage(QWidget):
 
     @staticmethod
     def _share_bar_text(share_pct: float) -> str:
-        # Simple unicode bar (10 blocks)
         n = max(0, min(10, int(round(share_pct / 10.0))))
         return "█" * n + " " * (10 - n)
+
+    @staticmethod
+    def _normalize_rows(rows: List[TenantUsageRow]) -> List[TenantUsageRow]:
+        """
+        Склеиваем все строки "без арендатора", которые на самом деле ГЗ,
+        в одну строку "Гос. задание".
+        """
+        gz_none: Optional[TenantUsageRow] = None
+        out: List[TenantUsageRow] = []
+
+        for r in rows:
+            name = (getattr(r, "tenant_name", "") or "").strip().lower()
+            is_none = name in {"", "—", "без арендатора", "без контрагента", "none", "null"}
+
+            if is_none and int(getattr(r, "gz_sec", 0) or 0) > 0 and int(getattr(r, "pd_sec", 0) or 0) <= 0:
+                if gz_none is None:
+                    gz_none = TenantUsageRow(
+                        tenant_id=None,
+                        tenant_name="Гос. задание",
+                        tenant_kind="—",
+                        rent_kind="—",
+                        pd_sec=0,
+                        gz_sec=int(r.gz_sec),
+                        total_sec=int(r.gz_sec),
+                        bookings_count=int(getattr(r, "bookings_count", 0) or 0),
+                        cancelled_count=int(getattr(r, "cancelled_count", 0) or 0),
+                    )
+                else:
+                    gz_none = TenantUsageRow(
+                        tenant_id=None,
+                        tenant_name="Гос. задание",
+                        tenant_kind="—",
+                        rent_kind="—",
+                        pd_sec=0,
+                        gz_sec=int(gz_none.gz_sec) + int(r.gz_sec),
+                        total_sec=int(gz_none.total_sec) + int(r.gz_sec),
+                        bookings_count=int(gz_none.bookings_count) + int(getattr(r, "bookings_count", 0) or 0),
+                        cancelled_count=int(gz_none.cancelled_count) + int(getattr(r, "cancelled_count", 0) or 0),
+                    )
+                continue
+
+            out.append(r)
+
+        if gz_none is not None:
+            out.append(gz_none)
+
+        return out
 
     def reload(self):
         p = self._calc_period()
@@ -551,24 +568,23 @@ class TenantUsagePage(QWidget):
             QMessageBox.critical(self, "Загрузка арендаторов", f"Ошибка расчёта:\n{e}")
             return
 
-        self._rows = list(rows)
+        rows2 = self._normalize_rows(list(rows))
+        self._rows = rows2
 
-        total_pd = sum(r.pd_sec for r in rows)
-        total_gz = sum(r.gz_sec for r in rows)
+        total_pd = sum(r.pd_sec for r in rows2)
+        total_gz = sum(r.gz_sec for r in rows2)
         total_all = total_pd + total_gz
         self.lbl_total.setText(f"ИТОГО: ПД {_hours(total_pd)}ч | ГЗ {_hours(total_gz)}ч | Всего {_hours(total_all)}ч")
 
-        # update charts
         self.chart_donut.set_data(pd_sec=total_pd, gz_sec=total_gz, title="Структура загрузки", subtitle=p.title)
 
-        top_items = sorted(((r.tenant_name, r.total_sec) for r in rows), key=lambda x: x[1], reverse=True)[: self.TOP_N]
+        top_items = sorted(((r.tenant_name, r.total_sec) for r in rows2), key=lambda x: x[1], reverse=True)[: self.TOP_N]
         self.chart_top.set_data(title=f"Топ-{min(self.TOP_N, len(top_items))} по часам", items=top_items, total_sec=total_all)
 
-        # table
         self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(0)
 
-        rows_sorted = sorted(rows, key=lambda r: int(getattr(r, "total_sec", 0)), reverse=True)
+        rows_sorted = sorted(rows2, key=lambda r: int(getattr(r, "total_sec", 0)), reverse=True)
         for r in rows_sorted:
             rr = self.tbl.rowCount()
             self.tbl.insertRow(rr)
@@ -587,8 +603,8 @@ class TenantUsagePage(QWidget):
             self.tbl.setItem(rr, 6, it_bar)
 
             self.tbl.setItem(rr, 7, QTableWidgetItem(f"{share:.1f}%"))
-            self.tbl.setItem(rr, 8, QTableWidgetItem(str(r.bookings_count)))
-            self.tbl.setItem(rr, 9, QTableWidgetItem(str(r.cancelled_count)))
+            self.tbl.setItem(rr, 8, QTableWidgetItem(str(getattr(r, "bookings_count", 0))))
+            self.tbl.setItem(rr, 9, QTableWidgetItem(str(getattr(r, "cancelled_count", 0))))
 
             for c in (3, 4, 5, 7, 8, 9):
                 it = self.tbl.item(rr, c)
