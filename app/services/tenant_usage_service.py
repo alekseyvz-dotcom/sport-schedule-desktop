@@ -92,7 +92,7 @@ def list_usage_by_tenants(
                     b2.tenant_key,
 
                     -- tenant_id оставляем NULL (это "виртуальные" строки)
-                    CASE WHEN b2.tenant_key LIKE 'T:%' THEN b2.tenant_id ELSE NULL END AS tenant_id,
+                    CASE WHEN b2.tenant_key LIKE 'T:%%' THEN b2.tenant_id ELSE NULL END AS tenant_id,
 
                     CASE
                         WHEN b2.tenant_key = 'GZ' THEN 'Гос. задание'
@@ -118,7 +118,7 @@ def list_usage_by_tenants(
                     COALESCE(SUM(CASE WHEN b2.status = 'cancelled' THEN 1 ELSE 0 END), 0)::int AS cancelled_count
                 FROM b2
                 LEFT JOIN public.tenants t
-                       ON (b2.tenant_key LIKE 'T:%' AND t.id = b2.tenant_id)
+                       ON (b2.tenant_key LIKE 'T:%%' AND t.id = b2.tenant_id)
             """
 
             if only_active_tenants:
@@ -128,7 +128,7 @@ def list_usage_by_tenants(
             sql += """
                 GROUP BY
                     b2.tenant_key,
-                    CASE WHEN b2.tenant_key LIKE 'T:%' THEN b2.tenant_id ELSE NULL END,
+                    CASE WHEN b2.tenant_key LIKE 'T:%%' THEN b2.tenant_id ELSE NULL END,
                     tenant_name,
                     tenant_kind,
                     rent_kind
