@@ -7,6 +7,7 @@ from typing import List, Optional
 from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
+from app.services.access_guard import require_org_edit
 
 
 @dataclass(frozen=True)
@@ -79,14 +80,18 @@ def _validate_work_time(*, is_24h: bool, work_start: time, work_end: time) -> No
 
 
 def create_org(
+    *,
+    user_id: int,
+    role_code: str,
     name: str,
     address: str = "",
     comment: str = "",
-    *,
     work_start: time = time(8, 0),
     work_end: time = time(22, 0),
     is_24h: bool = False,
 ) -> int:
+    if (role_code or "").lower() != "admin":
+        raise PermissionError("Недостаточно прав: создание учреждения доступно только администратору")
     name = (name or "").strip()
     if not name:
         raise ValueError("Название учреждения не может быть пустым")
@@ -120,17 +125,20 @@ def create_org(
         if conn:
             put_conn(conn)
 
-
 def update_org(
+    *,
+    user_id: int,
+    role_code: str,
     org_id: int,
     name: str,
     address: str = "",
     comment: str = "",
-    *,
     work_start: time,
     work_end: time,
     is_24h: bool = False,
 ) -> None:
+    require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
+
     name = (name or "").strip()
     if not name:
         raise ValueError("Название учреждения не может быть пустым")
@@ -171,7 +179,9 @@ def update_org(
             put_conn(conn)
 
 
-def set_org_active(org_id: int, is_active: bool) -> None:
+def set_org_active(*, user_id: int, role_code: str, org_id: int, is_active: bool) -> None:
+    require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
+
     conn = None
     try:
         conn = get_conn()
