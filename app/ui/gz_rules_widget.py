@@ -5,8 +5,14 @@ from typing import Optional, Dict, List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem,
-    QMessageBox, QAbstractItemView
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QAbstractItemView,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues
@@ -28,17 +34,26 @@ class GzRulesWidget(QWidget):
     """
     Виджет правил расписания для ГЗ (gz_group_rules).
 
-    Полностью повторяет TenantRulesWidget по поведению:
-    - локальная копия правил _rules_local, чтобы GzGroupDialog вернул payload
-    - для существующего gz_group_id грузит из БД
-    - disable: is_active=false + опционально отмена будущих броней (GZ)
-    - delete (admin): delete + отмена будущих броней (GZ)
+    Дополнительно:
+    - умеет принимать период группы (period_from/period_to) и подставлять его
+      при создании/редактировании правил через TenantRuleDialog.
     """
 
-    def __init__(self, parent=None, *, gz_group_id: Optional[int], is_admin: bool = False):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        gz_group_id: Optional[int],
+        is_admin: bool = False,
+        group_period_from: Optional[date] = None,
+        group_period_to: Optional[date] = None,
+    ):
         super().__init__(parent)
         self._gz_group_id = gz_group_id
         self._is_admin = bool(is_admin)
+
+        self._group_period_from: Optional[date] = group_period_from
+        self._group_period_to: Optional[date] = group_period_to
 
         self._units = self._load_units_flat()
         self._rules_local: List[Dict] = []
@@ -79,8 +94,12 @@ class GzRulesWidget(QWidget):
         else:
             self._refresh()
 
+    def set_group_period(self, period_from: Optional[date], period_to: Optional[date]) -> None:
+        """Можно вызывать из диалога группы, если пользователь меняет период."""
+        self._group_period_from = period_from
+        self._group_period_to = period_to
+
     def _default_rule_title(self) -> str:
-        # можно оставить пустым/коротким; в генерации есть красивый fallback
         return "ГЗ"
 
     def _load_units_flat(self) -> List[Dict]:
@@ -170,7 +189,12 @@ class GzRulesWidget(QWidget):
         self.tbl.resizeColumnsToContents()
 
     def _on_add(self):
-        dlg = TenantRuleDialog(self, venue_units=self._units, contract_valid_from=None, contract_valid_to=None)
+        dlg = TenantRuleDialog(
+            self,
+            venue_units=self._units,
+            contract_valid_from=self._group_period_from,
+            contract_valid_to=self._group_period_to,
+        )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 
@@ -212,8 +236,8 @@ class GzRulesWidget(QWidget):
             title="Изменить правило",
             venue_units=self._units,
             initial=r,
-            contract_valid_from=None,
-            contract_valid_to=None,
+            contract_valid_from=self._group_period_from,
+            contract_valid_to=self._group_period_to,
         )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
@@ -221,7 +245,6 @@ class GzRulesWidget(QWidget):
         v = dlg.values()
         title = (v.get("title") or "").strip() or self._default_rule_title()
 
-        # стратегия как у tenant: старое деактивируем, новое добавляем
         if r.get("id"):
             r["op"] = "deactivate"
             r["is_active"] = False
