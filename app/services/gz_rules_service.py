@@ -6,10 +6,28 @@ from datetime import date, time, datetime, timedelta, timezone
 from typing import List, Tuple
 
 from psycopg2.extras import RealDictCursor
-from psycopg2 import errors
+from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
 from app.services.bookings_service import create_booking
+
+
+GZ_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте: {"admin", "manager"}
+
+
+def _norm_role(role_code: str) -> str:
+    return (role_code or "").strip().lower()
+
+
+def _require_rules_view(*, user_id: int, role_code: str) -> None:
+    if not user_id:
+        raise PermissionError("Недостаточно прав: просмотр правил ГЗ запрещён")
+
+
+def _require_rules_edit(*, user_id: int, role_code: str) -> None:
+    _require_rules_view(user_id=user_id, role_code=role_code)
+    if _norm_role(role_code) not in GZ_RULES_EDIT_ROLES:
+        raise PermissionError("Недостаточно прав: редактирование правил ГЗ запрещено")
 
 
 @dataclass(frozen=True)
@@ -33,7 +51,15 @@ class GenerateReport:
     errors: List[str]
 
 
-def list_rules_for_group(gz_group_id: int, include_inactive: bool = False) -> List[GzRule]:
+def list_rules_for_group(
+    *,
+    user_id: int,
+    role_code: str,
+    gz_group_id: int,
+    include_inactive: bool = False,
+) -> List[GzRule]:
+    _require_rules_view(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -75,6 +101,8 @@ def list_rules_for_group(gz_group_id: int, include_inactive: bool = False) -> Li
 
 def create_rule(
     *,
+    user_id: int,
+    role_code: str,
     gz_group_id: int,
     venue_unit_id: int,
     weekday: int,
@@ -84,6 +112,8 @@ def create_rule(
     valid_to: date,
     title: str = "",
 ) -> int:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
     if not (1 <= int(weekday) <= 7):
         raise ValueError("weekday должен быть от 1 до 7")
     if ends_at <= starts_at:
@@ -123,7 +153,7 @@ def create_rule(
         if conn:
             conn.rollback()
         pgcode = getattr(e, "pgcode", None)
-        if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
+        if isinstance(e, pg_errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError(
                 "Пересечение правил: у этого тренера уже есть занятие в это время (другая группа ГЗ)."
             ) from e
@@ -133,7 +163,9 @@ def create_rule(
             put_conn(conn)
 
 
-def set_rule_active(rule_id: int, is_active: bool) -> None:
+def set_rule_active(*, user_id: int, role_code: str, rule_id: int, is_active: bool) -> None:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -143,12 +175,16 @@ def set_rule_active(rule_id: int, is_active: bool) -> None:
                     "UPDATE public.gz_group_rules SET is_active=%s WHERE id=%s",
                     (bool(is_active), int(rule_id)),
                 )
+                if cur.rowcount != 1:
+                    raise ValueError("Правило не найдено")
     finally:
         if conn:
             put_conn(conn)
 
 
-def delete_rule(rule_id: int) -> None:
+def delete_rule(*, user_id: int, role_code: str, rule_id: int) -> None:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -187,10 +223,6 @@ def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
 
 
 def _get_group_display(gz_group_id: int) -> Tuple[str, str]:
-    """
-    Возвращает (coach_name, group_year_str).
-    ВАЖНО: group_year в БД у вас TEXT и может быть не числом.
-    """
     conn = None
     try:
         conn = get_conn()
@@ -251,6 +283,7 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
             pgcode = getattr(e, "pgcode", None)
             msg = str(e)
 
+            # занято/пересечение — нормальный skip, не "ошибка"
             if pgcode == "P0001" and "Пересечение по времени" in msg:
                 continue
 
@@ -259,8 +292,16 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
     return GenerateReport(created=created, skipped=skipped, errors=errors_list)
 
 
-def generate_bookings_for_group(*, gz_group_id: int, tz: timezone) -> GenerateReport:
-    rules = list_rules_for_group(int(gz_group_id), include_inactive=False)
+def generate_bookings_for_group(*, user_id: int, role_code: str, gz_group_id: int, tz: timezone) -> GenerateReport:
+    # генерация создаёт брони => это операция изменения
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
+    rules = list_rules_for_group(
+        user_id=user_id,
+        role_code=role_code,
+        gz_group_id=int(gz_group_id),
+        include_inactive=False,
+    )
     total_created = 0
     total_skipped = 0
     errors_list: List[str] = []
