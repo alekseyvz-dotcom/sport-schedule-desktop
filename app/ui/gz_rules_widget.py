@@ -135,7 +135,12 @@ class GzRulesWidget(QWidget):
         return out
 
     def _load_from_db(self):
-        rules = list_rules_for_group(int(self._gz_group_id), include_inactive=True)
+        rules = list_rules_for_group(
+            user_id=self._user_id,
+            role_code=self._role_code,
+            gz_group_id=int(self._gz_group_id),
+            include_inactive=True,
+        )
         self._rules_local = [
             {
                 "id": int(r.id),
@@ -304,7 +309,12 @@ class GzRulesWidget(QWidget):
 
         if r.get("id"):
             try:
-                set_rule_active(int(r["id"]), False)
+                set_rule_active(
+                    user_id=self._user_id,
+                    role_code=self._role_code,
+                    rule_id=int(r["id"]),
+                    is_active=False,
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
                 return
@@ -376,7 +386,11 @@ class GzRulesWidget(QWidget):
                 from_day=date.today(),
                 title=(r.get("title") or "").strip(),
             )
-            delete_rule(int(r["id"]))
+            delete_rule(
+                user_id=self._user_id,
+                role_code=self._role_code,
+                rule_id=int(r["id"]),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Удалить правило", f"Ошибка:\n{e}")
             return
