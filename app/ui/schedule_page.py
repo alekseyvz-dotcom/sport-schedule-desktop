@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
+from psycopg2.extras import RealDictCursor
+from app.db import get_conn, put_conn
 
 import os
 import tempfile
@@ -41,6 +43,32 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
+def _load_org_work_window(org_id: int) -> tuple[time, time]:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT work_start, work_end, is_24h
+                FROM public.sport_orgs
+                WHERE id=%s
+                """,
+                (int(org_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                # fallback на старое поведение
+                return time(8, 0), time(22, 0)
+
+            if bool(row.get("is_24h")):
+                # делаем сетку на сутки
+                return time(0, 0), time(23, 59, 59)
+
+            return row["work_start"], row["work_end"]
+    finally:
+        if conn:
+            put_conn(conn)
 
 def _uilog(msg: str) -> None:
     path = os.path.join(tempfile.gettempdir(), "schedule_debug.log")
@@ -166,8 +194,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.restore()
 
 class SchedulePage(QWidget):
-    WORK_START = time(8, 0)
-    WORK_END = time(22, 0)
     SLOT_MINUTES = 30
 
     TZ_OFFSET_HOURS = 3
@@ -185,6 +211,9 @@ class SchedulePage(QWidget):
         self._gz_groups: List[Dict] = []
 
         self._settings = QSettings("SportApp", "Schedule")
+
+        self._work_start: time = time(8, 0)
+        self._work_end: time = time(22, 0)
 
         self._resources: List[Resource] = []
         self._tenants: List[Dict] = []
@@ -614,6 +643,13 @@ class SchedulePage(QWidget):
             return
     
         org_id = int(org_id)
+
+        # режим работы учреждения -> слоты
+        try:
+            self._work_start, self._work_end = _load_org_work_window(org_id)
+        except Exception:
+            # если что-то пошло не так — оставляем дефолт
+            self._work_start, self._work_end = time(8, 0), time(22, 0)
         
         try:
             self._gz_groups = list_active_gz_groups_for_booking(org_id=org_id)
@@ -708,13 +744,15 @@ class SchedulePage(QWidget):
 
     def _time_slots(self) -> List[time]:
         out: List[time] = []
-        cur = datetime.combine(date.today(), self.WORK_START)
-        end = datetime.combine(date.today(), self.WORK_END)
+        cur = datetime.combine(date.today(), self._work_start)
+        end = datetime.combine(date.today(), self._work_end)
+
         step = timedelta(minutes=self.SLOT_MINUTES)
         while cur < end:
             out.append(cur.time())
             cur += step
         return out
+
 
     def _setup_table(self):
         times = self._time_slots()
@@ -785,8 +823,8 @@ class SchedulePage(QWidget):
             else:
                 venue_fallback_col[int(rsrc.venue_id)] = col
 
-        day_start = datetime.combine(day, self.WORK_START, tzinfo=self.TZ)
-        day_end = datetime.combine(day, self.WORK_END, tzinfo=self.TZ)
+        day_start = datetime.combine(day, self._work_start, tzinfo=self.TZ)
+        day_end = datetime.combine(day, self._work_end, tzinfo=self.TZ)
 
         for b in bookings:
             col = None
