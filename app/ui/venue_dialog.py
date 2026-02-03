@@ -40,7 +40,7 @@ class VenueDialog(QDialog):
 
         # NEW: схема зон
         self.cmb_units = QComboBox()
-        self.cmb_units.addItem("Не делить (1 зона)", 0)
+        self.cmb_units.addItem("1 зона", 1)
         self.cmb_units.addItem("Делить на 2 (половины)", 2)
         self.cmb_units.addItem("Делить на 4 (четверти)", 4)
 
