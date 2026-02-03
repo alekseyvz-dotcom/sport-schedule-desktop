@@ -366,7 +366,13 @@ class TenantsPage(QWidget):
             QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на создание контрагентов.")
             return
 
-        dlg = TenantDialog(self, title="Создать контрагента", is_admin=self._is_admin)
+        dlg = TenantDialog(
+            self,
+            title="Создать контрагента",
+            is_admin=self._is_admin,
+            user_id=int(self._user.id),
+            role_code=str(self._user.role_code),
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -404,6 +410,8 @@ class TenantsPage(QWidget):
                 self,
                 title=f"Редактировать: {t.name}",
                 is_admin=self._is_admin,
+                user_id=int(self._user.id),
+                role_code=str(self._user.role_code),
                 data={
                     "id": t.id,
                     "name": t.name,
