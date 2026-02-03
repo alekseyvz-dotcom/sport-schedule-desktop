@@ -49,6 +49,8 @@ class TenantRulesWidget(QWidget):
         contract_to: Optional[date],
         tenant_kind: str = "legal",  # NEW: 'legal'|'person'
         is_admin: bool = False,
+        user_id: int,
+        role_code: str,
     ):
         super().__init__(parent)
         self._tenant_id = tenant_id
@@ -56,6 +58,8 @@ class TenantRulesWidget(QWidget):
         self._contract_to = contract_to
         self._tenant_kind = (tenant_kind or "legal").strip()
         self._is_admin = bool(is_admin)
+        self._user_id = int(user_id)
+        self._role_code = str(role_code or "")
 
         # список [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
         self._units = self._load_units_flat()
@@ -126,7 +130,12 @@ class TenantRulesWidget(QWidget):
         return out
 
     def _load_from_db(self):
-        rules = list_rules_for_tenant(tenant_id=int(self._tenant_id), include_inactive=True)
+        rules = list_rules_for_tenant(
+            user_id=self._user_id,
+            role_code=self._role_code,
+            tenant_id=int(self._tenant_id),
+            include_inactive=True,
+        )
         self._rules_local = [
             {
                 "id": int(r.id),
@@ -303,7 +312,12 @@ class TenantRulesWidget(QWidget):
 
         if r.get("id"):
             try:
-                set_rule_active(int(r["id"]), False)
+                set_rule_active(
+                    user_id=self._user_id,
+                    role_code=self._role_code,
+                    rule_id=int(r["id"]),
+                    is_active=False,
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
                 return
@@ -377,7 +391,11 @@ class TenantRulesWidget(QWidget):
                 from_day=date.today(),
                 activity="PD",
             )
-            delete_rule(int(r["id"]))
+            delete_rule(
+                user_id=self._user_id,
+                role_code=self._role_code,
+                rule_id=int(r["id"]),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Удалить правило", f"Ошибка:\n{e}")
             return
