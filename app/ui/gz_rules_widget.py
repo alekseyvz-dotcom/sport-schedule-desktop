@@ -47,10 +47,15 @@ class GzRulesWidget(QWidget):
         is_admin: bool = False,
         group_period_from: Optional[date] = None,
         group_period_to: Optional[date] = None,
+        user_id: int,
+        role_code: str,
     ):
         super().__init__(parent)
         self._gz_group_id = gz_group_id
         self._is_admin = bool(is_admin)
+
+        self._user_id = int(user_id)
+        self._role_code = str(role_code or "")
 
         self._group_period_from: Optional[date] = group_period_from
         self._group_period_to: Optional[date] = group_period_to
