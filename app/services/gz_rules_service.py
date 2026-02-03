@@ -247,6 +247,13 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
             created += 1
         except Exception as e:
             skipped += 1
+
+            pgcode = getattr(e, "pgcode", None)
+            msg = str(e)
+
+            if pgcode == "P0001" and "Пересечение по времени" in msg:
+                continue
+
             errors_list.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
 
     return GenerateReport(created=created, skipped=skipped, errors=errors_list)
