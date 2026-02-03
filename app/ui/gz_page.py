@@ -1,3 +1,4 @@
+# app/ui/gz_page.py
 from __future__ import annotations
 
 from datetime import timedelta, timezone
@@ -45,7 +46,7 @@ class GzPage(QWidget):
         self._user = user
         self._role = (getattr(user, "role_code", "") or "").lower()
         self._is_admin = self._role == "admin"
-        self._can_edit = self._role in ("admin",)  # синхронизируйте с GZ_EDIT_ROLES в gz_service
+        self._can_edit = self._role in ("admin",)  # синхронизируйте с GZ_EDIT_ROLES/GZ_RULES_EDIT_ROLES
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: тренер / группа")
@@ -149,7 +150,7 @@ class GzPage(QWidget):
         self.btn_add.setEnabled(self._can_edit)
         self.btn_edit.setEnabled(self._can_edit)
         self.btn_archive.setEnabled(self._can_edit)
-        self.btn_coaches.setEnabled(self._can_edit)  # если viewer не должен управлять тренерами
+        self.btn_coaches.setEnabled(self._can_edit)
 
     def _on_coaches(self):
         if not self._can_edit:
@@ -212,7 +213,8 @@ class GzPage(QWidget):
                 op = r.get("op", "keep")
                 if op == "new":
                     create_rule(
-                        # ВАЖНО: gz_rules_service нужно обновить и добавить user_id/role_code как в tenant_rules_service
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
                         gz_group_id=int(gz_group_id),
                         venue_unit_id=int(r["venue_unit_id"]),
                         weekday=int(r["weekday"]),
@@ -223,7 +225,12 @@ class GzPage(QWidget):
                         title=r.get("title", "") or "",
                     )
                 elif op == "deactivate" and r.get("id"):
-                    set_rule_active(int(r["id"]), False)
+                    set_rule_active(
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
+                        rule_id=int(r["id"]),
+                        is_active=False,
+                    )
         except Exception as e:
             QMessageBox.critical(self, "Правила ГЗ", f"Ошибка сохранения правил:\n{e}")
             return
@@ -245,6 +252,8 @@ class GzPage(QWidget):
 
         try:
             rep = generate_bookings_for_group(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
                 gz_group_id=int(gz_group_id),
                 tz=self.TZ,
             )
