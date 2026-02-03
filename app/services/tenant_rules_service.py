@@ -2,12 +2,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time, datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from psycopg2.extras import RealDictCursor
+from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
 from app.services.bookings_service import create_booking
+
+
+TENANT_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте
+
+
+def _norm_role(role_code: str) -> str:
+    return (role_code or "").strip().lower()
+
+
+def _require_rules_view(*, user_id: int, role_code: str) -> None:
+    if not user_id:
+        raise PermissionError("Недостаточно прав: просмотр правил запрещён")
+
+
+def _require_rules_edit(*, user_id: int, role_code: str) -> None:
+    _require_rules_view(user_id=user_id, role_code=role_code)
+    if _norm_role(role_code) not in TENANT_RULES_EDIT_ROLES:
+        raise PermissionError("Недостаточно прав: редактирование правил запрещено")
 
 
 @dataclass(frozen=True)
@@ -15,7 +34,7 @@ class TenantRule:
     id: int
     tenant_id: int
     venue_unit_id: int
-    weekday: int          # 1..7 (Mon..Sun)
+    weekday: int  # 1..7 (Mon..Sun)
     starts_at: time
     ends_at: time
     valid_from: date
@@ -31,7 +50,15 @@ class GenerateReport:
     errors: List[str]
 
 
-def list_rules_for_tenant(tenant_id: int, include_inactive: bool = False) -> List[TenantRule]:
+def list_rules_for_tenant(
+    *,
+    user_id: int,
+    role_code: str,
+    tenant_id: int,
+    include_inactive: bool = False,
+) -> List[TenantRule]:
+    _require_rules_view(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -73,6 +100,8 @@ def list_rules_for_tenant(tenant_id: int, include_inactive: bool = False) -> Lis
 
 def create_rule(
     *,
+    user_id: int,
+    role_code: str,
     tenant_id: int,
     venue_unit_id: int,
     weekday: int,
@@ -82,6 +111,8 @@ def create_rule(
     valid_to: date,
     title: str = "",
 ) -> int:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
     if not (1 <= int(weekday) <= 7):
         raise ValueError("weekday должен быть от 1 до 7")
     if ends_at <= starts_at:
@@ -104,8 +135,13 @@ def create_rule(
                 RETURNING id
                 """,
                 (
-                    int(tenant_id), int(venue_unit_id), int(weekday),
-                    starts_at, ends_at, valid_from, valid_to,
+                    int(tenant_id),
+                    int(venue_unit_id),
+                    int(weekday),
+                    starts_at,
+                    ends_at,
+                    valid_from,
+                    valid_to,
                     (title or "").strip(),
                 ),
             )
@@ -121,7 +157,9 @@ def create_rule(
             put_conn(conn)
 
 
-def set_rule_active(rule_id: int, is_active: bool) -> None:
+def set_rule_active(*, user_id: int, role_code: str, rule_id: int, is_active: bool) -> None:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -131,6 +169,24 @@ def set_rule_active(rule_id: int, is_active: bool) -> None:
                     "UPDATE public.tenant_recurring_rules SET is_active=%s WHERE id=%s",
                     (bool(is_active), int(rule_id)),
                 )
+                if cur.rowcount != 1:
+                    raise ValueError("Правило не найдено")
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def delete_rule(*, user_id: int, role_code: str, rule_id: int) -> None:
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.tenant_recurring_rules WHERE id=%s", (int(rule_id),))
+                if cur.rowcount != 1:
+                    raise ValueError("Правило не найдено")
     finally:
         if conn:
             put_conn(conn)
@@ -150,10 +206,7 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT venue_id FROM public.venue_units WHERE id=%s",
-                (int(venue_unit_id),),
-            )
+            cur.execute("SELECT venue_id FROM public.venue_units WHERE id=%s", (int(venue_unit_id),))
             row = cur.fetchone()
             if not row:
                 raise ValueError(f"Не найдена зона venue_unit_id={venue_unit_id}")
@@ -164,17 +217,11 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
 
 
 def _get_tenant_name_and_kind(tenant_id: int) -> Tuple[str, str]:
-    """
-    Возвращает (name, tenant_kind). tenant_kind: 'legal'|'person'
-    """
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT name, tenant_kind FROM public.tenants WHERE id=%s",
-                (int(tenant_id),),
-            )
+            cur.execute("SELECT name, tenant_kind FROM public.tenants WHERE id=%s", (int(tenant_id),))
             row = cur.fetchone()
             if not row:
                 raise ValueError(f"Контрагент tenant_id={tenant_id} не найден")
@@ -187,12 +234,6 @@ def _get_tenant_name_and_kind(tenant_id: int) -> Tuple[str, str]:
 
 
 def _default_booking_title(*, tenant_name: str, tenant_kind: str) -> str:
-    """
-    Заголовок брони, если в правиле title пустой.
-    Требование:
-      - юрлица: "<Название> — Аренда по договору"
-      - физлица: "<ФИО> — Оферта"
-    """
     base = tenant_name.strip() or "Контрагент"
     suffix = "Оферта" if tenant_kind == "person" else "Аренда по договору"
     return f"{base} — {suffix}"
@@ -222,13 +263,24 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
             created += 1
         except Exception as e:
             skipped += 1
+            pgcode = getattr(e, "pgcode", None)
+            msg = str(e)
+
+            # занято/пересечение — это нормальный skip, не ошибка
+            if pgcode == "P0001" and "Пересечение по времени" in msg:
+                continue
+
             errors.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
 
     return GenerateReport(created=created, skipped=skipped, errors=errors)
 
 
-def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateReport:
-    rules = list_rules_for_tenant(int(tenant_id), include_inactive=False)
+def generate_bookings_for_tenant(*, user_id: int, role_code: str, tenant_id: int, tz: timezone) -> GenerateReport:
+    # генерация создаёт брони => это операция изменения
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
+    rules = list_rules_for_tenant(user_id=user_id, role_code=role_code, tenant_id=int(tenant_id), include_inactive=False)
+
     total_created = 0
     total_skipped = 0
     errors: List[str] = []
@@ -241,17 +293,3 @@ def generate_bookings_for_tenant(*, tenant_id: int, tz: timezone) -> GenerateRep
         errors.extend(rep.errors)
 
     return GenerateReport(created=total_created, skipped=total_skipped, errors=errors)
-
-
-def delete_rule(rule_id: int) -> None:
-    conn = None
-    try:
-        conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM public.tenant_recurring_rules WHERE id=%s", (int(rule_id),))
-                if cur.rowcount != 1:
-                    raise ValueError("Правило не найдено")
-    finally:
-        if conn:
-            put_conn(conn)
