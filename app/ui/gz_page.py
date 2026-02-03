@@ -1,3 +1,4 @@
+# app/ui/gz_page.py
 from __future__ import annotations
 
 from datetime import timedelta, timezone
@@ -156,7 +157,12 @@ class GzPage(QWidget):
 
     def reload(self):
         try:
-            groups = list_groups(search=self.ed_search.text(), include_inactive=self.cb_inactive.isChecked())
+            groups = list_groups(
+                search=self.ed_search.text(),
+                include_inactive=self.cb_inactive.isChecked(),
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Гос. задание", f"Ошибка загрузки:\n{e}")
             return
@@ -236,13 +242,17 @@ class GzPage(QWidget):
 
     def _on_add(self):
         try:
-            coaches = list_coaches(include_inactive=False)
+            coaches = list_coaches(
+                include_inactive=False,
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
             return
 
         if not coaches:
-            QMessageBox.information(self, "Гос. задание", "Добавьте хотя бы одного тренера.")
+            QMessageBox.information(self, "Гос. задание", "Нет доступных тренеров для ваших учреждений.")
             return
 
         dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches, is_admin=self._is_admin)
@@ -278,7 +288,11 @@ class GzPage(QWidget):
             return
 
         try:
-            coaches = list_coaches(include_inactive=False)
+            coaches = list_coaches(
+                include_inactive=False,
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
             return
