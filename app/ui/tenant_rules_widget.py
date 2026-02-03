@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional, Dict, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -62,7 +62,7 @@ class TenantRulesWidget(QWidget):
         self._role_code = str(role_code or "")
 
         # список [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
-        self._units = self._load_units_flat()
+        self._units: List[Dict] = []
         self._rules_local: List[Dict] = []
 
         self.tbl = QTableWidget(0, 6)
@@ -96,9 +96,17 @@ class TenantRulesWidget(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl)
 
-        if self._tenant_id:
-            self._load_from_db()
-        else:
+        QTimer.singleShot(0, self._deferred_init)
+
+    def _deferred_init(self) -> None:
+        try:
+            self._units = self._load_units_flat()
+            if self._tenant_id:
+                self._load_from_db()
+            else:
+                self._refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "Правила", f"Ошибка загрузки:\n{type(e).__name__}: {e}")
             self._refresh()
 
     def _default_rule_title(self) -> str:
