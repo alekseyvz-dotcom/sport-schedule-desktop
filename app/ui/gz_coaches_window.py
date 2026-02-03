@@ -80,7 +80,7 @@ class GzCoachesWindow(QDialog):
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.doubleClicked.connect(self._on_edit)
+        self.tbl.doubleClicked.connect(lambda *_: self._on_edit())
 
         hdr = self.tbl.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -207,8 +207,18 @@ class GzCoachesWindow(QDialog):
         org_ids = [int(x) for x in (v.get("org_ids") or []) if int(x) in allowed]
 
         try:
-            new_id = create_coach(v["full_name"], v.get("comment", ""))
-            set_coach_orgs(new_id, org_ids)
+            new_id = create_coach(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                full_name=v["full_name"],
+                comment=v.get("comment", ""),
+            )
+            set_coach_orgs(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                coach_id=int(new_id),
+                org_ids=org_ids,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Создать тренера", str(e))
             return
@@ -227,7 +237,11 @@ class GzCoachesWindow(QDialog):
         allowed = self._allowed_org_ids_set()
 
         try:
-            selected_org_ids = get_coach_org_ids(c.id)
+            selected_org_ids = get_coach_org_ids(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                coach_id=int(c.id),
+            )
             selected_org_ids = [int(oid) for oid in selected_org_ids if int(oid) in allowed]
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", f"Не удалось загрузить объекты тренера:\n{e}")
@@ -247,8 +261,19 @@ class GzCoachesWindow(QDialog):
         org_ids = [int(x) for x in (v.get("org_ids") or []) if int(x) in allowed]
 
         try:
-            update_coach(c.id, v["full_name"], v.get("comment", ""))
-            set_coach_orgs(c.id, org_ids)
+            update_coach(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                coach_id=int(c.id),
+                full_name=v["full_name"],
+                comment=v.get("comment", ""),
+            )
+            set_coach_orgs(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                coach_id=int(c.id),
+                org_ids=org_ids,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Редактировать тренера", str(e))
             return
@@ -270,7 +295,12 @@ class GzCoachesWindow(QDialog):
             return
 
         try:
-            set_coach_active(c.id, new_state)
+            set_coach_active(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                coach_id=int(c.id),
+                is_active=new_state,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Тренеры", str(e))
             return
