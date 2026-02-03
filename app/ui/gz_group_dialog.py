@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -100,7 +99,6 @@ class GzGroupDialog(QDialog):
         self.dt_from.setSpecialValueText("—")
         self.dt_from.setDate(date.today())
         self.dt_from.setMinimumDate(date(1900, 1, 1))
-        self.dt_from.setEnabled(True)
 
         self.dt_to = QDateEdit()
         self.dt_to.setCalendarPopup(True)
@@ -108,18 +106,47 @@ class GzGroupDialog(QDialog):
         self.dt_to.setSpecialValueText("—")
         self.dt_to.setDate(date.today())
         self.dt_to.setMinimumDate(date(1900, 1, 1))
-        self.dt_to.setEnabled(True)
 
         self.ed_notes = QTextEdit()
         self.ed_notes.setPlaceholderText("Примечание…")
         self.ed_notes.setFixedHeight(70)
+
+        # --- initial values (важно сделать ДО rules_widget, чтобы передать период)
+        if data:
+            coach_id = data.get("coach_id")
+            if coach_id is not None:
+                idx = self.cmb_coach.findData(int(coach_id))
+                if idx >= 0:
+                    self.cmb_coach.setCurrentIndex(idx)
+
+            self.ed_year.setText(str(data.get("group_year") or ""))
+            self.ed_notes.setPlainText(str(data.get("notes") or ""))
+
+            self.cb_free.setChecked(bool(data.get("is_free", False)))
+
+            pf = data.get("period_from")
+            pt = data.get("period_to")
+            if pf:
+                self.dt_from.setDate(pf)
+            if pt:
+                self.dt_to.setDate(pt)
 
         # --- rules widget
         gb_rules = QGroupBox("Правила расписания (ГЗ)")
         rules_lay = QVBoxLayout(gb_rules)
         rules_lay.setContentsMargins(12, 16, 12, 12)
 
-        self.rules_widget = GzRulesWidget(self, gz_group_id=self._group_id, is_admin=self._is_admin)
+        self.rules_widget = GzRulesWidget(
+            self,
+            gz_group_id=self._group_id,
+            is_admin=self._is_admin,
+            group_period_from=self.dt_from.date().toPython(),
+            group_period_to=self.dt_to.date().toPython(),
+        )
+
+        # обновляем период в rules_widget при изменении дат в группе
+        self.dt_from.dateChanged.connect(self._sync_rules_period)
+        self.dt_to.dateChanged.connect(self._sync_rules_period)
 
         scroll = QScrollArea(gb_rules)
         scroll.setWidgetResizable(True)
@@ -176,25 +203,13 @@ class GzGroupDialog(QDialog):
         footer.addWidget(btn_cancel)
         root.addLayout(footer)
 
-        # --- initial values ---
-        if data:
-            coach_id = data.get("coach_id")
-            if coach_id is not None:
-                idx = self.cmb_coach.findData(int(coach_id))
-                if idx >= 0:
-                    self.cmb_coach.setCurrentIndex(idx)
-
-            self.ed_year.setText(str(data.get("group_year") or ""))
-            self.ed_notes.setPlainText(str(data.get("notes") or ""))
-
-            self.cb_free.setChecked(bool(data.get("is_free", False)))
-
-            pf = data.get("period_from")
-            pt = data.get("period_to")
-            if pf:
-                self.dt_from.setDate(pf)
-            if pt:
-                self.dt_to.setDate(pt)
+    def _sync_rules_period(self, *_):
+        # чтобы "Добавить правило" сразу подставлял актуальный период
+        if hasattr(self, "rules_widget") and self.rules_widget:
+            self.rules_widget.set_group_period(
+                self.dt_from.date().toPython(),
+                self.dt_to.date().toPython(),
+            )
 
     def _on_ok(self):
         if not (self.ed_year.text() or "").strip():
