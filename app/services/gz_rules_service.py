@@ -1,3 +1,4 @@
+# app/services/gz_rules_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ class GzRule:
     id: int
     gz_group_id: int
     venue_unit_id: int
-    weekday: int          # 1..7 (Mon..Sun)
+    weekday: int  # 1..7 (Mon..Sun)
     starts_at: time
     ends_at: time
     valid_from: date
@@ -105,8 +106,13 @@ def create_rule(
                 RETURNING id
                 """,
                 (
-                    int(gz_group_id), int(venue_unit_id), int(weekday),
-                    starts_at, ends_at, valid_from, valid_to,
+                    int(gz_group_id),
+                    int(venue_unit_id),
+                    int(weekday),
+                    starts_at,
+                    ends_at,
+                    valid_from,
+                    valid_to,
                     (title or "").strip(),
                 ),
             )
@@ -180,7 +186,11 @@ def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
         d += timedelta(days=1)
 
 
-def _get_group_display(gz_group_id: int) -> Tuple[str, int]:
+def _get_group_display(gz_group_id: int) -> Tuple[str, str]:
+    """
+    Возвращает (coach_name, group_year_str).
+    ВАЖНО: group_year в БД у вас TEXT и может быть не числом.
+    """
     conn = None
     try:
         conn = get_conn()
@@ -197,14 +207,19 @@ def _get_group_display(gz_group_id: int) -> Tuple[str, int]:
             row = cur.fetchone()
             if not row:
                 raise ValueError("Группа ГЗ не найдена")
-            return str(row["coach_name"] or "").strip(), int(row["group_year"])
+
+            coach_name = str(row.get("coach_name") or "").strip()
+            group_year = str(row.get("group_year") or "").strip()
+            return coach_name, group_year
     finally:
         if conn:
             put_conn(conn)
 
 
-def _default_booking_title(coach_name: str, group_year: int) -> str:
-    return f"ГЗ: {coach_name.strip() or 'Тренер'} — {group_year}"
+def _default_booking_title(coach_name: str, group_year: str) -> str:
+    coach_name = (coach_name or "").strip() or "Тренер"
+    group_year = (group_year or "").strip() or "—"
+    return f"ГЗ: {coach_name} — {group_year}"
 
 
 def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone) -> GenerateReport:
