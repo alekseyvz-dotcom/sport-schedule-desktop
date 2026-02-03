@@ -1177,6 +1177,9 @@ class SchedulePage(QWidget):
         unit0 = rsrc0.venue_unit_id
         venue_unit_id = int(unit0) if unit0 is not None else None
     
+        allowed_kinds = self._allowed_booking_kinds()
+        default_kind = "GZ" if ("GZ" in allowed_kinds and "PD" not in allowed_kinds) else "PD"
+        
         dlg = BookingDialog(
             self,
             title="Создать бронь",
@@ -1186,10 +1189,12 @@ class SchedulePage(QWidget):
             gz_groups=self._gz_groups,
             venue_name=venue_name,
             venue_units=venue_units,
-            initial={"venue_unit_id": venue_unit_id, "kind": "PD", "title": ""},
+            initial={"venue_unit_id": venue_unit_id, "kind": default_kind, "title": ""},
             selection_title=(f"Выбрано зон: {len(selected_lines)}" if multi_cols else None),
             selection_lines=(selected_lines if multi_cols else None),
+            allowed_kinds=allowed_kinds,
         )
+
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
     
@@ -1298,6 +1303,8 @@ class SchedulePage(QWidget):
             "title": getattr(b, "title", ""),
         }
     
+        allowed_kinds = self._allowed_booking_kinds()
+        
         dlg = BookingDialog(
             self,
             title="Редактировать бронь",
@@ -1308,6 +1315,7 @@ class SchedulePage(QWidget):
             venue_name=venue_name,
             venue_units=venue_units,
             initial=initial,
+            allowed_kinds=allowed_kinds,
         )
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -1370,3 +1378,18 @@ class SchedulePage(QWidget):
             return
     
         self.reload()
+
+    def _allowed_booking_kinds(self) -> set[str]:
+        if (self.user.role_code or "").lower() == "admin":
+            return {"PD", "GZ"}
+    
+        perms = self.user.permissions or set()
+    
+        allowed: set[str] = set()
+        if "tab.tenants" in perms:
+            allowed.add("PD")
+        if "tab.gz" in perms:
+            allowed.add("GZ")
+    
+        return allowed or {"PD"}
+
