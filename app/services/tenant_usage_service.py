@@ -32,11 +32,6 @@ def list_usage_by_tenants(
     include_cancelled: bool = False,
     only_active_tenants: bool = False,
 ) -> List[TenantUsageRow]:
-    """
-    Агрегация по арендаторам за период [start_dt, end_dt).
-    Считает пересечение брони с периодом.
-    ВАЖНО: tenant_id может быть NULL — показываем строку "Без арендатора".
-    """
     if end_dt <= start_dt:
         raise ValueError("end_dt <= start_dt")
 
@@ -76,29 +71,67 @@ def list_usage_by_tenants(
                         EXTRACT(EPOCH FROM (e - s))::bigint AS sec
                     FROM b0
                     WHERE e > s
+                ),
+                b2 AS (
+                    SELECT
+                        -- виртуальный "tenant" для аналитики:
+                        --  - GZ без tenant_id => отдельная строка "Гос. задание"
+                        CASE
+                            WHEN b1.tenant_id IS NULL AND b1.activity = 'GZ' THEN 'GZ'
+                            WHEN b1.tenant_id IS NULL THEN 'NONE'
+                            ELSE 'T:' || b1.tenant_id::text
+                        END AS tenant_key,
+
+                        b1.tenant_id,
+                        b1.activity,
+                        b1.status,
+                        b1.sec
+                    FROM b1
                 )
                 SELECT
-                    b1.tenant_id AS tenant_id,
-                    COALESCE(t.name, 'Без арендатора') AS tenant_name,
-                    COALESCE(t.tenant_kind, 'unknown') AS tenant_kind,
-                    COALESCE(t.rent_kind, 'unknown') AS rent_kind,
+                    b2.tenant_key,
 
-                    COALESCE(SUM(CASE WHEN b1.activity = 'PD' THEN b1.sec ELSE 0 END), 0)::bigint AS pd_sec,
-                    COALESCE(SUM(CASE WHEN b1.activity = 'GZ' THEN b1.sec ELSE 0 END), 0)::bigint AS gz_sec,
-                    COALESCE(SUM(b1.sec), 0)::bigint AS total_sec,
+                    -- tenant_id оставляем NULL (это "виртуальные" строки)
+                    CASE WHEN b2.tenant_key LIKE 'T:%' THEN b2.tenant_id ELSE NULL END AS tenant_id,
+
+                    CASE
+                        WHEN b2.tenant_key = 'GZ' THEN 'Гос. задание'
+                        WHEN b2.tenant_key = 'NONE' THEN 'Без арендатора'
+                        ELSE COALESCE(t.name, 'Без арендатора')
+                    END AS tenant_name,
+
+                    CASE
+                        WHEN b2.tenant_key IN ('GZ', 'NONE') THEN 'unknown'
+                        ELSE COALESCE(t.tenant_kind, 'unknown')
+                    END AS tenant_kind,
+
+                    CASE
+                        WHEN b2.tenant_key IN ('GZ', 'NONE') THEN 'unknown'
+                        ELSE COALESCE(t.rent_kind, 'unknown')
+                    END AS rent_kind,
+
+                    COALESCE(SUM(CASE WHEN b2.activity = 'PD' THEN b2.sec ELSE 0 END), 0)::bigint AS pd_sec,
+                    COALESCE(SUM(CASE WHEN b2.activity = 'GZ' THEN b2.sec ELSE 0 END), 0)::bigint AS gz_sec,
+                    COALESCE(SUM(b2.sec), 0)::bigint AS total_sec,
 
                     COUNT(*)::int AS bookings_count,
-                    COALESCE(SUM(CASE WHEN b1.status = 'cancelled' THEN 1 ELSE 0 END), 0)::int AS cancelled_count
-                FROM b1
-                LEFT JOIN public.tenants t ON t.id = b1.tenant_id
+                    COALESCE(SUM(CASE WHEN b2.status = 'cancelled' THEN 1 ELSE 0 END), 0)::int AS cancelled_count
+                FROM b2
+                LEFT JOIN public.tenants t
+                       ON (b2.tenant_key LIKE 'T:%' AND t.id = b2.tenant_id)
             """
 
             if only_active_tenants:
-                # Оставляем "Без арендатора" (tenant_id IS NULL) даже при фильтре активных
-                sql += " WHERE (b1.tenant_id IS NULL OR t.is_active = true)"
+                # показываем "виртуальные" строки всегда, а реальных — только активных
+                sql += " WHERE (b2.tenant_key IN ('GZ','NONE') OR t.is_active = true)"
 
             sql += """
-                GROUP BY b1.tenant_id, t.name, t.tenant_kind, t.rent_kind
+                GROUP BY
+                    b2.tenant_key,
+                    CASE WHEN b2.tenant_key LIKE 'T:%' THEN b2.tenant_id ELSE NULL END,
+                    tenant_name,
+                    tenant_kind,
+                    rent_kind
                 ORDER BY total_sec DESC, tenant_name
             """
 
@@ -124,3 +157,4 @@ def list_usage_by_tenants(
     finally:
         if conn:
             put_conn(conn)
+
