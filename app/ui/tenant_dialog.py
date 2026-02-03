@@ -109,6 +109,8 @@ class TenantDialog(QDialog):
         data: Optional[Dict] = None,
         *,
         is_admin: bool = False,
+        user_id: int,
+        role_code: str,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -116,6 +118,8 @@ class TenantDialog(QDialog):
         self.setStyleSheet(_DIALOG_QSS)
 
         self._is_admin = bool(is_admin)
+        self._user_id = int(user_id)
+        self._role_code = str(role_code or "")
 
         self._data_in = data or {}
         self._tenant_id: Optional[int] = self._data_in.get("id")
@@ -261,6 +265,8 @@ class TenantDialog(QDialog):
             contract_to=contract_to,
             tenant_kind=self.cmb_tenant_kind.currentData(),
             is_admin=self._is_admin,
+            user_id=self._user_id,
+            role_code=self._role_code,
         )
         self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.rules_widget.setMinimumHeight(260)  # smaller
