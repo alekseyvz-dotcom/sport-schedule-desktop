@@ -287,7 +287,7 @@ class GzPage(QWidget):
             QMessageBox.information(self, "Гос. задание", "Нет доступных тренеров для ваших учреждений.")
             return
 
-        dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches, is_admin=self._is_admin)
+        dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches, is_admin=self._is_admin, user_id=int(self._user.id), role_code=str(self._user.role_code))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -340,6 +340,8 @@ class GzPage(QWidget):
             title=f"Редактировать: {g.coach_name} — {g.group_year}",
             coaches=coaches,
             is_admin=self._is_admin,
+            user_id=int(self._user.id),
+            role_code=str(self._user.role_code),
             data={
                 "id": g.id,
                 "coach_id": g.coach_id,
