@@ -10,6 +10,7 @@ from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
 from app.services.bookings_service import create_booking
+from app.services.gz_service import list_accessible_org_ids
 
 
 GZ_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте: {"admin", "manager"}
@@ -26,7 +27,9 @@ def _require_rules_view(*, user_id: int, role_code: str) -> None:
 
 def _require_rules_edit(*, user_id: int, role_code: str) -> None:
     _require_rules_view(user_id=user_id, role_code=role_code)
-    if _norm_role(role_code) not in GZ_RULES_EDIT_ROLES:
+    if _norm_role(role_code) == "admin":
+        return
+    if not list_accessible_org_ids(user_id=int(user_id), for_edit=True):
         raise PermissionError("Недостаточно прав: редактирование правил ГЗ запрещено")
 
 
