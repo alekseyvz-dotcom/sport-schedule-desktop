@@ -1,3 +1,4 @@
+# app/ui/orgs_venues_page.py
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -16,6 +17,9 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
 )
+
+from app.services.users_service import AuthUser
+from app.services.access_service import get_org_access
 
 from app.services.orgs_service import (
     list_orgs,
@@ -103,14 +107,16 @@ QLabel#sectionTitle {
 
 class OrgsVenuesPage(QWidget):
     """
-    Изменения под режим работы учреждения:
-      - при создании/редактировании: передаём work_start/work_end/is_24h из OrgDialog.values()
-      - при редактировании: прокидываем текущие значения в OrgDialog(data=...)
-      - (опционально) показываем режим работы в таблице (добавлен столбец)
+    Страница учреждений/площадок с учётом прав:
+      - список учреждений фильтруется по can_view (через обновлённый list_orgs)
+      - редактирование/архивирование доступно только при can_edit
+      - создание учреждения — только admin (как в create_org)
+      - для площадок UI ограничиваем по can_edit учреждения (сервис venues желательно тоже защитить)
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.user = user
         self.setStyleSheet(_PAGE_QSS)
 
         # ---------- Orgs (left)
@@ -146,11 +152,11 @@ class OrgsVenuesPage(QWidget):
         org_top.addWidget(self.btn_org_edit)
         org_top.addWidget(self.btn_org_archive)
 
-        # было 4 колонки, сделаем 5: добавим "Режим"
         self.tbl_orgs = QTableWidget(0, 5)
         self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Режим", "Активен"])
         self._style_table(self.tbl_orgs)
-        self.tbl_orgs.itemSelectionChanged.connect(self.reload_venues)
+
+        self.tbl_orgs.itemSelectionChanged.connect(self._on_org_selected)
         self.tbl_orgs.doubleClicked.connect(self._org_edit)
 
         left = QVBoxLayout()
@@ -206,6 +212,41 @@ class OrgsVenuesPage(QWidget):
 
         self.reload_orgs()
 
+    # -------- helpers
+    def _is_admin(self) -> bool:
+        return (self.user.role_code or "").lower() == "admin"
+
+    def _org_access(self, org_id: int):
+        return get_org_access(user_id=self.user.id, role_code=self.user.role_code, org_id=org_id)
+
+    def _apply_ui_access(self):
+        org = self._selected_org()
+
+        # create org: только admin (как в сервисе create_org)
+        self.btn_org_add.setEnabled(self._is_admin())
+
+        if not org:
+            self.btn_org_edit.setEnabled(False)
+            self.btn_org_archive.setEnabled(False)
+
+            self.btn_venue_add.setEnabled(False)
+            self.btn_venue_edit.setEnabled(False)
+            self.btn_venue_archive.setEnabled(False)
+            return
+
+        acc = self._org_access(org.id)
+        self.btn_org_edit.setEnabled(acc.can_edit)
+        self.btn_org_archive.setEnabled(acc.can_edit)
+
+        # Площадки завязаны на право редактирования учреждения
+        self.btn_venue_add.setEnabled(acc.can_edit)
+        self.btn_venue_edit.setEnabled(acc.can_edit)
+        self.btn_venue_archive.setEnabled(acc.can_edit)
+
+    def _on_org_selected(self):
+        self._apply_ui_access()
+        self.reload_venues()
+
     def _style_table(self, tbl: QTableWidget) -> None:
         tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -251,7 +292,6 @@ class OrgsVenuesPage(QWidget):
         return obj if isinstance(obj, Venue) else None
 
     def _org_work_str(self, o: SportOrg) -> str:
-        # поддерживает и старые SportOrg без полей (на случай если ещё не везде обновили)
         if getattr(o, "is_24h", False):
             return "24/7"
         ws = getattr(o, "work_start", None)
@@ -267,7 +307,9 @@ class OrgsVenuesPage(QWidget):
 
         try:
             orgs = list_orgs(
-                self.ed_org_search.text(),
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                search=self.ed_org_search.text(),
                 include_inactive=self.cb_org_inactive.isChecked(),
             )
         except Exception as e:
@@ -308,6 +350,7 @@ class OrgsVenuesPage(QWidget):
         if selected_id is not None:
             self._select_org_row_by_id(selected_id)
 
+        self._apply_ui_access()
         self.reload_venues()
 
     def reload_venues(self):
@@ -363,8 +406,14 @@ class OrgsVenuesPage(QWidget):
         if selected_id is not None:
             self._select_venue_row_by_id(selected_id)
 
+        self._apply_ui_access()
+
     # -------- org actions
     def _org_add(self):
+        if not self._is_admin():
+            QMessageBox.warning(self, "Доступ запрещён", "Создание учреждения доступно только администратору.")
+            return
+
         dlg = OrgDialog(self, title="Создать учреждение")
         if dlg.exec() != OrgDialog.Accepted:
             return
@@ -372,6 +421,8 @@ class OrgsVenuesPage(QWidget):
         data = dlg.values()
         try:
             new_id = create_org(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
                 name=data["name"],
                 address=data["address"],
                 comment=data["comment"],
@@ -393,6 +444,11 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.information(self, "Редактировать", "Выберите учреждение.")
             return
 
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование этого учреждения.")
+            return
+
         dlg = OrgDialog(
             self,
             title=f"Редактировать: {org.name}",
@@ -411,7 +467,9 @@ class OrgsVenuesPage(QWidget):
         data = dlg.values()
         try:
             update_org(
-                org.id,
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
                 name=data["name"],
                 address=data["address"],
                 comment=data["comment"],
@@ -432,6 +490,11 @@ class OrgsVenuesPage(QWidget):
             QMessageBox.information(self, "Архив", "Выберите учреждение.")
             return
 
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение статуса этого учреждения.")
+            return
+
         new_state = not org.is_active
         action = "восстановить" if new_state else "архивировать"
         if (
@@ -445,18 +508,28 @@ class OrgsVenuesPage(QWidget):
             return
 
         try:
-            set_org_active(org.id, new_state)
+            set_org_active(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                is_active=new_state,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
 
         self.reload_orgs()
 
-    # -------- venue actions (без изменений)
+    # -------- venue actions (UI-гейт по правам учреждения)
     def _venue_add(self):
         org = self._selected_org()
         if not org:
             QMessageBox.information(self, "Площадки", "Сначала выберите учреждение слева.")
+            return
+
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование площадок этого учреждения.")
             return
 
         dlg = VenueDialog(self, title=f"Создать площадку — {org.name}")
@@ -482,6 +555,16 @@ class OrgsVenuesPage(QWidget):
         self._select_venue_row_by_id(new_id)
 
     def _venue_edit(self):
+        org = self._selected_org()
+        if not org:
+            QMessageBox.information(self, "Редактировать", "Сначала выберите учреждение слева.")
+            return
+
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование площадок этого учреждения.")
+            return
+
         v = self._selected_venue()
         if not v:
             QMessageBox.information(self, "Редактировать", "Выберите площадку.")
@@ -519,6 +602,16 @@ class OrgsVenuesPage(QWidget):
         self._select_venue_row_by_id(v.id)
 
     def _venue_toggle(self):
+        org = self._selected_org()
+        if not org:
+            QMessageBox.information(self, "Архив", "Сначала выберите учреждение слева.")
+            return
+
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение статуса площадок этого учреждения.")
+            return
+
         v = self._selected_venue()
         if not v:
             QMessageBox.information(self, "Архив", "Выберите площадку.")
