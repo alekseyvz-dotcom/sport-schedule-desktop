@@ -9,7 +9,28 @@ from psycopg2.extras import RealDictCursor
 from app.db import get_conn, put_conn
 
 
+# какие роли могут редактировать контрагентов
+TENANTS_EDIT_ROLES = {"admin"}  # при необходимости добавьте: {"admin", "manager"}
+
+
+def _norm_role(role_code: str) -> str:
+    return (role_code or "").strip().lower()
+
+
+def _require_tenants_view(*, user_id: int, role_code: str) -> None:
+    # сейчас: всем авторизованным можно смотреть
+    if not user_id:
+        raise PermissionError("Недостаточно прав: просмотр контрагентов запрещён")
+
+
+def _require_tenants_edit(*, user_id: int, role_code: str) -> None:
+    _require_tenants_view(user_id=user_id, role_code=role_code)
+    if _norm_role(role_code) not in TENANTS_EDIT_ROLES:
+        raise PermissionError("Недостаточно прав: редактирование контрагентов запрещено")
+
+
 def _tlog(msg: str) -> None:
+    # оставил ваш лог как есть
     try:
         import os
         import tempfile
@@ -19,7 +40,6 @@ def _tlog(msg: str) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} {msg}\n")
     except Exception:
-        # НИКОГДА не ломаем импорт/работу приложения из-за лога
         pass
 
 
@@ -50,7 +70,15 @@ class Tenant:
     rent_kind: str  # 'long_term' | 'one_time'
 
 
-def list_tenants(search: str = "", include_inactive: bool = False) -> List[Tenant]:
+def list_tenants(
+    *,
+    user_id: int,
+    role_code: str,
+    search: str = "",
+    include_inactive: bool = False,
+) -> List[Tenant]:
+    _require_tenants_view(user_id=user_id, role_code=role_code)
+
     search = (search or "").strip()
     conn = None
     try:
@@ -113,7 +141,9 @@ def list_tenants(search: str = "", include_inactive: bool = False) -> List[Tenan
             put_conn(conn)
 
 
-def get_tenant(tenant_id: int) -> Tenant:
+def get_tenant(*, user_id: int, role_code: str, tenant_id: int) -> Tenant:
+    _require_tenants_view(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -164,7 +194,9 @@ def get_tenant(tenant_id: int) -> Tenant:
             put_conn(conn)
 
 
-def create_tenant(**data) -> int:
+def create_tenant(*, user_id: int, role_code: str, **data) -> int:
+    _require_tenants_edit(user_id=user_id, role_code=role_code)
+
     name = (data.get("name") or "").strip()
     if not name:
         raise ValueError("Название контрагента не может быть пустым")
@@ -230,7 +262,9 @@ def create_tenant(**data) -> int:
             put_conn(conn)
 
 
-def update_tenant(tenant_id: int, **data) -> None:
+def update_tenant(*, user_id: int, role_code: str, tenant_id: int, **data) -> None:
+    _require_tenants_edit(user_id=user_id, role_code=role_code)
+
     _tlog(f"update_tenant CALLED tenant_id={tenant_id}, name={data.get('name')!r}")
 
     name = (data.get("name") or "").strip()
@@ -243,6 +277,7 @@ def update_tenant(tenant_id: int, **data) -> None:
     conn = None
     try:
         conn = get_conn()
+
         with conn.cursor() as cur:
             cur.execute("select current_database(), current_user, inet_server_addr(), inet_server_port();")
             _tlog("DBINFO: " + str(cur.fetchone()))
@@ -321,7 +356,9 @@ def update_tenant(tenant_id: int, **data) -> None:
             put_conn(conn)
 
 
-def set_tenant_active(tenant_id: int, is_active: bool):
+def set_tenant_active(*, user_id: int, role_code: str, tenant_id: int, is_active: bool) -> None:
+    _require_tenants_edit(user_id=user_id, role_code=role_code)
+
     conn = None
     try:
         conn = get_conn()
@@ -330,6 +367,8 @@ def set_tenant_active(tenant_id: int, is_active: bool):
                 "UPDATE public.tenants SET is_active=%s WHERE id=%s",
                 (bool(is_active), int(tenant_id)),
             )
+            if cur.rowcount != 1:
+                raise ValueError("Контрагент не найден")
         conn.commit()
     except Exception:
         if conn:
