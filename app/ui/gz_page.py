@@ -28,6 +28,7 @@ from app.services.gz_service import (
     create_group,
     update_group,
     set_group_active,
+    list_accessible_org_ids,
 )
 from app.services.gz_rules_service import (
     create_rule,
@@ -46,7 +47,9 @@ class GzPage(QWidget):
         self._user = user
         self._role = (getattr(user, "role_code", "") or "").lower()
         self._is_admin = self._role == "admin"
-        self._can_edit = self._role in ("admin",)  # синхронизируйте с GZ_EDIT_ROLES/GZ_RULES_EDIT_ROLES
+        self._can_edit = (self._role == "admin") or bool(
+            list_accessible_org_ids(user_id=int(self._user.id), for_edit=True)
+        )
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: тренер / группа")
