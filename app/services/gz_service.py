@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import List, Optional, Dict, Any, Iterable
 
 from psycopg2.extras import RealDictCursor
@@ -20,9 +21,12 @@ class GzGroup:
     id: int
     coach_id: int
     coach_name: str
-    group_year: str           # TEXT (как вы хотите)
+    group_year: str
     notes: Optional[str]
     is_active: bool
+    is_free: bool
+    period_from: Optional[date]
+    period_to: Optional[date]
 
 
 # ---------------- coaches ----------------
@@ -251,7 +255,10 @@ def list_groups(
                     c.full_name AS coach_name,
                     g.group_year,
                     g.notes,
-                    g.is_active
+                    g.is_active,
+                    g.is_free,
+                    g.period_from,
+                    g.period_to
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
             """
@@ -269,6 +276,9 @@ def list_groups(
                     group_year=str(r["group_year"] or "").strip(),
                     notes=r.get("notes"),
                     is_active=bool(r["is_active"]),
+                    is_free=bool(r.get("is_free")),
+                    period_from=r.get("period_from"),
+                    period_to=r.get("period_to"),
                 )
                 for r in rows
             ]
@@ -277,10 +287,20 @@ def list_groups(
             put_conn(conn)
 
 
-def create_group(coach_id: int, group_year: str, notes: str = "") -> int:
+def create_group(
+    coach_id: int,
+    group_year: str,
+    notes: str = "",
+    *,
+    is_free: bool = False,
+    period_from: Optional[date] = None,
+    period_to: Optional[date] = None,
+) -> int:
     group_year = (group_year or "").strip()
     if not group_year:
         raise ValueError("Группа обязательна")
+    if period_from and period_to and period_to < period_from:
+        raise ValueError("Дата 'по' не может быть раньше даты 'с'")
 
     conn = None
     try:
@@ -288,11 +308,18 @@ def create_group(coach_id: int, group_year: str, notes: str = "") -> int:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO public.gz_groups(coach_id, group_year, notes, is_active)
-                VALUES (%s, %s, %s, true)
+                INSERT INTO public.gz_groups(coach_id, group_year, notes, is_active, is_free, period_from, period_to)
+                VALUES (%s, %s, %s, true, %s, %s, %s)
                 RETURNING id
                 """,
-                (int(coach_id), group_year, (notes or "").strip() or None),
+                (
+                    int(coach_id),
+                    group_year,
+                    (notes or "").strip() or None,
+                    bool(is_free),
+                    period_from,
+                    period_to,
+                ),
             )
             new_id = int(cur.fetchone()[0])
         conn.commit()
@@ -305,11 +332,21 @@ def create_group(coach_id: int, group_year: str, notes: str = "") -> int:
         if conn:
             put_conn(conn)
 
-
-def update_group(group_id: int, coach_id: int, group_year: str, notes: str = "") -> None:
+def update_group(
+    group_id: int,
+    coach_id: int,
+    group_year: str,
+    notes: str = "",
+    *,
+    is_free: bool = False,
+    period_from: Optional[date] = None,
+    period_to: Optional[date] = None,
+) -> None:
     group_year = (group_year or "").strip()
     if not group_year:
         raise ValueError("Группа обязательна")
+    if period_from and period_to and period_to < period_from:
+        raise ValueError("Дата 'по' не может быть раньше даты 'с'")
 
     conn = None
     try:
@@ -318,10 +355,19 @@ def update_group(group_id: int, coach_id: int, group_year: str, notes: str = "")
             cur.execute(
                 """
                 UPDATE public.gz_groups
-                SET coach_id=%s, group_year=%s, notes=%s
+                SET coach_id=%s, group_year=%s, notes=%s,
+                    is_free=%s, period_from=%s, period_to=%s
                 WHERE id=%s
                 """,
-                (int(coach_id), group_year, (notes or "").strip() or None, int(group_id)),
+                (
+                    int(coach_id),
+                    group_year,
+                    (notes or "").strip() or None,
+                    bool(is_free),
+                    period_from,
+                    period_to,
+                    int(group_id),
+                ),
             )
             if cur.rowcount != 1:
                 raise ValueError("Группа не найдена")
@@ -333,7 +379,6 @@ def update_group(group_id: int, coach_id: int, group_year: str, notes: str = "")
     finally:
         if conn:
             put_conn(conn)
-
 
 def set_group_active(group_id: int, is_active: bool) -> None:
     conn = None
