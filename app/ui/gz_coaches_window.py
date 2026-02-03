@@ -151,11 +151,12 @@ class GzCoachesWindow(QDialog):
             rows = list_coaches(
                 search=self.ed_search.text(),
                 include_inactive=self.cb_inactive.isChecked(),
-                org_id=org_id,                     # конкретный объект (если выбран)
-                org_ids=allowed_org_ids_list,      # ограничение доступными объектами
+                org_id=org_id,
+                org_ids=allowed_org_ids_list,
+                user_id=self.user.id,
+                role_code=self.user.role_code,
             )
 
-            # показываем в колонке "Объекты" только доступные пользователю учреждения
             coach_orgs = list_coach_orgs_map(
                 include_inactive_orgs=False,
                 org_ids=allowed_org_ids_list,
