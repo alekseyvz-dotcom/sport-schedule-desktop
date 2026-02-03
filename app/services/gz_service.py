@@ -389,29 +389,96 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
         if conn:
             put_conn(conn)
 
-def list_coach_orgs_map(*, include_inactive_orgs: bool = False) -> Dict[int, List[str]]:
+def list_coach_orgs_map(
+    *,
+    include_inactive_orgs: bool = False,
+    org_ids: Optional[Iterable[int]] = None,
+) -> Dict[int, List[str]]:
     """
     Возвращает {coach_id: [org_name, ...]} (отсортировано по названию).
+    Можно ограничить org_ids (например, доступными пользователю).
     """
+    org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
+
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            where = []
+            params: Dict[str, Any] = {}
+
+            if not include_inactive_orgs:
+                where.append("o.is_active = true")
+
+            if org_ids_list is not None:
+                if not org_ids_list:
+                    return {}
+                where.append("co.org_id = ANY(%(org_ids)s)")
+                params["org_ids"] = org_ids_list
+
             sql = """
                 SELECT co.coach_id, o.name AS org_name
                 FROM public.gz_coach_orgs co
                 JOIN public.sport_orgs o ON o.id = co.org_id
             """
-            if not include_inactive_orgs:
-                sql += " WHERE o.is_active = true"
+            if where:
+                sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY co.coach_id, o.name"
 
-            cur.execute(sql)
+            cur.execute(sql, params)
             rows = cur.fetchall()
 
             out: Dict[int, List[str]] = {}
             for r in rows:
                 out.setdefault(int(r["coach_id"]), []).append(str(r["org_name"]))
+            return out
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def list_coach_orgs_map_full(
+    *,
+    include_inactive_orgs: bool = False,
+    org_ids: Optional[Iterable[int]] = None,
+) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Возвращает {coach_id: [{"id": org_id, "name": org_name}, ...]}
+    (полезно, если дальше захотите фильтровать/показывать точнее).
+    """
+    org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            where = []
+            params: Dict[str, Any] = {}
+
+            if not include_inactive_orgs:
+                where.append("o.is_active = true")
+
+            if org_ids_list is not None:
+                if not org_ids_list:
+                    return {}
+                where.append("co.org_id = ANY(%(org_ids)s)")
+                params["org_ids"] = org_ids_list
+
+            sql = """
+                SELECT co.coach_id, o.id AS org_id, o.name AS org_name
+                FROM public.gz_coach_orgs co
+                JOIN public.sport_orgs o ON o.id = co.org_id
+            """
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY co.coach_id, o.name"
+
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+            out: Dict[int, List[Dict[str, Any]]] = {}
+            for r in rows:
+                out.setdefault(int(r["coach_id"]), []).append({"id": int(r["org_id"]), "name": str(r["org_name"])})
             return out
     finally:
         if conn:
