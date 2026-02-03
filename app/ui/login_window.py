@@ -1,5 +1,8 @@
 # app/ui/login_window.py
-from PySide6.QtCore import Signal
+import os
+
+from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QPushButton,
     QLabel, QMessageBox, QHBoxLayout, QApplication
@@ -10,6 +13,10 @@ from app.services.users_service import authenticate, AuthUser
 
 _LOGIN_QSS = """
 QWidget#loginForm { background: transparent; }
+
+QLabel#logo {
+    padding: 8px 0 2px 0;
+}
 
 QLabel#status {
     color: #b00020;
@@ -60,6 +67,27 @@ class LoginWindow(QWidget):
         self.setObjectName("loginForm")
         self.setStyleSheet(_LOGIN_QSS)
 
+        # ---- Logo ----
+        self.lbl_logo = QLabel()
+        self.lbl_logo.setObjectName("logo")
+        self.lbl_logo.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+
+        # Путь: от текущего файла -> вверх -> вверх -> assets/logo.png
+        # app/ui/login_window.py -> app/ui -> app -> (root) -> assets/logo.png
+        logo_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "assets", "logo.png")
+        )
+
+        pix = QPixmap(logo_path)
+        if not pix.isNull():
+            # ширина логотипа (можете поменять на 120/160)
+            pix = pix.scaledToWidth(140, Qt.SmoothTransformation)
+            self.lbl_logo.setPixmap(pix)
+        else:
+            # если файла нет/не найден — просто не показываем пустую область
+            self.lbl_logo.setVisible(False)
+
+        # ---- Inputs & buttons ----
         self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("status")
 
@@ -87,6 +115,8 @@ class LoginWindow(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
+
+        root.addWidget(self.lbl_logo)  # <-- логотип сверху
         root.addWidget(self.ed_user)
         root.addWidget(self.ed_pass)
         root.addWidget(self.lbl_status)
