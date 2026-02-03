@@ -47,6 +47,7 @@ class TenantsPage(QWidget):
         self._role = (getattr(user, "role_code", "") or "").lower()
         self._is_admin = self._role == "admin"
         self._can_edit = self._role in ("admin",)  # синхронизируйте с TENANTS_EDIT_ROLES в tenants_service
+        self._edit_open = False
 
         # --- Top bar ---
         self.ed_search = QLineEdit()
@@ -386,61 +387,66 @@ class TenantsPage(QWidget):
         self._select_row_by_id(new_id)
 
     def _on_edit(self, *_):
-        if not self._can_edit:
-            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование контрагентов.")
+        if self._edit_open:
             return
-    
-        t = self._selected_tenant()
-        if not t:
-            QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
-            return
-    
-        dlg = TenantDialog(
-            self,
-            title=f"Редактировать: {t.name}",
-            is_admin=self._is_admin,
-            data={
-                "id": t.id,
-                "name": t.name,
-                "inn": t.inn,
-                "phone": t.phone,
-                "email": t.email,
-                "comment": t.comment,
-                "contact_name": t.contact_name,
-                "obligation_kind": t.obligation_kind,
-                "contract_no": t.contract_no,
-                "contract_date": t.contract_date,
-                "contract_valid_from": t.contract_valid_from,
-                "contract_valid_to": t.contract_valid_to,
-                "docs_delivery_method": t.docs_delivery_method,
-                "status": t.status,
-                "contract_signed": t.contract_signed,
-                "attached_in_1c": t.attached_in_1c,
-                "has_ds": t.has_ds,
-                "notes": t.notes,
-                "tenant_kind": t.tenant_kind,
-                "rent_kind": t.rent_kind,
-            },
-        )
-    
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-    
-        data = dlg.values()
-        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
-    
+        self._edit_open = True
         try:
+            if not self._can_edit:
+                QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование контрагентов.")
+                return
+    
+            t = self._selected_tenant()
+            if not t:
+                QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
+                return
+    
+            dlg = TenantDialog(
+                self,
+                title=f"Редактировать: {t.name}",
+                is_admin=self._is_admin,
+                data={
+                    "id": t.id,
+                    "name": t.name,
+                    "inn": t.inn,
+                    "phone": t.phone,
+                    "email": t.email,
+                    "comment": t.comment,
+                    "contact_name": t.contact_name,
+                    "obligation_kind": t.obligation_kind,
+                    "contract_no": t.contract_no,
+                    "contract_date": t.contract_date,
+                    "contract_valid_from": t.contract_valid_from,
+                    "contract_valid_to": t.contract_valid_to,
+                    "docs_delivery_method": t.docs_delivery_method,
+                    "status": t.status,
+                    "contract_signed": t.contract_signed,
+                    "attached_in_1c": t.attached_in_1c,
+                    "has_ds": t.has_ds,
+                    "notes": t.notes,
+                    "tenant_kind": t.tenant_kind,
+                    "rent_kind": t.rent_kind,
+                },
+            )
+            dlg.setModal(True)
+    
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+    
+            data = dlg.values()
+            rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+    
             update_tenant(user_id=self._user.id, role_code=self._user.role_code, tenant_id=t.id, **data)
+    
+            if rules_payload:
+                self._apply_rules_and_maybe_generate(t.id, rules_payload)
+    
+            self.reload()
+            self._select_row_by_id(t.id)
+    
         except Exception as e:
-            QMessageBox.critical(self, "Редактировать контрагента", f"Ошибка:\n{e}")
-            return
-    
-        if rules_payload:
-            self._apply_rules_and_maybe_generate(t.id, rules_payload)
-    
-        self.reload()
-        self._select_row_by_id(t.id)
-
+            QMessageBox.critical(self, "Редактирование", f"{type(e).__name__}: {e}")
+        finally:
+            self._edit_open = False
 
     def _on_toggle_active(self):
         if not self._can_edit:
