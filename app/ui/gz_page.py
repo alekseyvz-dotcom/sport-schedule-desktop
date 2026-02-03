@@ -5,16 +5,33 @@ from datetime import timedelta, timezone
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QMessageBox, QCheckBox, QHeaderView, QAbstractItemView, QDialog
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QCheckBox,
+    QHeaderView,
+    QAbstractItemView,
+    QDialog,
 )
 
 from app.services.users_service import AuthUser
 from app.services.gz_service import (
-    GzGroup, list_groups, list_coaches, create_group, update_group, set_group_active
+    GzGroup,
+    list_groups,
+    list_coaches,
+    create_group,
+    update_group,
+    set_group_active,
 )
 from app.services.gz_rules_service import (
-    create_rule, set_rule_active, generate_bookings_for_group
+    create_rule,
+    set_rule_active,
+    generate_bookings_for_group,
 )
 from app.ui.gz_group_dialog import GzGroupDialog
 from app.ui.gz_coaches_window import GzCoachesWindow
@@ -29,7 +46,7 @@ class GzPage(QWidget):
         self._is_admin = (getattr(user, "role_code", "") == "admin")
 
         self.ed_search = QLineEdit()
-        self.ed_search.setPlaceholderText("Поиск: тренер / год группы")
+        self.ed_search.setPlaceholderText("Поиск: тренер / группа")
         self.ed_search.setClearButtonEnabled(True)
         self.ed_search.returnPressed.connect(self.reload)
 
@@ -57,7 +74,7 @@ class GzPage(QWidget):
         top.addWidget(self.btn_archive)
 
         self.tbl = QTableWidget(0, 5)
-        self.tbl.setHorizontalHeaderLabels(["ID", "Тренер", "Год", "Примечание", "Активен"])
+        self.tbl.setHorizontalHeaderLabels(["ID", "Тренер", "Группа", "Примечание", "Активен"])
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -236,7 +253,14 @@ class GzPage(QWidget):
         rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
 
         try:
-            new_id = create_group(coach_id=data["coach_id"], group_year=data["group_year"], notes=data["notes"])
+            new_id = create_group(
+                coach_id=data["coach_id"],
+                group_year=data["group_year"],
+                notes=data.get("notes", ""),
+                is_free=bool(data.get("is_free", False)),
+                period_from=data.get("period_from"),
+                period_to=data.get("period_to"),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Создать группу ГЗ", f"Ошибка:\n{e}")
             return
@@ -264,7 +288,15 @@ class GzPage(QWidget):
             title=f"Редактировать: {g.coach_name} — {g.group_year}",
             coaches=coaches,
             is_admin=self._is_admin,
-            data={"id": g.id, "coach_id": g.coach_id, "group_year": g.group_year, "notes": g.notes},
+            data={
+                "id": g.id,
+                "coach_id": g.coach_id,
+                "group_year": g.group_year,
+                "notes": g.notes,
+                "is_free": getattr(g, "is_free", False),
+                "period_from": getattr(g, "period_from", None),
+                "period_to": getattr(g, "period_to", None),
+            },
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -273,7 +305,15 @@ class GzPage(QWidget):
         rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
 
         try:
-            update_group(g.id, coach_id=data["coach_id"], group_year=data["group_year"], notes=data["notes"])
+            update_group(
+                g.id,
+                coach_id=data["coach_id"],
+                group_year=data["group_year"],
+                notes=data.get("notes", ""),
+                is_free=bool(data.get("is_free", False)),
+                period_from=data.get("period_from"),
+                period_to=data.get("period_to"),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Редактировать группу ГЗ", f"Ошибка:\n{e}")
             return
@@ -293,7 +333,11 @@ class GzPage(QWidget):
         new_state = not g.is_active
         action = "восстановить" if new_state else "архивировать"
         if (
-            QMessageBox.question(self, "Подтверждение", f"Вы действительно хотите {action} группу «{g.coach_name} — {g.group_year}»?")
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Вы действительно хотите {action} группу «{g.coach_name} — {g.group_year}»?",
+            )
             != QMessageBox.StandardButton.Yes
         ):
             return
