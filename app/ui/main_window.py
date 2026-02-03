@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
             tabs.addTab(GzPage(user), "Гос. задание")
         
         if self._can_tab("tab.orgs"):
-            tabs.addTab(OrgsVenuesPage(), "Учреждения и площадки")
+            tabs.addTab(OrgsVenuesPage(user), "Учреждения и площадки")
         
         if self._can_tab("tab.schedule"):
             tabs.addTab(SchedulePage(user), "Расписание")
