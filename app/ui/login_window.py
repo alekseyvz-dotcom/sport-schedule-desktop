@@ -1,5 +1,6 @@
 # app/ui/login_window.py
 import os
+import sys
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QPixmap
@@ -58,6 +59,9 @@ QPushButton#ghost {
 }
 """
 
+def resource_path(rel_path: str) -> str:
+    base = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base, rel_path)
 
 class LoginWindow(QWidget):
     logged_in = Signal(object)  # AuthUser
@@ -74,11 +78,9 @@ class LoginWindow(QWidget):
 
         # Путь: от текущего файла -> вверх -> вверх -> assets/logo.png
         # app/ui/login_window.py -> app/ui -> app -> (root) -> assets/logo.png
-        logo_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "assets", "logo.png")
-        )
-
+        logo_path = resource_path(os.path.join("assets", "logo.png"))
         pix = QPixmap(logo_path)
+
         if not pix.isNull():
             # ширина логотипа (можете поменять на 120/160)
             pix = pix.scaledToWidth(140, Qt.SmoothTransformation)
