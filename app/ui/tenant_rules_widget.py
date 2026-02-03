@@ -126,7 +126,7 @@ class TenantRulesWidget(QWidget):
         return out
 
     def _load_from_db(self):
-        rules = list_rules_for_tenant(int(self._tenant_id), include_inactive=True)
+        rules = list_rules_for_tenant(tenant_id=int(self._tenant_id), include_inactive=True)
         self._rules_local = [
             {
                 "id": int(r.id),
