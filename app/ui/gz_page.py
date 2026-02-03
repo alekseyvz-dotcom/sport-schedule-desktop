@@ -126,9 +126,8 @@ class GzPage(QWidget):
         self.reload()
 
     def _on_coaches(self):
-        dlg = GzCoachesWindow(self)
+        dlg = GzCoachesWindow(self._user, self)
         dlg.exec()
-        # после закрытия окна тренеров — обновим список групп
         self.reload()
 
     def _selected_group(self) -> GzGroup | None:
