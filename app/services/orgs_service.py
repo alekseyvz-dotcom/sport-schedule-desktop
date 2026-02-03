@@ -1,3 +1,4 @@
+# app/services/orgs_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from typing import List, Optional
 from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
-from app.services.access_guard import require_org_edit
+from app.services.access_service import list_allowed_org_ids, get_org_access
 
 
 @dataclass(frozen=True)
@@ -22,14 +23,43 @@ class SportOrg:
     is_24h: bool
 
 
-def list_orgs(search: str = "", include_inactive: bool = False) -> List[SportOrg]:
+def _validate_work_time(*, is_24h: bool, work_start: time, work_end: time) -> None:
+    if is_24h:
+        return
+    if work_end <= work_start:
+        raise ValueError("Окончание рабочего дня должно быть позже начала (смены через полночь не поддерживаются).")
+
+
+def _require_org_edit(*, user_id: int, role_code: str, org_id: int) -> None:
+    acc = get_org_access(user_id=user_id, role_code=role_code, org_id=org_id)
+    if not acc.can_edit:
+        raise PermissionError("Недостаточно прав: редактирование учреждения запрещено")
+
+
+def list_orgs(
+    *,
+    user_id: int,
+    role_code: str,
+    search: str = "",
+    include_inactive: bool = False,
+) -> List[SportOrg]:
+    """
+    Возвращает учреждения, доступные пользователю по can_view.
+    admin -> все активные/включая архив (по include_inactive).
+    """
     search = (search or "").strip()
+
+    allowed_ids = list_allowed_org_ids(user_id=user_id, role_code=role_code)
+    if not allowed_ids:
+        return []
+
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            where = []
-            params = {}
+            where = ["o.id = ANY(%(allowed)s)"]
+            params = {"allowed": allowed_ids}
+
             if not include_inactive:
                 where.append("o.is_active = true")
             if search:
@@ -72,13 +102,6 @@ def list_orgs(search: str = "", include_inactive: bool = False) -> List[SportOrg
             put_conn(conn)
 
 
-def _validate_work_time(*, is_24h: bool, work_start: time, work_end: time) -> None:
-    if is_24h:
-        return
-    if work_end <= work_start:
-        raise ValueError("Окончание рабочего дня должно быть позже начала (смены через полночь не поддерживаются).")
-
-
 def create_org(
     *,
     user_id: int,
@@ -90,8 +113,13 @@ def create_org(
     work_end: time = time(22, 0),
     is_24h: bool = False,
 ) -> int:
+    """
+    Создание учреждения: в текущей модели прав (can_view/can_edit по org) отдельного права на создание нет,
+    поэтому ограничим создание ролью admin.
+    """
     if (role_code or "").lower() != "admin":
         raise PermissionError("Недостаточно прав: создание учреждения доступно только администратору")
+
     name = (name or "").strip()
     if not name:
         raise ValueError("Название учреждения не может быть пустым")
@@ -125,6 +153,7 @@ def create_org(
         if conn:
             put_conn(conn)
 
+
 def update_org(
     *,
     user_id: int,
@@ -137,7 +166,7 @@ def update_org(
     work_end: time,
     is_24h: bool = False,
 ) -> None:
-    require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
+    _require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
 
     name = (name or "").strip()
     if not name:
@@ -180,7 +209,7 @@ def update_org(
 
 
 def set_org_active(*, user_id: int, role_code: str, org_id: int, is_active: bool) -> None:
-    require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
+    _require_org_edit(user_id=user_id, role_code=role_code, org_id=org_id)
 
     conn = None
     try:
