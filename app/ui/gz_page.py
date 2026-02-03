@@ -1,4 +1,3 @@
-# app/ui/gz_page.py
 from __future__ import annotations
 
 from datetime import timedelta, timezone
@@ -44,7 +43,9 @@ class GzPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self._user = user
-        self._is_admin = (getattr(user, "role_code", "") == "admin")
+        self._role = (getattr(user, "role_code", "") or "").lower()
+        self._is_admin = self._role == "admin"
+        self._can_edit = self._role in ("admin",)  # синхронизируйте с GZ_EDIT_ROLES в gz_service
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: тренер / группа")
@@ -141,9 +142,19 @@ class GzPage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
+        self._apply_ui_access()
         self.reload()
 
+    def _apply_ui_access(self):
+        self.btn_add.setEnabled(self._can_edit)
+        self.btn_edit.setEnabled(self._can_edit)
+        self.btn_archive.setEnabled(self._can_edit)
+        self.btn_coaches.setEnabled(self._can_edit)  # если viewer не должен управлять тренерами
+
     def _on_coaches(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование тренеров.")
+            return
         dlg = GzCoachesWindow(self._user, self)
         dlg.exec()
         self.reload()
@@ -192,11 +203,16 @@ class GzPage(QWidget):
                         it.setForeground(Qt.GlobalColor.darkGray)
 
     def _apply_rules_and_maybe_generate(self, gz_group_id: int, rules_payload: list[dict]) -> None:
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение правил/генерацию бронирований.")
+            return
+
         try:
             for r in rules_payload:
                 op = r.get("op", "keep")
                 if op == "new":
                     create_rule(
+                        # ВАЖНО: gz_rules_service нужно обновить и добавить user_id/role_code как в tenant_rules_service
                         gz_group_id=int(gz_group_id),
                         venue_unit_id=int(r["venue_unit_id"]),
                         weekday=int(r["weekday"]),
@@ -228,12 +244,15 @@ class GzPage(QWidget):
             return
 
         try:
-            rep = generate_bookings_for_group(gz_group_id=int(gz_group_id), tz=self.TZ)
+            rep = generate_bookings_for_group(
+                gz_group_id=int(gz_group_id),
+                tz=self.TZ,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
             return
 
-        msg = f"Создано бронирований: {rep.created}\nПропущено (занято/ошибка): {rep.skipped}"
+        msg = f"Создано бронирований: {rep.created}\nПропущено: {rep.skipped}"
         if rep.errors:
             msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
             if len(rep.errors) > 8:
@@ -241,6 +260,10 @@ class GzPage(QWidget):
         QMessageBox.information(self, "Генерация бронирований", msg)
 
     def _on_add(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на создание групп ГЗ.")
+            return
+
         try:
             coaches = list_coaches(
                 include_inactive=False,
@@ -264,6 +287,8 @@ class GzPage(QWidget):
 
         try:
             new_id = create_group(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
                 coach_id=data["coach_id"],
                 group_year=data["group_year"],
                 notes=data.get("notes", ""),
@@ -282,6 +307,10 @@ class GzPage(QWidget):
         self._select_row_by_id(new_id)
 
     def _on_edit(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование групп ГЗ.")
+            return
+
         g = self._selected_group()
         if not g:
             QMessageBox.information(self, "Редактировать", "Выберите группу.")
@@ -320,7 +349,9 @@ class GzPage(QWidget):
 
         try:
             update_group(
-                g.id,
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                group_id=g.id,
                 coach_id=data["coach_id"],
                 group_year=data["group_year"],
                 notes=data.get("notes", ""),
@@ -339,6 +370,10 @@ class GzPage(QWidget):
         self._select_row_by_id(g.id)
 
     def _on_toggle_active(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение статуса групп ГЗ.")
+            return
+
         g = self._selected_group()
         if not g:
             QMessageBox.information(self, "Архив", "Выберите группу.")
@@ -357,7 +392,12 @@ class GzPage(QWidget):
             return
 
         try:
-            set_group_active(g.id, new_state)
+            set_group_active(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                group_id=g.id,
+                is_active=new_state,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
