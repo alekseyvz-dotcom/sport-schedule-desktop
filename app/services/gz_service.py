@@ -24,12 +24,12 @@ def _require_gz_view(*, user_id: int, role_code: str) -> None:
     if not user_id:
         raise PermissionError("Недостаточно прав: просмотр ГЗ запрещён")
 
-
 def _require_gz_edit(*, user_id: int, role_code: str) -> None:
     _require_gz_view(user_id=user_id, role_code=role_code)
-    if _norm_role(role_code) not in GZ_EDIT_ROLES:
+    if _admin(role_code):
+        return
+    if not list_accessible_org_ids(user_id=int(user_id), for_edit=True):
         raise PermissionError("Недостаточно прав: редактирование ГЗ запрещено")
-
 
 @dataclass(frozen=True)
 class GzCoach:
@@ -54,16 +54,16 @@ class GzGroup:
 
 # ---------------- helpers (access) ----------------
 
-def list_accessible_org_ids(*, user_id: int) -> List[int]:
+def list_accessible_org_ids(*, user_id: int, for_edit: bool = False) -> List[int]:
     conn = None
     try:
         conn = get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT org_id
                 FROM public.app_user_org_permissions
-                WHERE user_id=%s AND can_view=true
+                WHERE user_id=%s AND { "can_edit" if for_edit else "can_view" }=true
                 ORDER BY org_id
                 """,
                 (int(user_id),),
@@ -81,7 +81,7 @@ def _require_org_access_for_edit(*, user_id: int, role_code: str, org_ids: Itera
     if _admin(role_code):
         return
 
-    allowed = set(list_accessible_org_ids(user_id=int(user_id)))
+    allowed = set(list_accessible_org_ids(user_id=int(user_id), for_edit=True))
     requested = {int(x) for x in org_ids if x is not None}
     if not requested:
         raise PermissionError("Нужно выбрать хотя бы одно доступное учреждение")
