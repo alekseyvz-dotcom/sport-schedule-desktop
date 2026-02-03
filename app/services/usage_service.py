@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta, timezone
-from typing import Dict, List, Optional, Tuple, Literal
+from typing import Dict, List, Optional, Tuple, DefaultDict
+from collections import defaultdict
 
 from psycopg2.extras import RealDictCursor
 
@@ -39,14 +40,6 @@ class UsageRow:
     evening_total_sec: int
 
 
-def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> int:
-    s = max(a0, b0)
-    e = min(a1, b1)
-    if e <= s:
-        return 0
-    return int((e - s).total_seconds())
-
-
 def _iter_days(d0: date, d1: date):
     d = d0
     while d <= d1:
@@ -72,6 +65,60 @@ def _work_window_for_org(vrow: Dict) -> Tuple[time, time]:
     return vrow["org_work_start"], vrow["org_work_end"]
 
 
+def _unit_fraction(unit_code: Optional[str]) -> float:
+    """
+    Доля площадки, занимаемая юнитом:
+      Q1..Q4 => 0.25
+      H1/H2  => 0.5
+      main/NULL/прочее => 1.0
+    """
+    code = (unit_code or "").strip().upper()
+    if code.startswith("Q"):
+        return 0.25
+    if code.startswith("H"):
+        return 0.5
+    return 1.0
+
+
+def _weighted_busy_seconds(intervals: List[Tuple[datetime, datetime, float]]) -> int:
+    """
+    intervals: [(start_dt, end_dt, fraction)]
+    Возвращает занятость целой площадки в секундах:
+    сумма fraction по пересечениям клипается до 1.0.
+    """
+    events: List[Tuple[datetime, float]] = []
+    for s, e, f in intervals:
+        if e <= s or f <= 0:
+            continue
+        events.append((s, +f))
+        events.append((e, -f))
+
+    if not events:
+        return 0
+
+    events.sort(key=lambda x: x[0])
+
+    busy = 0.0
+    total = 0.0
+    prev_t = events[0][0]
+    i = 0
+
+    while i < len(events):
+        t = events[i][0]
+
+        if t > prev_t:
+            sec = (t - prev_t).total_seconds()
+            if sec > 0:
+                total += min(1.0, max(0.0, busy)) * sec
+            prev_t = t
+
+        while i < len(events) and events[i][0] == t:
+            busy += events[i][1]
+            i += 1
+
+    return int(total)
+
+
 def _load_bookings_for_range(
     *,
     start_dt: datetime,
@@ -88,6 +135,7 @@ def _load_bookings_for_range(
                     b.id,
                     b.venue_id,
                     b.venue_unit_id,
+                    u.code AS unit_code,
                     v.name as venue_name,
                     v.org_id,
                     o.name as org_name,
@@ -101,6 +149,7 @@ def _load_bookings_for_range(
                 FROM public.bookings b
                 JOIN public.venues v ON v.id = b.venue_id
                 JOIN public.sport_orgs o ON o.id = v.org_id
+                LEFT JOIN public.venue_units u ON u.id = b.venue_unit_id
                 WHERE b.starts_at < %(end_dt)s
                   AND b.ends_at > %(start_dt)s
             """
@@ -161,8 +210,14 @@ def calc_usage_by_venues(
 ) -> List[UsageRow]:
     """
     Аналитика по площадкам (venues).
-    Окно учёта = режим работы учреждения (sport_orgs.work_start/work_end/is_24h).
-    Смены = пересечение базовых смен с окном работы.
+
+    Считает занятость ЦЕЛОЙ площадки, учитывая что брони могут быть по четвертям/половинам:
+      - Q1..Q4 => 0.25
+      - H1/H2  => 0.5
+      - main или venue_unit_id NULL => 1.0
+
+    Если в один и тот же интервал занято несколько юнитов, доли суммируются и клипаются до 1.0,
+    поэтому процент не завышается.
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
@@ -189,7 +244,6 @@ def calc_usage_by_venues(
 
         cap_day = _sec_between(work_start, work_end)
 
-        # shift capacities = пересечение смены с рабочим окном
         sm = _clip_interval(base_shift_m, (work_start, work_end))
         sd = _clip_interval(base_shift_d, (work_start, work_end))
         se = _clip_interval(base_shift_e, (work_start, work_end))
@@ -222,14 +276,24 @@ def calc_usage_by_venues(
             "evening_gz_sec": 0,
         }
 
+    # 1) Собираем интервалы (по площадке+дню+активности), с весом fraction
+    intervals_work: DefaultDict[tuple, list] = defaultdict(list)
+    intervals_m: DefaultDict[tuple, list] = defaultdict(list)
+    intervals_d: DefaultDict[tuple, list] = defaultdict(list)
+    intervals_e: DefaultDict[tuple, list] = defaultdict(list)
+
     for b in bookings:
         vid = int(b["venue_id"])
         if vid not in agg:
             continue
 
         activity = (b["activity"] or "").strip().upper()
+        if activity not in ("PD", "GZ"):
+            continue
+
         starts_at: datetime = b["starts_at"]
         ends_at: datetime = b["ends_at"]
+        frac = _unit_fraction(b.get("unit_code"))
 
         work_start: time = agg[vid]["work_start"]
         work_end: time = agg[vid]["work_end"]
@@ -238,41 +302,54 @@ def calc_usage_by_venues(
         se = agg[vid]["shift_e"]
 
         for d in _iter_days(start_day, end_day):
+            # рабочее окно
             work0 = datetime.combine(d, work_start, tzinfo=tz)
             work1 = datetime.combine(d, work_end, tzinfo=tz)
-            work_overlap = _overlap_seconds(starts_at, ends_at, work0, work1)
-            if work_overlap <= 0:
+            s = max(starts_at, work0)
+            e = min(ends_at, work1)
+            if e <= s:
                 continue
 
-            m_overlap = 0
-            d_overlap = 0
-            e_overlap = 0
+            intervals_work[(vid, d, activity)].append((s, e, frac))
 
             if sm:
                 m0 = datetime.combine(d, sm[0], tzinfo=tz)
                 m1 = datetime.combine(d, sm[1], tzinfo=tz)
-                m_overlap = _overlap_seconds(starts_at, ends_at, m0, m1)
+                ms = max(starts_at, m0)
+                me = min(ends_at, m1)
+                if me > ms:
+                    intervals_m[(vid, d, activity)].append((ms, me, frac))
 
             if sd:
                 d0 = datetime.combine(d, sd[0], tzinfo=tz)
                 d1 = datetime.combine(d, sd[1], tzinfo=tz)
-                d_overlap = _overlap_seconds(starts_at, ends_at, d0, d1)
+                ds = max(starts_at, d0)
+                de = min(ends_at, d1)
+                if de > ds:
+                    intervals_d[(vid, d, activity)].append((ds, de, frac))
 
             if se:
                 e0 = datetime.combine(d, se[0], tzinfo=tz)
                 e1 = datetime.combine(d, se[1], tzinfo=tz)
-                e_overlap = _overlap_seconds(starts_at, ends_at, e0, e1)
+                es = max(starts_at, e0)
+                ee = min(ends_at, e1)
+                if ee > es:
+                    intervals_e[(vid, d, activity)].append((es, ee, frac))
 
-            if activity == "PD":
-                agg[vid]["pd_sec"] += work_overlap
-                agg[vid]["morning_pd_sec"] += m_overlap
-                agg[vid]["day_pd_sec"] += d_overlap
-                agg[vid]["evening_pd_sec"] += e_overlap
-            elif activity == "GZ":
-                agg[vid]["gz_sec"] += work_overlap
-                agg[vid]["morning_gz_sec"] += m_overlap
-                agg[vid]["day_gz_sec"] += d_overlap
-                agg[vid]["evening_gz_sec"] += e_overlap
+    # 2) Начисляем занятость (взвешенную и клипнутую до 1.0)
+    for vid in agg.keys():
+        for d in _iter_days(start_day, end_day):
+            agg[vid]["pd_sec"] += _weighted_busy_seconds(intervals_work.get((vid, d, "PD"), []))
+            agg[vid]["gz_sec"] += _weighted_busy_seconds(intervals_work.get((vid, d, "GZ"), []))
+
+            agg[vid]["morning_pd_sec"] += _weighted_busy_seconds(intervals_m.get((vid, d, "PD"), []))
+            agg[vid]["morning_gz_sec"] += _weighted_busy_seconds(intervals_m.get((vid, d, "GZ"), []))
+
+            agg[vid]["day_pd_sec"] += _weighted_busy_seconds(intervals_d.get((vid, d, "PD"), []))
+            agg[vid]["day_gz_sec"] += _weighted_busy_seconds(intervals_d.get((vid, d, "GZ"), []))
+
+            agg[vid]["evening_pd_sec"] += _weighted_busy_seconds(intervals_e.get((vid, d, "PD"), []))
+            agg[vid]["evening_gz_sec"] += _weighted_busy_seconds(intervals_e.get((vid, d, "GZ"), []))
 
     out: List[UsageRow] = []
     for _, a in agg.items():
