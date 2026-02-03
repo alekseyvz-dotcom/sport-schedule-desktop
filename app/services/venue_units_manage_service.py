@@ -4,8 +4,8 @@ from typing import List, Tuple
 
 from app.db import get_conn, put_conn
 
-
 # схемы: (code, name, sort_order)
+UNITS_1 = [("MAIN", "Основная зона", 10)]
 UNITS_2 = [("H1", "1/2 #1", 10), ("H2", "1/2 #2", 20)]
 UNITS_4 = [("Q1", "1/4 #1", 10), ("Q2", "1/4 #2", 20), ("Q3", "1/4 #3", 30), ("Q4", "1/4 #4", 40)]
 
@@ -13,10 +13,10 @@ UNITS_4 = [("Q1", "1/4 #1", 10), ("Q2", "1/4 #2", 20), ("Q3", "1/4 #3", 30), ("Q
 def detect_units_scheme(venue_id: int) -> int:
     """
     Возвращает схему:
-      0 - нет
-      2 - две зоны
-      4 - четыре зоны
-    по текущим venue_units.
+      0 - нет (все зоны выключены)
+      1 - одна зона (MAIN)
+      2 - две зоны (H1,H2)
+      4 - четыре зоны (Q1..Q4)
     """
     conn = None
     try:
@@ -26,18 +26,20 @@ def detect_units_scheme(venue_id: int) -> int:
                 "SELECT code FROM public.venue_units WHERE venue_id=%s AND is_active=true ORDER BY sort_order, code",
                 (int(venue_id),),
             )
-            codes = [r[0] for r in cur.fetchall()]
+            codes = [str(r[0]) for r in cur.fetchall()]
     finally:
         if conn:
             put_conn(conn)
 
     if not codes:
         return 0
+    if set(codes) == {"MAIN"}:
+        return 1
     if set(codes) == {"H1", "H2"}:
         return 2
     if set(codes) == {"Q1", "Q2", "Q3", "Q4"}:
         return 4
-    # если вручную сделали другое — считаем как "есть зоны", но нестандартно
+    # если вручную сделали другое — считаем как "нестандартно"
     return 0
 
 
@@ -45,19 +47,19 @@ def apply_units_scheme(venue_id: int, scheme: int) -> None:
     """
     Применяет схему зон:
       0 - деактивировать все unit'ы
+      1 - создать/активировать MAIN и деактивировать остальные
       2 - создать/активировать H1/H2 и деактивировать остальные
       4 - создать/активировать Q1..Q4 и деактивировать остальные
-
-    ВАЖНО: если уже есть брони на unit'ах, деактивация "лишних" unit'ов их не удалит,
-    но пользователь больше не сможет выбирать такие unit'ы для новых правил.
     """
     scheme = int(scheme)
-    if scheme not in (0, 2, 4):
-        raise ValueError("scheme должен быть 0, 2 или 4")
+    if scheme not in (0, 1, 2, 4):
+        raise ValueError("scheme должен быть 0, 1, 2 или 4")
 
     desired: List[Tuple[str, str, int]]
     if scheme == 0:
         desired = []
+    elif scheme == 1:
+        desired = UNITS_1
     elif scheme == 2:
         desired = UNITS_2
     else:
@@ -68,13 +70,11 @@ def apply_units_scheme(venue_id: int, scheme: int) -> None:
         conn = get_conn()
         with conn:
             with conn.cursor() as cur:
-                # 1) деактивируем все существующие
                 cur.execute(
                     "UPDATE public.venue_units SET is_active=false WHERE venue_id=%s",
                     (int(venue_id),),
                 )
 
-                # 2) создаём/активируем нужные
                 for code, name, sort_order in desired:
                     cur.execute(
                         """
