@@ -1,9 +1,10 @@
+# app/ui/tenants_page.py
 from __future__ import annotations
 
 from datetime import timedelta, timezone
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -38,14 +39,14 @@ from app.ui.tenant_dialog import TenantDialog
 
 class TenantsPage(QWidget):
     TZ = timezone(timedelta(hours=3))
-
-    # Минимальная ширина колонки "ФИО / Название" (чтобы всегда было читаемо)
     NAME_MIN_WIDTH = 260
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self._user = user
-        self._is_admin = (getattr(user, "role_code", "") == "admin")
+        self._role = (getattr(user, "role_code", "") or "").lower()
+        self._is_admin = self._role == "admin"
+        self._can_edit = self._role in ("admin",)  # синхронизируйте с TENANTS_EDIT_ROLES в tenants_service
 
         # --- Top bar ---
         self.ed_search = QLineEdit()
@@ -104,46 +105,38 @@ class TenantsPage(QWidget):
         self.tbl.setSortingEnabled(True)
         self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
+
+        # двойной клик: только если можно редактировать
         self.tbl.doubleClicked.connect(self._on_edit)
 
-        # Горизонтальный скролл появится, если места мало (важно для "ФИО всегда читаемо")
         self.tbl.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         header = self.tbl.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setHighlightSections(False)
-        
-        # 1) Пользователь может двигать
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        
-        # 2) Последняя колонка (Комментарий) тянется и "съедает" остаток
         header.setStretchLastSection(True)
-        
-        # Узкие колонки по содержимому
+
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)   # ID
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)   # Тип
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)   # Аренда
         header.setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)  # Активен
-        
-        # ВАЖНО: ФИО делаем НЕ Stretch, а Interactive (чтобы ширина не схлопывалась)
+
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(13, QHeaderView.ResizeMode.Interactive)
-        
-        # Стартовые ширины
-        header.setMinimumSectionSize(80)
-        self.tbl.setColumnWidth(1, 420)   # ФИО/Название (сразу широко)
-        self.tbl.setColumnWidth(13, 260)  # Комментарий (можно, но он всё равно будет тянуться)
-        
-        # Остальным задаем разумные стартовые ширины
-        self.tbl.setColumnWidth(4, 90)    # ИНН
-        self.tbl.setColumnWidth(5, 120)   # Телефон
-        self.tbl.setColumnWidth(6, 180)   # Email
-        self.tbl.setColumnWidth(7, 150)   # Контакт
-        self.tbl.setColumnWidth(8, 120)   # № договора
-        self.tbl.setColumnWidth(9, 95)    # Срок с
-        self.tbl.setColumnWidth(10, 95)   # Срок по
-        self.tbl.setColumnWidth(11, 120)  # Статус
 
+        header.setMinimumSectionSize(80)
+        self.tbl.setColumnWidth(1, 420)
+        self.tbl.setColumnWidth(13, 260)
+
+        self.tbl.setColumnWidth(4, 90)
+        self.tbl.setColumnWidth(5, 120)
+        self.tbl.setColumnWidth(6, 180)
+        self.tbl.setColumnWidth(7, 150)
+        self.tbl.setColumnWidth(8, 120)
+        self.tbl.setColumnWidth(9, 95)
+        self.tbl.setColumnWidth(10, 95)
+        self.tbl.setColumnWidth(11, 120)
 
         self.tbl.setStyleSheet(
             """
@@ -206,14 +199,19 @@ class TenantsPage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
-        # Иконки (используем стандартные значки Qt, чтобы не тянуть файлы)
         style = self.style()
-        self._ico_person = style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon)     # можно заменить
-        self._ico_legal = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)    # можно заменить
-        self._ico_one_time = style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop) # можно заменить
-        self._ico_long = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)   # можно заменить
+        self._ico_person = style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon)
+        self._ico_legal = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        self._ico_one_time = style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop)
+        self._ico_long = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
 
+        self._apply_ui_access()
         self.reload()
+
+    def _apply_ui_access(self) -> None:
+        self.btn_add.setEnabled(self._can_edit)
+        self.btn_edit.setEnabled(self._can_edit)
+        self.btn_archive.setEnabled(self._can_edit)
 
     def _selected_tenant(self) -> Tenant | None:
         row = self.tbl.currentRow()
@@ -236,6 +234,8 @@ class TenantsPage(QWidget):
     def reload(self):
         try:
             tenants = list_tenants(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
                 search=self.ed_search.text(),
                 include_inactive=self.cb_inactive.isChecked(),
             )
@@ -278,12 +278,8 @@ class TenantsPage(QWidget):
             self.tbl.setItem(r, 6, QTableWidgetItem(t.email or ""))
             self.tbl.setItem(r, 7, QTableWidgetItem(t.contact_name or ""))
             self.tbl.setItem(r, 8, QTableWidgetItem(t.contract_no or ""))
-            self.tbl.setItem(
-                r, 9, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else "")
-            )
-            self.tbl.setItem(
-                r, 10, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else "")
-            )
+            self.tbl.setItem(r, 9, QTableWidgetItem(f"{t.contract_valid_from:%d.%m.%Y}" if t.contract_valid_from else ""))
+            self.tbl.setItem(r, 10, QTableWidgetItem(f"{t.contract_valid_to:%d.%m.%Y}" if t.contract_valid_to else ""))
             self.tbl.setItem(r, 11, QTableWidgetItem(t.status or ""))
             self.tbl.setItem(r, 12, it_active)
             self.tbl.setItem(r, 13, QTableWidgetItem(t.comment or ""))
@@ -295,18 +291,22 @@ class TenantsPage(QWidget):
                         it.setForeground(Qt.GlobalColor.darkGray)
 
         self.tbl.setSortingEnabled(True)
-
-        # На всякий случай: после перезагрузки еще раз удерживаем минимум ширины ФИО
         self.tbl.horizontalHeader().setStretchLastSection(True)
         if self.tbl.columnWidth(1) < self.NAME_MIN_WIDTH:
             self.tbl.setColumnWidth(1, self.NAME_MIN_WIDTH)
 
     def _apply_rules_and_maybe_generate(self, tenant_id: int, rules_payload: list[dict]) -> None:
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение правил/генерацию бронирований.")
+            return
+
         try:
             for r in rules_payload:
                 op = r.get("op", "keep")
                 if op == "new":
                     create_rule(
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
                         tenant_id=int(tenant_id),
                         venue_unit_id=int(r["venue_unit_id"]),
                         weekday=int(r["weekday"]),
@@ -317,7 +317,12 @@ class TenantsPage(QWidget):
                         title=r.get("title", "") or "",
                     )
                 elif op == "deactivate" and r.get("id"):
-                    set_rule_active(int(r["id"]), False)
+                    set_rule_active(
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
+                        rule_id=int(r["id"]),
+                        is_active=False,
+                    )
         except Exception as e:
             QMessageBox.critical(self, "Правила расписания", f"Ошибка сохранения правил:\n{e}")
             return
@@ -338,12 +343,17 @@ class TenantsPage(QWidget):
             return
 
         try:
-            rep = generate_bookings_for_tenant(tenant_id=int(tenant_id), tz=self.TZ)
+            rep = generate_bookings_for_tenant(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                tenant_id=int(tenant_id),
+                tz=self.TZ,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
             return
 
-        msg = f"Создано бронирований: {rep.created}\nПропущено (занято/ошибка): {rep.skipped}"
+        msg = f"Создано бронирований: {rep.created}\nПропущено: {rep.skipped}"
         if rep.errors:
             msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
             if len(rep.errors) > 8:
@@ -351,6 +361,10 @@ class TenantsPage(QWidget):
         QMessageBox.information(self, "Генерация бронирований", msg)
 
     def _on_add(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на создание контрагентов.")
+            return
+
         dlg = TenantDialog(self, title="Создать контрагента", is_admin=self._is_admin)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -359,7 +373,7 @@ class TenantsPage(QWidget):
         rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
 
         try:
-            new_id = create_tenant(**data)
+            new_id = create_tenant(user_id=self._user.id, role_code=self._user.role_code, **data)
         except Exception as e:
             QMessageBox.critical(self, "Создать контрагента", f"Ошибка:\n{e}")
             return
@@ -372,6 +386,10 @@ class TenantsPage(QWidget):
         self._select_row_by_id(new_id)
 
     def _on_edit(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование контрагентов.")
+            return
+
         t = self._selected_tenant()
         if not t:
             QMessageBox.information(self, "Редактировать", "Выберите контрагента в списке.")
@@ -411,7 +429,7 @@ class TenantsPage(QWidget):
         rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
 
         try:
-            update_tenant(t.id, **data)
+            update_tenant(user_id=self._user.id, role_code=self._user.role_code, tenant_id=t.id, **data)
         except Exception as e:
             QMessageBox.critical(self, "Редактировать контрагента", f"Ошибка:\n{e}")
             return
@@ -423,6 +441,10 @@ class TenantsPage(QWidget):
         self._select_row_by_id(t.id)
 
     def _on_toggle_active(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение статуса контрагентов.")
+            return
+
         t = self._selected_tenant()
         if not t:
             QMessageBox.information(self, "Архив", "Выберите контрагента в списке.")
@@ -441,7 +463,12 @@ class TenantsPage(QWidget):
             return
 
         try:
-            set_tenant_active(t.id, new_state)
+            set_tenant_active(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                tenant_id=t.id,
+                is_active=new_state,
+            )
         except Exception as e:
             QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
             return
