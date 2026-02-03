@@ -107,7 +107,7 @@ class TenantsPage(QWidget):
         self.tbl.verticalHeader().setVisible(False)
 
         # двойной клик: только если можно редактировать
-        self.tbl.doubleClicked.connect(self._on_edit)
+        self.tbl.doubleClicked.connect(lambda *_: self._on_edit())
 
         self.tbl.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
