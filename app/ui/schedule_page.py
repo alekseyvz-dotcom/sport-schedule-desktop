@@ -180,6 +180,8 @@ class SchedulePage(QWidget):
         self.user = user
         self.setStyleSheet(_PAGE_QSS)
 
+        self._gz_group_is_free: Dict[int, bool] = {}
+
         self._gz_groups: List[Dict] = []
 
         self._settings = QSettings("SportApp", "Schedule")
@@ -486,11 +488,22 @@ class SchedulePage(QWidget):
     def _base_color_for_booking(self, b) -> QColor:
         if getattr(b, "status", "") == "cancelled":
             return QColor("#d5dbe3")
+    
         kind = (getattr(b, "kind", None) or getattr(b, "activity", "") or "").upper()
+    
         if kind == "PD":
             return QColor("#9bd7ff")
+    
         if kind == "GZ":
-            return QColor("#ffcc80")
+            base = QColor("#ffcc80")
+    
+            gz_group_id = getattr(b, "gz_group_id", None)
+            if gz_group_id is not None and self._gz_group_is_free.get(int(gz_group_id), False):
+                # два тона светлее
+                return self._lighten(base, steps=2, amount=120)
+    
+            return base
+    
         return QColor("#e5e7eb")
 
     def _kind_title(self, kind: str) -> str:
@@ -606,6 +619,11 @@ class SchedulePage(QWidget):
             self._gz_groups = list_active_gz_groups_for_booking(org_id=org_id)
         except Exception:
             self._gz_groups = []
+        
+        # ожидаем, что list_active_gz_groups_for_booking вернёт ещё и is_free
+        self._gz_group_is_free = {
+            int(g["id"]): bool(g.get("is_free", False)) for g in (self._gz_groups or []) if g.get("id") is not None
+        }
     
         acc = get_org_access(int(self.user.id), str(self.user.role_code), org_id)
         can_edit = bool(acc.can_edit)
@@ -1385,4 +1403,15 @@ class SchedulePage(QWidget):
             allowed.add("GZ")
     
         return allowed or {"PD"}
+
+    def _lighten(self, color: QColor, steps: int = 2, amount: int = 120) -> QColor:
+        """
+        steps=2 -> два тона светлее.
+        amount: 0..200, 100 примерно без изменений, больше -> светлее.
+        """
+        c = QColor(color)
+        for _ in range(max(0, int(steps))):
+            c = c.lighter(int(amount))
+        return c
+
 
