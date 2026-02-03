@@ -83,7 +83,7 @@ class GzPage(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.doubleClicked.connect(self._on_edit)
+        self.tbl.doubleClicked.connect(lambda *_: self._on_edit())
 
         header = self.tbl.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
