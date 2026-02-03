@@ -1,3 +1,4 @@
+# app/services/gz_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,6 +6,7 @@ from datetime import date
 from typing import List, Optional, Dict, Any, Iterable
 
 from psycopg2.extras import RealDictCursor
+
 from app.db import get_conn, put_conn
 
 
@@ -27,6 +29,35 @@ class GzGroup:
     is_free: bool
     period_from: Optional[date]
     period_to: Optional[date]
+
+
+# ---------------- helpers (access) ----------------
+
+def list_accessible_org_ids(*, user_id: int) -> List[int]:
+    """
+    Org ids, которые доступны пользователю (can_view=true).
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT org_id
+                FROM public.app_user_org_permissions
+                WHERE user_id=%s AND can_view=true
+                ORDER BY org_id
+                """,
+                (int(user_id),),
+            )
+            return [int(r[0]) for r in cur.fetchall()]
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def _admin(role_code: str) -> bool:
+    return (role_code or "").lower() == "admin"
 
 
 # ---------------- coaches ----------------
@@ -152,9 +183,27 @@ def list_coaches(
     *,
     org_id: Optional[int] = None,
     org_ids: Optional[Iterable[int]] = None,
+    user_id: Optional[int] = None,
+    role_code: str = "",
 ) -> List[GzCoach]:
+    """
+    Фильтрация тренеров:
+      - admin: как раньше (все, +опционально org_id/org_ids)
+      - не admin:
+          * если user_id задан — ограничиваем доступными org'ами пользователя (can_view=true)
+          * дополнительно можно передать org_id/org_ids (пересекается с доступными)
+    """
     search = (search or "").strip()
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
+
+    # доступные org'и пользователя
+    accessible_orgs: Optional[List[int]] = None
+    if not _admin(role_code):
+        if user_id is None:
+            return []
+        accessible_orgs = list_accessible_org_ids(user_id=int(user_id))
+        if not accessible_orgs:
+            return []
 
     conn = None
     try:
@@ -170,7 +219,9 @@ def list_coaches(
                 params["q"] = f"%{search}%"
 
             joins = ""
-            if org_id is not None or org_ids_list is not None:
+            # фильтр по учреждениям всегда через co, если есть хоть какое-то ограничение
+            need_org_filter = (org_id is not None) or (org_ids_list is not None) or (accessible_orgs is not None)
+            if need_org_filter:
                 joins += " JOIN public.gz_coach_orgs co ON co.coach_id = c.id "
 
                 if org_id is not None:
@@ -182,6 +233,10 @@ def list_coaches(
                         return []
                     where.append("co.org_id = ANY(%(org_ids)s)")
                     params["org_ids"] = org_ids_list
+
+                if accessible_orgs is not None:
+                    where.append("co.org_id = ANY(%(acc_orgs)s)")
+                    params["acc_orgs"] = accessible_orgs
 
             sql = f"""
                 SELECT DISTINCT c.id, c.full_name, c.comment, c.is_active
@@ -216,9 +271,26 @@ def list_groups(
     *,
     org_id: Optional[int] = None,
     org_ids: Optional[Iterable[int]] = None,
+    user_id: Optional[int] = None,
+    role_code: str = "",
 ) -> List[GzGroup]:
+    """
+    Фильтрация групп:
+      - admin: как раньше (все, +опционально org_id/org_ids)
+      - не admin:
+          * если user_id задан — ограничиваем доступными org'ами пользователя (can_view=true)
+          * дополнительно можно передать org_id/org_ids (пересекается с доступными)
+    """
     search = (search or "").strip()
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
+
+    accessible_orgs: Optional[List[int]] = None
+    if not _admin(role_code):
+        if user_id is None:
+            return []
+        accessible_orgs = list_accessible_org_ids(user_id=int(user_id))
+        if not accessible_orgs:
+            return []
 
     conn = None
     try:
@@ -231,25 +303,33 @@ def list_groups(
                 where.append("g.is_active = true")
                 where.append("c.is_active = true")
 
-            # фильтр по объектам через привязку тренера
-            if org_id is not None or org_ids_list is not None:
-                where.append("EXISTS (SELECT 1 FROM public.gz_coach_orgs co WHERE co.coach_id = c.id"
-                             + (" AND co.org_id = %(org_id)s" if org_id is not None else "")
-                             + (" AND co.org_id = ANY(%(org_ids)s)" if org_ids_list is not None else "")
-                             + ")")
+            # фильтр по учреждениям через привязку тренера
+            # делаем JOIN, чтобы не городить EXISTS со смешанными условиями
+            joins = ""
+            need_org_filter = (org_id is not None) or (org_ids_list is not None) or (accessible_orgs is not None)
+            if need_org_filter:
+                joins += " JOIN public.gz_coach_orgs co ON co.coach_id = c.id "
+
                 if org_id is not None:
+                    where.append("co.org_id = %(org_id)s")
                     params["org_id"] = int(org_id)
+
                 if org_ids_list is not None:
                     if not org_ids_list:
                         return []
+                    where.append("co.org_id = ANY(%(org_ids)s)")
                     params["org_ids"] = org_ids_list
+
+                if accessible_orgs is not None:
+                    where.append("co.org_id = ANY(%(acc_orgs)s)")
+                    params["acc_orgs"] = accessible_orgs
 
             if search:
                 where.append("(c.full_name ILIKE %(q)s OR g.group_year ILIKE %(q)s)")
                 params["q"] = f"%{search}%"
 
-            sql = """
-                SELECT
+            sql = f"""
+                SELECT DISTINCT
                     g.id,
                     g.coach_id,
                     c.full_name AS coach_name,
@@ -261,6 +341,7 @@ def list_groups(
                     g.period_to
                 FROM public.gz_groups g
                 JOIN public.gz_coaches c ON c.id = g.coach_id
+                {joins}
             """
             if where:
                 sql += " WHERE " + " AND ".join(where)
@@ -332,6 +413,7 @@ def create_group(
         if conn:
             put_conn(conn)
 
+
 def update_group(
     group_id: int,
     coach_id: int,
@@ -379,6 +461,7 @@ def update_group(
     finally:
         if conn:
             put_conn(conn)
+
 
 def set_group_active(group_id: int, is_active: bool) -> None:
     conn = None
@@ -440,15 +523,12 @@ def list_active_gz_groups_for_booking(*, org_id: Optional[int] = None) -> List[D
         if conn:
             put_conn(conn)
 
+
 def list_coach_orgs_map(
     *,
     include_inactive_orgs: bool = False,
     org_ids: Optional[Iterable[int]] = None,
 ) -> Dict[int, List[str]]:
-    """
-    Возвращает {coach_id: [org_name, ...]} (отсортировано по названию).
-    Можно ограничить org_ids (например, доступными пользователю).
-    """
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
 
     conn = None
@@ -493,10 +573,6 @@ def list_coach_orgs_map_full(
     include_inactive_orgs: bool = False,
     org_ids: Optional[Iterable[int]] = None,
 ) -> Dict[int, List[Dict[str, Any]]]:
-    """
-    Возвращает {coach_id: [{"id": org_id, "name": org_name}, ...]}
-    (полезно, если дальше захотите фильтровать/показывать точнее).
-    """
     org_ids_list = [int(x) for x in org_ids] if org_ids is not None else None
 
     conn = None
