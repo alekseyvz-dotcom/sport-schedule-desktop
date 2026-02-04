@@ -5,10 +5,9 @@ from datetime import date, time, datetime, timedelta, timezone
 from typing import List, Tuple
 
 from psycopg2.extras import RealDictCursor
-from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
-from app.services.bookings_service import create_booking, create_pd_booking
+from app.services.bookings_service import create_pd_booking
 
 
 TENANT_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте
@@ -73,34 +72,7 @@ def list_rules_for_tenant(
             """
             params = {"tenant_id": int(tenant_id)}
             if not include_inactive:
-                sql += " AND is_active = true"
-            sql += " ORDER BY is_active DESC, valid_from, weekday, starts_at"
-
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-            return [
-                TenantRule(
-                    id=int(r["id"]),
-                    tenant_id=int(r["tenant_id"]),
-                    venue_unit_id=int(r["venue_unit_id"]),
-                    weekday=int(r["weekday"]),
-                    starts_at=r["starts_at"],
-                    ends_at=r["ends_at"],
-                    valid_from=r["valid_from"],
-                    valid_to=r["valid_to"],
-                    title=str(r["title"] or ""),
-                    is_active=bool(r["is_active"]),
-                )
-                for r in rows
-            ]
-    finally:
-        if conn:
-            put_conn(conn)
-
-
-def create_rule(
-    *,
-    user_id: int,
+                sql int,
     role_code: str,
     tenant_id: int,
     venue_unit_id: int,
@@ -193,7 +165,7 @@ def delete_rule(*, user_id: int, role_code: str, rule_id: int) -> None:
 
 
 def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
-    target = int(weekday) - 1  # Python: Mon=0..Sun=6
+    target = int(weekday) - 1  # Mon=0..Sun=6
     d = valid_from
     while d <= valid_to:
         if d.weekday() == target:
@@ -250,6 +222,7 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
     for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
         starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
         ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
+
         try:
             create_pd_booking(
                 venue_id=int(venue_id),
@@ -262,33 +235,29 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
             created += 1
         except Exception as e:
             skipped += 1
-
             msg = str(e)
-            # только это считаем "нормальным" пропуском
+
+            # "занято" — ожидаемый пропуск
             if "Площадка занята" in msg:
                 continue
 
-            # всё остальное — это реальные ошибки, их надо видеть
+            # всё остальное — реальная ошибка
             errors.append(
                 f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
             )
-            pgcode = getattr(e, "pgcode", None)
-            msg = str(e)
-
-            # занято/пересечение — это нормальный skip, не ошибка
-            if pgcode == "P0001" and "Пересечение по времени" in msg:
-                continue
-
-            errors.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
 
     return GenerateReport(created=created, skipped=skipped, errors=errors)
 
 
 def generate_bookings_for_tenant(*, user_id: int, role_code: str, tenant_id: int, tz: timezone) -> GenerateReport:
-    # генерация создаёт брони => это операция изменения
     _require_rules_edit(user_id=user_id, role_code=role_code)
 
-    rules = list_rules_for_tenant(user_id=user_id, role_code=role_code, tenant_id=int(tenant_id), include_inactive=False)
+    rules = list_rules_for_tenant(
+        user_id=user_id,
+        role_code=role_code,
+        tenant_id=int(tenant_id),
+        include_inactive=False,
+    )
 
     total_created = 0
     total_skipped = 0
