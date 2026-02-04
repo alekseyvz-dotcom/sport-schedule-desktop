@@ -72,7 +72,34 @@ def list_rules_for_tenant(
             """
             params = {"tenant_id": int(tenant_id)}
             if not include_inactive:
-                sql int,
+                sql += " AND is_active = true"
+            sql += " ORDER BY is_active DESC, valid_from, weekday, starts_at"
+
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            return [
+                TenantRule(
+                    id=int(r["id"]),
+                    tenant_id=int(r["tenant_id"]),
+                    venue_unit_id=int(r["venue_unit_id"]),
+                    weekday=int(r["weekday"]),
+                    starts_at=r["starts_at"],
+                    ends_at=r["ends_at"],
+                    valid_from=r["valid_from"],
+                    valid_to=r["valid_to"],
+                    title=str(r["title"] or ""),
+                    is_active=bool(r["is_active"]),
+                )
+                for r in rows
+            ]
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def create_rule(
+    *,
+    user_id: int,
     role_code: str,
     tenant_id: int,
     venue_unit_id: int,
@@ -241,7 +268,6 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
             if "Площадка занята" in msg:
                 continue
 
-            # всё остальное — реальная ошибка
             errors.append(
                 f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
             )
