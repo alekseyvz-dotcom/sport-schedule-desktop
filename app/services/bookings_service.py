@@ -27,6 +27,12 @@ def _ensure_aware(dt: datetime) -> datetime:
     return dt
 
 
+def _log(msg: str) -> None:
+    path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().isoformat()} {msg}\n")
+
+
 @dataclass(frozen=True)
 class Booking:
     id: int
@@ -57,15 +63,17 @@ def _row_to_booking(r: dict) -> Booking:
         ends_at=r["ends_at"],
         status=str(r.get("status") or "planned"),
         tenant_name=str(r.get("tenant_name") or ""),
-        gz_group_name=str(r start: datetime,
+        gz_group_name=str(r.get("gz_group_name") or ""),
+        venue_unit_name=str(r.get("venue_unit_name") or ""),
+    )
+
+
+def list_bookings_for_range(
+    venue_ids: Iterable[int],
+    start: datetime,
     end: datetime,
     include_cancelled: bool = False,
 ) -> List[Booking]:
-    """
-    Возвращает бронирования, пересекающиеся с интервалом [start, end).
-    Условие пересечения:
-      b.starts_at < end AND b.ends_at > start
-    """
     venue_ids = [int(x) for x in venue_ids]
     if not venue_ids:
         return []
@@ -130,54 +138,7 @@ def list_bookings_for_day(
 
     day_start = datetime.combine(day, time(0, 0), tzinfo=APP_TZ)
     day_end = day_start + timedelta(days=1)
-
-    conn = None
-    try:
-        conn = get_conn()
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            sql = """
-                SELECT
-                    b.id,
-                    b.venue_id,
-                    b.venue_unit_id,
-                    b.tenant_id,
-                    b.gz_group_id,
-                    b.title,
-                    b.activity AS kind,
-                    b.starts_at,
-                    b.ends_at,
-                    b.status,
-                    COALESCE(t.name, '') AS tenant_name,
-                    COALESCE(gc.full_name || ' — ' || gg.group_year::text, '') AS gz_group_name,
-                    COALESCE(vu.name, '') AS venue_unit_name
-                FROM public.bookings b
-                LEFT JOIN public.tenants t ON t.id = b.tenant_id
-                LEFT JOIN public.gz_groups gg ON gg.id = b.gz_group_id
-                LEFT JOIN public.gz_coaches gc ON gc.id = gg.coach_id
-                LEFT JOIN public.venue_units vu ON vu.id = b.venue_unit_id
-                WHERE b.venue_id = ANY(%s)
-                  AND b.starts_at < %s
-                  AND b.ends_at   > %s
-            """
-            params = [venue_ids, day_end, day_start]
-
-            if not include_cancelled:
-                sql += " AND b.status <> 'cancelled'"
-
-            sql += " ORDER BY b.starts_at"
-
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-            return [_row_to_booking(r) for r in rows]
-    finally:
-        if conn:
-            put_conn(conn)
-
-
-def _log(msg: str) -> None:
-    path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().isoformat()} {msg}\n")
+    return list_bookings_for_range(venue_ids, day_start, day_end, include_cancelled=include_cancelled)
 
 
 def create_booking(
@@ -191,33 +152,35 @@ def create_booking(
     ends_at: datetime,
     venue_unit_id: int | None = None,
 ) -> int:
-    # title НЕ обязателен: в БД title NOT NULL, поэтому храним пустую строку вместо NULL
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
     starts_at = _ensure_aware(starts_at)
     ends_at = _ensure_aware(ends_at)
 
-    _log(
-        "create_booking called: "
-        f"venue_id={venue_id}, venue_unit_id={venue_unit_id}, tenant_id={tenant_id}, gz_group_id={gz_group_id}, kind={kind}, "
-        f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}"
-    )
-
     if kind not in ("PD", "GZ"):
         raise ValueError("Тип занятости должен быть PD или GZ")
+
     if kind == "PD":
         if tenant_id is None:
             raise ValueError("Для ПД нужно выбрать контрагента")
         if gz_group_id is not None:
             raise ValueError("Для ПД gz_group_id должен быть пустым")
+
     if kind == "GZ":
         if gz_group_id is None:
             raise ValueError("Для ГЗ нужно выбрать группу")
         if tenant_id is not None:
             raise ValueError("Для ГЗ tenant_id должен быть пустым")
+
     if ends_at <= starts_at:
         raise ValueError("Окончание должно быть позже начала")
+
+    _log(
+        "create_booking called: "
+        f"venue_id={venue_id}, venue_unit_id={venue_unit_id}, tenant_id={tenant_id}, gz_group_id={gz_group_id}, kind={kind}, "
+        f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}"
+    )
 
     conn = None
     try:
@@ -256,7 +219,6 @@ def create_booking(
             new_id = int(cur.fetchone()[0])
 
         conn.commit()
-        _log(f"commit ok, new_id={new_id}")
         return new_id
 
     except Exception as e:
@@ -266,12 +228,11 @@ def create_booking(
         pgcode = getattr(e, "pgcode", None)
         _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
 
-        # В твоей схеме конфликт пересечений идёт через RAISE EXCEPTION в триггере,
-        # это обычно psycopg2.errors.RaiseException с pgcode=P0001.
+        # триггер trg_bookings_no_overlap() делает RAISE EXCEPTION => pgcode=P0001
         if pgcode == "P0001" and "Пересечение по времени" in str(e):
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
-        # на всякий случай, если когда-то заменишь на exclusion constraint
+        # если когда-то будет exclusion constraint
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
@@ -341,6 +302,7 @@ def update_booking(
             raise ValueError("Для ПД нужно выбрать контрагента")
         if gz_group_id is not None:
             raise ValueError("Для ПД gz_group_id должен быть пустым")
+
     if kind == "GZ":
         if gz_group_id is None:
             raise ValueError("Для ГЗ нужно выбрать группу")
@@ -370,7 +332,59 @@ def update_booking(
                     int(booking_id),
                 ),
             )
-               conn = None
+            if cur.rowcount != 1:
+                raise ValueError("Бронирование не найдено")
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        pgcode = getattr(e, "pgcode", None)
+        if pgcode == "P0001" and "Пересечение по времени" in str(e):
+            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+        if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
+            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def cancel_booking(booking_id: int) -> None:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.bookings SET status='cancelled' WHERE id=%s",
+                (int(booking_id),),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("Бронирование не найдено")
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def cancel_future_bookings_like_rule(
+    *,
+    tenant_id: int,
+    venue_unit_id: int,
+    weekday: int,  # 1..7 (Mon..Sun)
+    starts_at: time,
+    ends_at: time,
+    from_day: date,
+    activity: str = "PD",
+) -> int:
+    activity = (activity or "PD").strip().upper()
+    if activity not in ("PD", "GZ"):
+        raise ValueError("activity должен быть PD или GZ")
+
+    conn = None
     try:
         conn = get_conn()
         with conn.cursor() as cur:
