@@ -1,4 +1,3 @@
-# app/services/gz_rules_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,11 +8,11 @@ from psycopg2.extras import RealDictCursor
 from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
-from app.services.bookings_service import create_booking, create_gz_booking
+from app.services.bookings_service import create_gz_booking
 from app.services.gz_service import list_accessible_org_ids
 
 
-GZ_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте: {"admin", "manager"}
+GZ_RULES_EDIT_ROLES = {"admin"}  # оставил как было; доступ у тебя завязан на org can_edit
 
 
 def _norm_role(role_code: str) -> str:
@@ -38,7 +37,7 @@ class GzRule:
     id: int
     gz_group_id: int
     venue_unit_id: int
-    weekday: int  # 1..7 (Mon..Sun)
+    weekday: int
     starts_at: time
     ends_at: time
     valid_from: date
@@ -217,7 +216,7 @@ def get_venue_id_by_unit(venue_unit_id: int) -> int:
 
 
 def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
-    target = int(weekday) - 1  # Mon=0
+    target = int(weekday) - 1
     d = valid_from
     while d <= valid_to:
         if d.weekday() == target:
@@ -268,6 +267,7 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
     for d in _iter_rule_dates(rule.valid_from, rule.valid_to, rule.weekday):
         starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
         ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
+
         try:
             create_gz_booking(
                 venue_id=int(venue_id),
@@ -280,21 +280,20 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
             created += 1
         except Exception as e:
             skipped += 1
-
-            pgcode = getattr(e, "pgcode", None)
             msg = str(e)
 
-            # занято/пересечение — нормальный skip, не "ошибка"
-            if pgcode == "P0001" and "Пересечение по времени" in msg:
+            # "занято" — ожидаемый пропуск
+            if "Площадка занята" in msg:
                 continue
 
-            errors_list.append(f"{d} {rule.starts_at}-{rule.ends_at}: {e}")
+            errors_list.append(
+                f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
+            )
 
     return GenerateReport(created=created, skipped=skipped, errors=errors_list)
 
 
 def generate_bookings_for_group(*, user_id: int, role_code: str, gz_group_id: int, tz: timezone) -> GenerateReport:
-    # генерация создаёт брони => это операция изменения
     _require_rules_edit(user_id=user_id, role_code=role_code)
 
     rules = list_rules_for_group(
@@ -303,6 +302,7 @@ def generate_bookings_for_group(*, user_id: int, role_code: str, gz_group_id: in
         gz_group_id=int(gz_group_id),
         include_inactive=False,
     )
+
     total_created = 0
     total_skipped = 0
     errors_list: List[str] = []
