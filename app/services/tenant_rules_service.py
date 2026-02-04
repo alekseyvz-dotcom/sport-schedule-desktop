@@ -7,7 +7,7 @@ from typing import List, Tuple
 from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
-from app.services.bookings_service import create_pd_booking
+from app.services.bookings_service import create_pd_booking, create_booking
 
 
 TENANT_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте
