@@ -1,7 +1,8 @@
+# app/services/bookings_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import List, Iterable, Optional
 
 import os
@@ -11,6 +12,19 @@ from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
 
 from app.db import get_conn, put_conn
+
+# В БД starts_at/ends_at = timestamptz, поэтому в Python работаем с aware datetime.
+APP_TZ = timezone(timedelta(hours=3))
+
+
+def _ensure_aware(dt: datetime) -> datetime:
+    """
+    Если dt naive (tzinfo=None) — считаем, что это локальное время приложения (APP_TZ),
+    и делаем aware. Если уже aware — оставляем как есть.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=APP_TZ)
+    return dt
 
 
 @dataclass(frozen=True)
@@ -29,6 +43,7 @@ class Booking:
     gz_group_name: str
     venue_unit_name: str
 
+
 def _row_to_booking(r: dict) -> Booking:
     return Booking(
         id=int(r["id"]),
@@ -42,13 +57,7 @@ def _row_to_booking(r: dict) -> Booking:
         ends_at=r["ends_at"],
         status=str(r.get("status") or "planned"),
         tenant_name=str(r.get("tenant_name") or ""),
-        gz_group_name=str(r.get("gz_group_name") or ""),
-        venue_unit_name=str(r.get("venue_unit_name") or ""),
-    )
-
-def list_bookings_for_range(
-    venue_ids: Iterable[int],
-    start: datetime,
+        gz_group_name=str(r start: datetime,
     end: datetime,
     include_cancelled: bool = False,
 ) -> List[Booking]:
@@ -60,6 +69,9 @@ def list_bookings_for_range(
     venue_ids = [int(x) for x in venue_ids]
     if not venue_ids:
         return []
+
+    start = _ensure_aware(start)
+    end = _ensure_aware(end)
 
     if end <= start:
         raise ValueError("end должен быть позже start")
@@ -101,7 +113,6 @@ def list_bookings_for_range(
 
             cur.execute(sql, params)
             rows = cur.fetchall()
-
             return [_row_to_booking(r) for r in rows]
     finally:
         if conn:
@@ -117,7 +128,7 @@ def list_bookings_for_day(
     if not venue_ids:
         return []
 
-    day_start = datetime.combine(day, time(0, 0))
+    day_start = datetime.combine(day, time(0, 0), tzinfo=APP_TZ)
     day_end = day_start + timedelta(days=1)
 
     conn = None
@@ -157,11 +168,11 @@ def list_bookings_for_day(
 
             cur.execute(sql, params)
             rows = cur.fetchall()
-
             return [_row_to_booking(r) for r in rows]
     finally:
         if conn:
             put_conn(conn)
+
 
 def _log(msg: str) -> None:
     path = os.path.join(tempfile.gettempdir(), "booking_debug.log")
@@ -184,9 +195,12 @@ def create_booking(
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
 
+    starts_at = _ensure_aware(starts_at)
+    ends_at = _ensure_aware(ends_at)
+
     _log(
         "create_booking called: "
-        f"venue_id={venue_id}, venue_unit_id={venue_unit_id}, tenant_id={tenant_id}, kind={kind}, "
+        f"venue_id={venue_id}, venue_unit_id={venue_unit_id}, tenant_id={tenant_id}, gz_group_id={gz_group_id}, kind={kind}, "
         f"starts_at={starts_at!r}, ends_at={ends_at!r}, title={title!r}"
     )
 
@@ -208,12 +222,6 @@ def create_booking(
     conn = None
     try:
         conn = get_conn()
-
-        with conn.cursor() as cur:
-            cur.execute("select current_database(), current_user, inet_server_addr(), inet_server_port(), now();")
-            _log("db session: " + str(cur.fetchone()))
-            cur.execute("show transaction_read_only;")
-            _log("transaction_read_only: " + str(cur.fetchone()))
 
         # (не обязательно, но полезно) валидация: unit должен принадлежать venue
         if venue_unit_id is not None:
@@ -239,7 +247,7 @@ def create_booking(
                     int(venue_unit_id) if venue_unit_id is not None else None,
                     int(tenant_id) if tenant_id is not None else None,
                     int(gz_group_id) if gz_group_id is not None else None,
-                    title,  # может быть ''
+                    title,
                     kind,
                     starts_at,
                     ends_at,
@@ -258,6 +266,12 @@ def create_booking(
         pgcode = getattr(e, "pgcode", None)
         _log(f"ERROR: {type(e).__name__}: {e!r}, pgcode={pgcode}")
 
+        # В твоей схеме конфликт пересечений идёт через RAISE EXCEPTION в триггере,
+        # это обычно psycopg2.errors.RaiseException с pgcode=P0001.
+        if pgcode == "P0001" and "Пересечение по времени" in str(e):
+            raise RuntimeError("Площадка занята в выбранный интервал.") from e
+
+        # на всякий случай, если когда-то заменишь на exclusion constraint
         if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
             raise RuntimeError("Площадка занята в выбранный интервал.") from e
 
@@ -305,6 +319,7 @@ def get_booking(booking_id: int) -> Booking:
     finally:
         if conn:
             put_conn(conn)
+
 
 def update_booking(
     booking_id: int,
@@ -355,68 +370,7 @@ def update_booking(
                     int(booking_id),
                 ),
             )
-            if cur.rowcount != 1:
-                raise ValueError("Бронирование не найдено")
-        conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        pgcode = getattr(e, "pgcode", None)
-        if isinstance(e, errors.ExclusionViolation) or pgcode == "23P01":
-            raise RuntimeError("Площадка занята в выбранный интервал.") from e
-        raise
-    finally:
-        if conn:
-            put_conn(conn)
-
-def cancel_booking(booking_id: int) -> None:
-    conn = None
-    try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE public.bookings SET status='cancelled' WHERE id=%s",
-                (int(booking_id),),
-            )
-            if cur.rowcount != 1:
-                raise ValueError("Бронирование не найдено")
-        conn.commit()
-    except Exception:
-        if conn:
-            conn.rollback()
-        raise
-    finally:
-        if conn:
-            put_conn(conn)
-            
-def cancel_future_bookings_like_rule(
-    *,
-    tenant_id: int,
-    venue_unit_id: int,
-    weekday: int,          # 1..7 (Mon..Sun)
-    starts_at: time,
-    ends_at: time,
-    from_day: date,
-    activity: str = "PD",
-) -> int:
-    """
-    Эвристически отменяет будущие бронирования, которые выглядят как созданные по правилу.
-
-    Матчинг:
-      - tenant_id совпадает
-      - venue_unit_id совпадает
-      - activity совпадает (PD по умолчанию)
-      - status <> 'cancelled'
-      - starts_at::date >= from_day
-      - isodow(starts_at) == weekday
-      - starts_at::time == starts_at и ends_at::time == ends_at (точное совпадение времени)
-    Возвращает количество отменённых строк.
-    """
-    activity = (activity or "PD").strip().upper()
-    if activity not in ("PD", "GZ"):
-        raise ValueError("activity должен быть PD или GZ")
-
-    conn = None
+               conn = None
     try:
         conn = get_conn()
         with conn.cursor() as cur:
@@ -454,10 +408,11 @@ def cancel_future_bookings_like_rule(
         if conn:
             put_conn(conn)
 
+
 def cancel_future_gz_bookings_like_rule(
     *,
     venue_unit_id: int,
-    weekday: int,          # 1..7 (Mon..Sun)
+    weekday: int,  # 1..7 (Mon..Sun)
     starts_at: time,
     ends_at: time,
     from_day: date,
@@ -512,6 +467,7 @@ def cancel_future_gz_bookings_like_rule(
         if conn:
             put_conn(conn)
 
+
 def create_pd_booking(
     *,
     venue_id: int,
@@ -552,4 +508,3 @@ def create_gz_booking(
         starts_at=starts_at,
         ends_at=ends_at,
     )
-
