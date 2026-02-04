@@ -511,3 +511,45 @@ def cancel_future_gz_bookings_like_rule(
     finally:
         if conn:
             put_conn(conn)
+
+def create_pd_booking(
+    *,
+    venue_id: int,
+    venue_unit_id: int | None = None,
+    tenant_id: int,
+    title: str,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> int:
+    return create_booking(
+        venue_id=int(venue_id),
+        venue_unit_id=int(venue_unit_id) if venue_unit_id is not None else None,
+        tenant_id=int(tenant_id),
+        gz_group_id=None,
+        title=title,
+        kind="PD",
+        starts_at=starts_at,
+        ends_at=ends_at,
+    )
+
+
+def create_gz_booking(
+    *,
+    venue_id: int,
+    venue_unit_id: int | None = None,
+    gz_group_id: int,
+    title: str,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> int:
+    return create_booking(
+        venue_id=int(venue_id),
+        venue_unit_id=int(venue_unit_id) if venue_unit_id is not None else None,
+        tenant_id=None,
+        gz_group_id=int(gz_group_id),
+        title=title,
+        kind="GZ",
+        starts_at=starts_at,
+        ends_at=ends_at,
+    )
+
