@@ -262,6 +262,16 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
             created += 1
         except Exception as e:
             skipped += 1
+
+            msg = str(e)
+            # только это считаем "нормальным" пропуском
+            if "Площадка занята" in msg:
+                continue
+
+            # всё остальное — это реальные ошибки, их надо видеть
+            errors.append(
+                f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
+            )
             pgcode = getattr(e, "pgcode", None)
             msg = str(e)
 
