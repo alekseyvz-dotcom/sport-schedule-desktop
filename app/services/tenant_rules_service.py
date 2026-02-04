@@ -8,7 +8,7 @@ from psycopg2.extras import RealDictCursor
 from psycopg2 import errors as pg_errors
 
 from app.db import get_conn, put_conn
-from app.services.bookings_service import create_booking
+from app.services.bookings_service import create_booking, create_pd_booking
 
 
 TENANT_RULES_EDIT_ROLES = {"admin"}  # при необходимости расширьте
@@ -251,12 +251,11 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
         starts_dt = datetime.combine(d, rule.starts_at, tzinfo=tz)
         ends_dt = datetime.combine(d, rule.ends_at, tzinfo=tz)
         try:
-            create_booking(
+            create_pd_booking(
                 venue_id=int(venue_id),
                 venue_unit_id=int(rule.venue_unit_id),
                 tenant_id=int(rule.tenant_id),
                 title=(rule.title or "").strip() or fallback_title,
-                kind="PD",
                 starts_at=starts_dt,
                 ends_at=ends_dt,
             )
