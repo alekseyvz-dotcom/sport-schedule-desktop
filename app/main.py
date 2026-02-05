@@ -1,6 +1,5 @@
 import sys
 
-# FORCE включить модуль в сборку PyInstaller
 import app.services.tenants_service  # noqa: F401
 import app.services.orgs_service     # noqa: F401
 
@@ -8,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.db import init_pool
 from app.ui.main_window import MainWindow
+from app.ui.theme import DARK_APP_QSS
 
 
 CALENDAR_QSS = """
@@ -56,10 +56,9 @@ QCalendarWidget QAbstractItemView {
 def main():
     app = QApplication(sys.argv)
 
-    # добавляем стиль календаря поверх любых уже заданных стилей
-    app.setStyleSheet((app.styleSheet() or "") + "\n" + CALENDAR_QSS)
+    # ОДИН раз задаём весь стиль приложению
+    app.setStyleSheet(DARK_APP_QSS + "\n" + CALENDAR_QSS)
 
-    # пул соединений (dsn берётся из settings.dat)
     init_pool(minconn=1, maxconn=5)
 
     mw = MainWindow()
