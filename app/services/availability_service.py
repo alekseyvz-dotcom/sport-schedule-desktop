@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 
 from psycopg2.extras import RealDictCursor
 
@@ -14,19 +14,16 @@ from app.db import get_conn, put_conn
 class SlotConflict:
     day: date
     booking_id: int
-    starts_at: str  # текстом, чтобы не спорить о tz в UI
-    ends_at: str
+    who: str          # "PD: ..." / "GZ: ..."
     title: str
-    kind: str               # PD/GZ
-    tenant_name: str
-    gz_group_name: str
+    starts_at: str    # 'HH:MM' local
+    ends_at: str      # 'HH:MM' local
 
 
 @dataclass(frozen=True)
 class UnitAvailability:
     venue_unit_id: int
-    venue_unit_name: str
-    venue_unit_code: str
+    unit_label: str   # code/name
     conflict_count: int
     conflict_days_sample: List[date]
     conflicts_sample: List[SlotConflict]
@@ -43,7 +40,7 @@ def get_units_availability_for_rule(
     valid_to: date,
     tz_name: str = "Europe/Moscow",
     sample_days_limit: int = 10,
-    sample_conflicts_limit: int = 20,
+    sample_conflicts_limit: int = 40,
 ) -> List[UnitAvailability]:
     if ends_at <= starts_at:
         raise ValueError("ends_at должен быть позже starts_at")
@@ -51,16 +48,15 @@ def get_units_availability_for_rule(
         raise ValueError("valid_to не может быть раньше valid_from")
     if not (1 <= int(weekday) <= 7):
         raise ValueError("weekday должен быть 1..7")
-    venue_unit_ids = [int(x) for x in venue_unit_ids if x is not None]
 
-    if not venue_unit_ids:
+    unit_ids = [int(x) for x in venue_unit_ids if x is not None]
+    if not unit_ids:
         return []
 
     conn = None
     try:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # 1) конфликты по датам и кем занято (семпл)
             sql = """
 WITH days AS (
   SELECT d::date AS day
@@ -112,8 +108,7 @@ sample AS (
 )
 SELECT
   vu.id AS venue_unit_id,
-  COALESCE(vu.name, '') AS venue_unit_name,
-  COALESCE(vu.code, '') AS venue_unit_code,
+  COALESCE(NULLIF(vu.code, ''), vu.name, ('unit#' || vu.id::text)) AS unit_label,
   COALESCE(a.conflict_count, 0) AS conflict_count,
   COALESCE(a.conflict_days_sample, ARRAY[]::date[]) AS conflict_days_sample,
   COALESCE(
@@ -143,7 +138,7 @@ ORDER BY vu.sort_order, vu.code, vu.name;
                 sql,
                 {
                     "venue_id": int(venue_id),
-                    "unit_ids": venue_unit_ids,
+                    "unit_ids": unit_ids,
                     "weekday": int(weekday),
                     "start": starts_at,
                     "end": ends_at,
@@ -159,29 +154,34 @@ ORDER BY vu.sort_order, vu.code, vu.name;
         out: List[UnitAvailability] = []
         for r in rows:
             conflicts_json: List[Dict[str, Any]] = r["conflicts_sample"] or []
-            conflicts = [
-                SlotConflict(
-                    day=x["day"],
-                    booking_id=int(x["booking_id"]),
-                    starts_at=str(x["starts_at"]),
-                    ends_at=str(x["ends_at"]),
-                    title=str(x.get("title") or ""),
-                    kind=str(x.get("kind") or ""),
-                    tenant_name=str(x.get("tenant_name") or ""),
-                    gz_group_name=str(x.get("gz_group_name") or ""),
+            conflicts: List[SlotConflict] = []
+            for x in conflicts_json:
+                kind = str(x.get("kind") or "")
+                tenant_name = str(x.get("tenant_name") or "").strip()
+                gz_group_name = str(x.get("gz_group_name") or "").strip()
+                who = f"PD: {tenant_name}" if kind == "PD" else f"GZ: {gz_group_name}"
+
+                conflicts.append(
+                    SlotConflict(
+                        day=x["day"],
+                        booking_id=int(x["booking_id"]),
+                        who=who.strip(),
+                        title=str(x.get("title") or ""),
+                        starts_at=str(x.get("starts_at") or ""),
+                        ends_at=str(x.get("ends_at") or ""),
+                    )
                 )
-                for x in conflicts_json
-            ]
+
             out.append(
                 UnitAvailability(
                     venue_unit_id=int(r["venue_unit_id"]),
-                    venue_unit_name=str(r.get("venue_unit_name") or ""),
-                    venue_unit_code=str(r.get("venue_unit_code") or ""),
+                    unit_label=str(r.get("unit_label") or ""),
                     conflict_count=int(r.get("conflict_count") or 0),
                     conflict_days_sample=list(r.get("conflict_days_sample") or []),
                     conflicts_sample=conflicts,
                 )
             )
+
         return out
     finally:
         if conn:
