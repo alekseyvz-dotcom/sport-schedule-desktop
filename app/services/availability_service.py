@@ -23,10 +23,21 @@ class SlotConflict:
 @dataclass(frozen=True)
 class UnitAvailability:
     venue_unit_id: int
-    unit_label: str   # code/name
+    unit_label: str
     conflict_count: int
     conflict_days_sample: List[date]
     conflicts_sample: List[SlotConflict]
+
+
+def _to_date(x: Any) -> date:
+    """
+    psycopg2 может вернуть date как date или как str (например '2026-01-10').
+    Приводим к date.
+    """
+    if isinstance(x, date):
+        return x
+    s = str(x or "").strip()
+    return date.fromisoformat(s[:10])
 
 
 def get_units_availability_for_rule(
@@ -49,7 +60,7 @@ def get_units_availability_for_rule(
     if not (1 <= int(weekday) <= 7):
         raise ValueError("weekday должен быть 1..7")
 
-    unit_ids = [int(x) for x in venue_unit_ids if x is not None]
+    unit_ids = [int(x) for x in (venue_unit_ids or []) if x is not None]
     if not unit_ids:
         return []
 
@@ -153,8 +164,13 @@ ORDER BY vu.sort_order, vu.code, vu.name;
 
         out: List[UnitAvailability] = []
         for r in rows:
-            conflicts_json: List[Dict[str, Any]] = r["conflicts_sample"] or []
+            # days могут прийти как date[] или как list[str]
+            days_raw = list(r.get("conflict_days_sample") or [])
+            days = [_to_date(x) for x in days_raw]
+
+            conflicts_json: List[Dict[str, Any]] = r.get("conflicts_sample") or []
             conflicts: List[SlotConflict] = []
+
             for x in conflicts_json:
                 kind = str(x.get("kind") or "")
                 tenant_name = str(x.get("tenant_name") or "").strip()
@@ -163,7 +179,7 @@ ORDER BY vu.sort_order, vu.code, vu.name;
 
                 conflicts.append(
                     SlotConflict(
-                        day=x["day"],
+                        day=_to_date(x.get("day")),
                         booking_id=int(x["booking_id"]),
                         who=who.strip(),
                         title=str(x.get("title") or ""),
@@ -177,7 +193,7 @@ ORDER BY vu.sort_order, vu.code, vu.name;
                     venue_unit_id=int(r["venue_unit_id"]),
                     unit_label=str(r.get("unit_label") or ""),
                     conflict_count=int(r.get("conflict_count") or 0),
-                    conflict_days_sample=list(r.get("conflict_days_sample") or []),
+                    conflict_days_sample=days,
                     conflicts_sample=conflicts,
                 )
             )
