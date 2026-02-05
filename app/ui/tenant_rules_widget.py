@@ -64,6 +64,7 @@ class TenantRulesWidget(QWidget):
         self._user_id = int(user_id)
         self._role_code = str(role_code or "")
         self._tz_name = tz_name
+        self.btn_add.setObjectName("primary")
 
         # [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
         self._units: List[Dict] = []
