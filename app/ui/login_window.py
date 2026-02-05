@@ -3,7 +3,7 @@ import os
 import sys
 
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QPushButton,
     QLabel, QMessageBox, QHBoxLayout, QApplication
@@ -15,46 +15,36 @@ from app.services.users_service import authenticate, AuthUser
 _LOGIN_QSS = """
 QWidget#loginForm { background: transparent; }
 
-/* Лого */
 QLabel#logo { padding: 6px 0 0 0; }
 
-/* Статус/ошибка */
 QLabel#status {
-    color: #fb7185;               /* rose-400 */
+    color: #fb7185;
     padding: 2px 2px;
     font-size: 12px;
 }
 
-/* Подпись */
 QLabel#copyright {
     color: rgba(226, 232, 240, 0.45);
     padding: 8px 2px 2px 2px;
     font-size: 11px;
 }
 
-/* Поля ввода */
 QLineEdit {
     color: rgba(255, 255, 255, 0.92);
-    background: rgba(2, 6, 23, 0.35);        /* slate-950 с прозрачностью */
+    background: rgba(2, 6, 23, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 12px;
     padding: 10px 12px;
     min-height: 24px;
     selection-background-color: rgba(99, 102, 241, 0.55);
 }
+QLineEdit::placeholder { color: rgba(226, 232, 240, 0.45); }
 
-/* placeholder */
-QLineEdit::placeholder {
-    color: rgba(226, 232, 240, 0.45);
-}
-
-/* focus: “кольцо” + чуть светлее фон */
 QLineEdit:focus {
     background: rgba(2, 6, 23, 0.45);
     border: 1px solid rgba(99, 102, 241, 0.95);
 }
 
-/* Кнопки базовые */
 QPushButton {
     border-radius: 12px;
     padding: 10px 14px;
@@ -62,7 +52,6 @@ QPushButton {
     min-height: 38px;
 }
 
-/* Primary: градиент + лёгкая “глянцевость” */
 QPushButton#primary {
     color: rgba(255, 255, 255, 0.95);
     border: 1px solid rgba(99, 102, 241, 0.75);
@@ -85,7 +74,6 @@ QPushButton#primary:pressed {
     );
 }
 
-/* Ghost: прозрачная тёмная кнопка */
 QPushButton#ghost {
     color: rgba(226, 232, 240, 0.80);
     background: rgba(255, 255, 255, 0.06);
@@ -95,16 +83,7 @@ QPushButton#ghost:hover {
     background: rgba(255, 255, 255, 0.10);
     border: 1px solid rgba(255, 255, 255, 0.20);
 }
-QPushButton#ghost:pressed {
-    background: rgba(255, 255, 255, 0.07);
-}
-
-/* Disabled (на будущее, если добавишь валидацию) */
-QPushButton:disabled {
-    color: rgba(226, 232, 240, 0.35);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-}
+QPushButton#ghost:pressed { background: rgba(255, 255, 255, 0.07); }
 """
 
 
@@ -148,6 +127,24 @@ class LoginWindow(QWidget):
         self.ed_pass.setEchoMode(QLineEdit.Password)
         self.ed_pass.setClearButtonEnabled(True)
 
+        # --- “глаз” внутри поля пароля ---
+        # Вариант A: если есть иконки в assets/icons:
+        #   assets/icons/eye.png
+        #   assets/icons/eye-off.png
+        # Если нет — кнопка всё равно появится как текстовая (fallback).
+        self._eye_on_icon = QIcon(resource_path(os.path.join("assets", "icons", "eye.png")))
+        self._eye_off_icon = QIcon(resource_path(os.path.join("assets", "icons", "eye-off.png")))
+
+        self._act_toggle_pass = self.ed_pass.addAction(
+            self._eye_off_icon if not self._eye_off_icon.isNull() else QIcon(),
+            QLineEdit.TrailingPosition
+        )
+        if self._eye_off_icon.isNull():
+            self._act_toggle_pass.setText("Показать")
+
+        self._act_toggle_pass.triggered.connect(self._toggle_password_visibility)
+        self._pass_visible = False
+
         self.btn_login = QPushButton("Войти")
         self.btn_login.setObjectName("primary")
         self.btn_login.clicked.connect(self._on_login)
@@ -180,6 +177,22 @@ class LoginWindow(QWidget):
 
         self.ed_user.returnPressed.connect(self._on_login)
         self.ed_pass.returnPressed.connect(self._on_login)
+
+    def _toggle_password_visibility(self):
+        self._pass_visible = not self._pass_visible
+        self.ed_pass.setEchoMode(QLineEdit.Normal if self._pass_visible else QLineEdit.Password)
+
+        # Меняем иконку/текст
+        if self._pass_visible:
+            if not self._eye_on_icon.isNull():
+                self._act_toggle_pass.setIcon(self._eye_on_icon)
+            else:
+                self._act_toggle_pass.setText("Скрыть")
+        else:
+            if not self._eye_off_icon.isNull():
+                self._act_toggle_pass.setIcon(self._eye_off_icon)
+            else:
+                self._act_toggle_pass.setText("Показать")
 
     def _on_login(self):
         self.lbl_status.setText("")
