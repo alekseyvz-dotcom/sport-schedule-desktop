@@ -41,13 +41,6 @@ from app.ui.venue_dialog import VenueDialog
 
 
 class OrgsVenuesPage(QWidget):
-    """
-    Страница учреждений/площадок с учётом прав (can_view/can_edit на уровне org):
-      - list_orgs фильтруется по can_view (в orgs_service)
-      - редактирование/архивирование учреждения — только can_edit (проверка и в UI, и в сервисе)
-      - площадки: list/create/update/archive защищены в venues_service (требуют user_id/role_code)
-    """
-
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
@@ -77,7 +70,7 @@ class OrgsVenuesPage(QWidget):
             b.setMinimumHeight(34)
 
         org_top = QHBoxLayout()
-        org_top.setContentsMargins(12, 12, 12, 8)
+        org_top.setContentsMargins(0, 0, 0, 0)  # root уже даёт отступы
         org_top.setSpacing(10)
         org_top.addWidget(self.lbl_orgs)
         org_top.addWidget(self.ed_org_search, 1)
@@ -87,17 +80,26 @@ class OrgsVenuesPage(QWidget):
         org_top.addWidget(self.btn_org_archive)
 
         self.tbl_orgs = QTableWidget(0, 5)
+        self.tbl_orgs.setObjectName("orgsTable")
         self.tbl_orgs.setHorizontalHeaderLabels(["ID", "Название", "Адрес", "Режим", "Активен"])
         self._style_table(self.tbl_orgs)
 
         self.tbl_orgs.itemSelectionChanged.connect(self._on_org_selected)
         self.tbl_orgs.doubleClicked.connect(self._org_edit)
 
+        # card for orgs table
+        self.orgs_card = QWidget(self)
+        self.orgs_card.setObjectName("detailsCard")
+        orgs_card_lay = QVBoxLayout(self.orgs_card)
+        orgs_card_lay.setContentsMargins(10, 10, 10, 10)
+        orgs_card_lay.setSpacing(0)
+        orgs_card_lay.addWidget(self.tbl_orgs)
+
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
         left.addLayout(org_top)
-        left.addWidget(self.tbl_orgs, 1)
+        left.addWidget(self.orgs_card, 1)
 
         # ---------- Venues (right)
         self.lbl_venues = QLabel("Площадки: (выберите учреждение слева)")
@@ -118,7 +120,7 @@ class OrgsVenuesPage(QWidget):
             b.setMinimumHeight(34)
 
         venue_top = QHBoxLayout()
-        venue_top.setContentsMargins(12, 12, 12, 8)
+        venue_top.setContentsMargins(0, 0, 0, 0)  # root уже даёт отступы
         venue_top.setSpacing(10)
         venue_top.addWidget(self.lbl_venues, 1)
         venue_top.addWidget(self.cb_venue_inactive)
@@ -127,15 +129,24 @@ class OrgsVenuesPage(QWidget):
         venue_top.addWidget(self.btn_venue_archive)
 
         self.tbl_venues = QTableWidget(0, 6)
+        self.tbl_venues.setObjectName("venuesTable")
         self.tbl_venues.setHorizontalHeaderLabels(["ID", "Название", "Тип спорта", "Вместимость", "Активен", "Комментарий"])
         self._style_table(self.tbl_venues)
         self.tbl_venues.doubleClicked.connect(self._venue_edit)
+
+        # card for venues table
+        self.venues_card = QWidget(self)
+        self.venues_card.setObjectName("detailsCard")
+        venues_card_lay = QVBoxLayout(self.venues_card)
+        venues_card_lay.setContentsMargins(10, 10, 10, 10)
+        venues_card_lay.setSpacing(0)
+        venues_card_lay.addWidget(self.tbl_venues)
 
         right = QVBoxLayout()
         right.setContentsMargins(0, 0, 0, 0)
         right.setSpacing(10)
         right.addLayout(venue_top)
-        right.addWidget(self.tbl_venues, 1)
+        right.addWidget(self.venues_card, 1)
 
         # ---------- Root
         root = QHBoxLayout(self)
@@ -156,13 +167,11 @@ class OrgsVenuesPage(QWidget):
     def _apply_ui_access(self):
         org = self._selected_org()
 
-        # create org: только admin (как в сервисе create_org)
         self.btn_org_add.setEnabled(self._is_admin())
 
         if not org:
             self.btn_org_edit.setEnabled(False)
             self.btn_org_archive.setEnabled(False)
-
             self.btn_venue_add.setEnabled(False)
             self.btn_venue_edit.setEnabled(False)
             self.btn_venue_archive.setEnabled(False)
@@ -172,7 +181,6 @@ class OrgsVenuesPage(QWidget):
 
         self.btn_org_edit.setEnabled(acc.can_edit)
         self.btn_org_archive.setEnabled(acc.can_edit)
-
         self.btn_venue_add.setEnabled(acc.can_edit)
         self.btn_venue_edit.setEnabled(acc.can_edit)
         self.btn_venue_archive.setEnabled(acc.can_edit)
@@ -185,7 +193,7 @@ class OrgsVenuesPage(QWidget):
         tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        tbl.setAlternatingRowColors(True)
+        tbl.setAlternatingRowColors(False)
         tbl.setSortingEnabled(True)
         tbl.setShowGrid(False)
         tbl.verticalHeader().setVisible(False)
