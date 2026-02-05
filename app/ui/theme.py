@@ -7,22 +7,20 @@ QMainWindow {
     color: rgba(255, 255, 255, 0.88);
     font-size: 13px;
 }
-
-/* по умолчанию: не заливаем каждый QWidget (иначе “плашки” на логине) */
 QWidget {
     color: rgba(255, 255, 255, 0.88);
     font-size: 13px;
     background: transparent;
 }
 
-/* ---- Unified page background (для корневых виджетов вкладок) ---- */
+/* ---- Unified page background ---- */
 QWidget#page {
-    background: rgba(2, 6, 23, 0.55);
+    background: #0b1220; /* было rgba(2,6,23,0.55) -> давало "чёрные" страницы */
 }
 
 /* ---- Tooltip ---- */
 QToolTip {
-    background: rgba(2, 6, 23, 0.95);
+    background: rgba(11, 18, 32, 0.98);
     color: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.14);
     padding: 6px 8px;
@@ -41,7 +39,7 @@ QTabWidget::pane {
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 14px;
     top: -1px;
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(15, 23, 42, 0.35);
 }
 
 QTabBar::tab {
@@ -64,17 +62,16 @@ QTabBar::tab:hover {
 
 /* ---- Inputs ---- */
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox {
-    background: rgba(2, 6, 23, 0.40);
+    background: rgba(11, 18, 32, 0.65);
     color: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 12px;
     padding: 8px 10px;
     selection-background-color: rgba(99, 102, 241, 0.55);
 }
-QLineEdit::placeholder { color: rgba(226, 232, 240, 0.45); }
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid rgba(99, 102, 241, 0.95);
-    background: rgba(2, 6, 23, 0.52);
+    background: rgba(11, 18, 32, 0.78);
 }
 
 /* ---- Buttons ---- */
@@ -122,9 +119,9 @@ QCheckBox::indicator:checked {
     border-color: rgba(99, 102, 241, 0.95);
 }
 
-/* ---- Table ---- */
+/* ---- Tables ---- */
 QTableWidget, QTableView {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(15, 23, 42, 0.30);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 12px;
     gridline-color: transparent;
@@ -133,7 +130,7 @@ QTableWidget, QTableView {
     selection-color: rgba(255, 255, 255, 0.92);
 }
 QHeaderView::section {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(15, 23, 42, 0.55);
     color: rgba(226, 232, 240, 0.82);
     padding: 8px 10px;
     border: none;
@@ -170,10 +167,9 @@ QScrollBar::handle:horizontal {
 QScrollBar::handle:horizontal:hover { background: rgba(255, 255, 255, 0.22); }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 
-/* ---- Dialogs / MessageBox ---- */
-QDialog { background: #0b1220; }
+/* ---- Dialogs ---- */
+QDialog, QDialog#dialog { background: #0b1220; }
 QMessageBox { background: #0b1220; }
-QMessageBox QLabel { color: rgba(226, 232, 240, 0.82); }
 
 /* ---- GroupBox (cards) ---- */
 QGroupBox {
@@ -208,8 +204,9 @@ QComboBox::down-arrow {
     height: 12px;
     image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='rgb(226,232,240)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
+/* ---- Combo popup ---- */
 QComboBox QAbstractItemView {
-    background: rgba(2, 6, 23, 0.98);
+    background: rgba(11, 18, 32, 0.98);
     color: rgba(255, 255, 255, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 12px;
@@ -267,9 +264,9 @@ QToolButton#viewTab:checked {
     color: rgba(255, 255, 255, 0.92);
 }
 
-/* ---- Details card (SchedulePage list) ---- */
+/* ---- Details card ---- */
 QWidget#detailsCard {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(15, 23, 42, 0.45);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 12px;
 }
@@ -309,7 +306,7 @@ QLabel#hint { color: rgba(226, 232, 240, 0.60); font-size: 12px; }
 QProgressBar {
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
-    background: rgba(2, 6, 23, 0.35);
+    background: rgba(11, 18, 32, 0.65);
     text-align: center;
     padding: 2px;
     min-width: 120px;
@@ -353,4 +350,11 @@ QToolButton#zoneTile[selected="true"] { background: rgba(96,165,250,0.16); borde
 /* selected + ok/bad overrides */
 QToolButton#zoneTile[selected="true"][conflicts="0"] { background: rgba(34,197,94,0.18); border-color: rgba(34,197,94,0.90); }
 QToolButton#zoneTile[selected="true"][conflicts_bad="1"] { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.95); }
+
+QLabel#sectionTitle {
+    color: rgba(255,255,255,0.92);
+    font-weight: 900;
+    font-size: 16px;
+    padding-right: 8px;
+}
 """
