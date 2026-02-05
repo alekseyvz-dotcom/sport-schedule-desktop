@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QMessageBox,
     QAbstractItemView,
+    QHeaderView,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues
@@ -31,14 +32,6 @@ def _weekday_name(w: int) -> str:
 
 
 class GzRulesWidget(QWidget):
-    """
-    Виджет правил расписания для ГЗ (gz_group_rules).
-
-    Дополнительно:
-    - умеет принимать период группы (period_from/period_to) и подставлять его
-      при создании/редактировании правил через TenantRuleDialog.
-    """
-
     def __init__(
         self,
         parent=None,
@@ -51,6 +44,8 @@ class GzRulesWidget(QWidget):
         role_code: str,
     ):
         super().__init__(parent)
+        self.setObjectName("page")  # чтобы на случай отдельного показа был нормальный фон
+
         self._gz_group_id = gz_group_id
         self._is_admin = bool(is_admin)
 
@@ -64,12 +59,25 @@ class GzRulesWidget(QWidget):
         self._rules_local: List[Dict] = []
 
         self.tbl = QTableWidget(0, 6)
-        self.tbl.setHorizontalHeaderLabels(["День", "Время", "Зона", "Период", "Комментарий", "Active"])
+        self.tbl.setObjectName("gzRulesTable")
+        self.tbl.setHorizontalHeaderLabels(["День", "Время", "Зона", "Период", "Комментарий", "Активно"])
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.horizontalHeader().setStretchLastSection(True)
+        self.tbl.setShowGrid(False)
+        self.tbl.setAlternatingRowColors(False)
+
+        hdr = self.tbl.horizontalHeader()
+        hdr.setHighlightSections(False)
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        hdr.setStretchLastSection(True)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
 
         self.btn_add = QPushButton("Добавить правило")
         self.btn_edit = QPushButton("Изменить")
@@ -83,6 +91,8 @@ class GzRulesWidget(QWidget):
         self.btn_delete.clicked.connect(self._on_delete)
 
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(10)
         top.addWidget(self.btn_add)
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_disable)
@@ -90,9 +100,19 @@ class GzRulesWidget(QWidget):
             top.addWidget(self.btn_delete)
         top.addStretch(1)
 
+        # карточка под таблицу (единый фон как у виджетов)
+        table_card = QWidget(self)
+        table_card.setObjectName("detailsCard")
+        card_lay = QVBoxLayout(table_card)
+        card_lay.setContentsMargins(10, 10, 10, 10)
+        card_lay.setSpacing(0)
+        card_lay.addWidget(self.tbl)
+
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
         root.addLayout(top)
-        root.addWidget(self.tbl)
+        root.addWidget(table_card, 1)
 
         if self._gz_group_id:
             self._load_from_db()
@@ -100,7 +120,6 @@ class GzRulesWidget(QWidget):
             self._refresh()
 
     def set_group_period(self, period_from: Optional[date], period_to: Optional[date]) -> None:
-        """Можно вызывать из диалога группы, если пользователь меняет период."""
         self._group_period_from = period_from
         self._group_period_to = period_to
 
@@ -114,7 +133,7 @@ class GzRulesWidget(QWidget):
             venues = list_active_venues(int(org.id))
             for v in venues:
                 units = list_venue_units(int(v.id), include_inactive=False)
-    
+
                 if units:
                     for u in units:
                         out.append(
@@ -126,17 +145,14 @@ class GzRulesWidget(QWidget):
                             }
                         )
                 else:
-                    # ВАЖНО: площадка без зон — добавляем "виртуальную" зону.
-                    # Лучше всего завести РЕАЛЬНУЮ запись в venue_units в БД (см. пункт 2).
                     out.append(
                         {
-                            "id": -int(v.id),              # временный id (см. ниже)
+                            "id": -int(v.id),
                             "venue_id": int(v.id),
                             "sort_order": 0,
                             "label": f"{org.name} / {v.name} — (без зон)",
                         }
                     )
-    
         return out
 
     def _load_from_db(self):
@@ -171,9 +187,7 @@ class GzRulesWidget(QWidget):
         if row < 0:
             return None
         it = self.tbl.item(row, 0)
-        if not it:
-            return None
-        return int(it.data(Qt.ItemDataRole.UserRole))
+        return int(it.data(Qt.ItemDataRole.UserRole)) if it else None
 
     def _refresh(self):
         self.tbl.setRowCount(0)
@@ -196,6 +210,7 @@ class GzRulesWidget(QWidget):
 
             is_active = bool(r.get("is_active", True)) and r.get("op") != "deactivate"
             active = QTableWidgetItem("Да" if is_active else "Нет")
+            active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             self.tbl.setItem(idx, 0, day)
             self.tbl.setItem(idx, 1, tm)
@@ -205,7 +220,7 @@ class GzRulesWidget(QWidget):
             self.tbl.setItem(idx, 5, active)
 
             if r.get("op") == "deactivate" or not r.get("is_active", True):
-                for c in range(6):
+                for c in range(self.tbl.columnCount()):
                     item = self.tbl.item(idx, c)
                     if item:
                         item.setForeground(Qt.GlobalColor.gray)
