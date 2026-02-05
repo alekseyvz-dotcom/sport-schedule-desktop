@@ -31,65 +31,6 @@ from app.services.ref_service import list_active_orgs
 from app.services.tenant_usage_service import list_usage_by_tenants, TenantUsageRow
 
 
-_PAGE_QSS = """
-QWidget { background: #fbfbfc; }
-QComboBox, QDateEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 6px 10px;
-    min-height: 22px;
-}
-QComboBox:focus, QDateEdit:focus { border: 1px solid #7fb3ff; }
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-QCheckBox { padding: 0 6px; }
-QLabel#sectionTitle { color: #111111; font-weight: 700; padding: 0 4px; }
-
-QFrame#card {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 12px;
-}
-
-QLabel#cardTitle {
-    color:#0f172a;
-    font-weight:800;
-    padding: 10px 12px 0 12px;
-}
-QLabel#cardText {
-    color:#334155;
-    padding: 2px 12px;
-}
-
-QTableWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    selection-background-color: rgba(127,179,255,60);
-    selection-color: #111111;
-    gridline-color: #e9edf3;
-}
-QHeaderView::section {
-    background: #f6f7f9;
-    color: #111111;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #e6e6e6;
-    font-weight: 600;
-}
-QTableWidget::item { padding: 6px 10px; }
-"""
-
-
 @dataclass(frozen=True)
 class Period:
     start: date
@@ -129,6 +70,7 @@ class DonutChart(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
         self.setMinimumHeight(210)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
