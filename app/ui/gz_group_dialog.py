@@ -17,49 +17,11 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QCheckBox,
     QDateEdit,
+    QFrame,
 )
 
 from app.services.gz_service import GzCoach
 from app.ui.gz_rules_widget import GzRulesWidget
-
-
-_QSS = """
-QDialog { background: #fbfbfc; }
-QLineEdit, QComboBox, QTextEdit, QDateEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 6px 10px;
-}
-QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDateEdit:focus { border: 1px solid #7fb3ff; }
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-QLabel#title { font-weight: 700; color: #111111; }
-
-QGroupBox {
-    border: 1px solid #e6e6e6;
-    border-radius: 12px;
-    margin-top: 10px;
-    background: #ffffff;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
-    color: #111111;
-    font-weight: 700;
-}
-
-QScrollArea { border: none; background: transparent; }
-"""
 
 
 class GzGroupDialog(QDialog):
@@ -75,7 +37,7 @@ class GzGroupDialog(QDialog):
         role_code: str,
     ):
         super().__init__(parent)
-        self.setStyleSheet(_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(980, 620)
 
@@ -87,7 +49,7 @@ class GzGroupDialog(QDialog):
         self._group_id: Optional[int] = self._data_in.get("id")
 
         lbl = QLabel(title)
-        lbl.setObjectName("title")
+        lbl.setObjectName("title")  # можно потом добавить стиль в theme.py
 
         self.cmb_coach = QComboBox()
         for c in coaches:
@@ -140,6 +102,7 @@ class GzGroupDialog(QDialog):
         gb_rules = QGroupBox("Правила расписания (ГЗ)")
         rules_lay = QVBoxLayout(gb_rules)
         rules_lay.setContentsMargins(12, 16, 12, 12)
+        rules_lay.setSpacing(10)
 
         self.rules_widget = GzRulesWidget(
             self,
@@ -151,12 +114,13 @@ class GzGroupDialog(QDialog):
             role_code=self._role_code,
         )
 
-        # обновляем период в rules_widget при изменении дат в группе
         self.dt_from.dateChanged.connect(self._sync_rules_period)
         self.dt_to.dateChanged.connect(self._sync_rules_period)
 
         scroll = QScrollArea(gb_rules)
+        scroll.setObjectName("rulesScroll")
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(self.rules_widget)
         rules_lay.addWidget(scroll, 1)
 
@@ -167,19 +131,23 @@ class GzGroupDialog(QDialog):
 
         # --- layout
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(lbl)
 
         form = QGroupBox("Основное")
         form_lay = QVBoxLayout(form)
+        form_lay.setContentsMargins(12, 16, 12, 12)
+        form_lay.setSpacing(10)
 
         r1 = QHBoxLayout()
+        r1.setSpacing(10)
         r1.addWidget(QLabel("Тренер:"), 0)
         r1.addWidget(self.cmb_coach, 1)
         form_lay.addLayout(r1)
 
         r2 = QHBoxLayout()
+        r2.setSpacing(10)
         r2.addWidget(QLabel("Группа:"), 0)
         r2.addWidget(self.ed_year, 1)
         form_lay.addLayout(r2)
@@ -190,6 +158,7 @@ class GzGroupDialog(QDialog):
         form_lay.addLayout(r3)
 
         r4 = QHBoxLayout()
+        r4.setSpacing(10)
         r4.addWidget(QLabel("Период с:"), 0)
         r4.addWidget(self.dt_from, 0)
         r4.addSpacing(10)
@@ -211,7 +180,6 @@ class GzGroupDialog(QDialog):
         root.addLayout(footer)
 
     def _sync_rules_period(self, *_):
-        # чтобы "Добавить правило" сразу подставлял актуальный период
         if hasattr(self, "rules_widget") and self.rules_widget:
             self.rules_widget.set_group_period(
                 self.dt_from.date().toPython(),
