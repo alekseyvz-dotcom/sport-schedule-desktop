@@ -44,6 +44,7 @@ class GzPage(QWidget):
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
         self._user = user
         self._role = (getattr(user, "role_code", "") or "").lower()
         self._is_admin = self._role == "admin"
