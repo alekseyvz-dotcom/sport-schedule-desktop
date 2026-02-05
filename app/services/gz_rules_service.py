@@ -49,7 +49,8 @@ class GzRule:
 @dataclass
 class GenerateReport:
     created: int
-    skipped: int
+    skipped_busy: int      # занято/уже существует
+    skipped_error: int     # реальные ошибки
     errors: List[str]
 
 
@@ -258,7 +259,8 @@ def _default_booking_title(coach_name: str, group_year: str) -> str:
 
 def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone) -> GenerateReport:
     created = 0
-    skipped = 0
+    skipped_busy = 0
+    skipped_error = 0
     errors_list: List[str] = []
 
     coach_name, group_year = _get_group_display(rule.gz_group_id)
@@ -278,19 +280,27 @@ def generate_bookings_for_rule_soft(*, rule: GzRule, venue_id: int, tz: timezone
                 ends_at=ends_dt,
             )
             created += 1
+
         except Exception as e:
-            skipped += 1
             msg = str(e)
 
-            # "занято" — ожидаемый пропуск
+            # ожидаемый пропуск: занято
             if "Площадка занята" in msg:
+                skipped_busy += 1
                 continue
 
+            skipped_error += 1
             errors_list.append(
-                f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
+                f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: "
+                f"{type(e).__name__}: {e}"
             )
 
-    return GenerateReport(created=created, skipped=skipped, errors=errors_list)
+    return GenerateReport(
+        created=created,
+        skipped_busy=skipped_busy,
+        skipped_error=skipped_error,
+        errors=errors_list,
+    )
 
 
 def generate_bookings_for_group(*, user_id: int, role_code: str, gz_group_id: int, tz: timezone) -> GenerateReport:
@@ -304,14 +314,22 @@ def generate_bookings_for_group(*, user_id: int, role_code: str, gz_group_id: in
     )
 
     total_created = 0
-    total_skipped = 0
+    total_skipped_busy = 0
+    total_skipped_error = 0
     errors_list: List[str] = []
 
     for rule in rules:
         venue_id = get_venue_id_by_unit(rule.venue_unit_id)
         rep = generate_bookings_for_rule_soft(rule=rule, venue_id=venue_id, tz=tz)
         total_created += rep.created
-        total_skipped += rep.skipped
+        total_skipped_busy += rep.skipped_busy
+        total_skipped_error += rep.skipped_error
         errors_list.extend(rep.errors)
 
-    return GenerateReport(created=total_created, skipped=total_skipped, errors=errors_list)
+    return GenerateReport(
+        created=total_created,
+        skipped_busy=total_skipped_busy,
+        skipped_error=total_skipped_error,
+        errors=errors_list,
+    )
+
