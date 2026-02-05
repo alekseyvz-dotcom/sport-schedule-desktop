@@ -98,14 +98,21 @@ from app.ui.booking_dialog import BookingDialog
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
+    PD = QColor(96, 165, 250)        # blue-400
+    GZ = QColor(245, 158, 11)        # amber-500
+    CANC = QColor(148, 163, 184)     # slate-400
+
     @staticmethod
-    def _as_color(v) -> QColor | None:
-        if isinstance(v, QColor):
-            return v if v.isValid() else None
-        if isinstance(v, QBrush):
-            c = v.color()
-            return c if c.isValid() else None
-        return None
+    def _accent_for(booking) -> QColor:
+        if not booking:
+            return QColor(0, 0, 0, 0)
+        status = (getattr(booking, "status", "") or "").lower()
+        if status == "cancelled":
+            return QColor(BookingBlockDelegate.CANC)
+        kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
+        if kind == "GZ":
+            return QColor(BookingBlockDelegate.GZ)
+        return QColor(BookingBlockDelegate.PD)
 
     def paint(self, painter: QPainter, option, index):
         rect = option.rect
@@ -114,13 +121,12 @@ class BookingBlockDelegate(QStyledItemDelegate):
         has_booking = bool(booking)
 
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # EMPTY
+        # EMPTY: draw grid only (no default paint to avoid style overrides)
         if not has_booking:
-            super().paint(painter, option, index)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             grid_pen = QPen(QColor(255, 255, 255, 22))
+            grid_pen.setWidth(1)
             painter.setPen(grid_pen)
             painter.drawLine(rect.topLeft(), rect.bottomLeft())
             painter.drawLine(rect.topRight(), rect.bottomRight())
@@ -129,12 +135,13 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # BOOKING
-        bg_raw = index.data(Qt.ItemDataRole.BackgroundRole)
-        accent = self._as_color(bg_raw) or QColor(96, 165, 250)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
+        accent = self._accent_for(booking)
+
+        # brighter fill
         fill = QColor(accent)
-        fill.setAlpha(160)  # было 110 -> стало заметнее
+        fill.setAlpha(170)
 
         r = rect.adjusted(2, 1, -2, -1)
         radius = 10
@@ -157,38 +164,37 @@ class BookingBlockDelegate(QStyledItemDelegate):
         else:
             painter.drawRoundedRect(QRectF(r), radius, radius)
 
-        # left accent
+        # left accent bar
         painter.setBrush(accent)
         painter.drawRect(QRectF(r.left(), r.top(), 4, r.height()))
 
         # border
         border = QColor(accent)
-        border.setAlpha(210)
+        border.setAlpha(220)
         painter.setPen(QPen(border, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if part in ("top", "bottom", None):
             painter.drawRoundedRect(QRectF(r), radius, radius)
 
-        # badge (top only)
+        # badge + text only in top cell
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
 
             if status == "cancelled":
                 badge_text = "ОТМ"
-                badge_bg = QColor(148, 163, 184, 220)
+                badge_bg = QColor(self.CANC)
+                badge_bg.setAlpha(230)
             else:
                 badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
                 badge_bg = QColor(accent)
                 badge_bg.setAlpha(235)
 
-            badge_fg = QColor(255, 255, 255, 245)
-
+            # badge
             fm = painter.fontMetrics()
             pad_x, pad_y = 8, 3
             bw = fm.horizontalAdvance(badge_text) + pad_x * 2
             bh = max(18, fm.height() - 2 + pad_y * 2)
-
             bx = r.right() - bw - 8
             by = r.top() + 6
 
@@ -196,19 +202,18 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.setBrush(badge_bg)
             painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
 
-            painter.setPen(QPen(badge_fg))
+            painter.setPen(QPen(QColor(255, 255, 255, 245)))
             f = painter.font()
             f.setBold(True)
             painter.setFont(f)
             painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
 
-        # text (top only)
-        if part == "top" or part is None:
+            # text
             text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
             if text:
-                f = painter.font()
-                f.setBold(False)
-                painter.setFont(f)
+                f2 = painter.font()
+                f2.setBold(False)
+                painter.setFont(f2)
                 painter.setPen(QPen(QColor(255, 255, 255, 238)))
                 text_rect = QRectF(r.left() + 10, r.top() + 8, r.width() - 10 - 70, r.height() - 12)
                 painter.drawText(
