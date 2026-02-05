@@ -119,15 +119,15 @@ class BookingBlockDelegate(QStyledItemDelegate):
         booking = index.data(Qt.ItemDataRole.UserRole)
         part = index.data(self.ROLE_PART)
         has_booking = bool(booking)
-
+    
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # ВСЕГДА рисуем базовый фон ячейки
-        base_bg = QColor(15, 23, 42, 30)  # прозрачный темный
+    
+        # Базовый фон ячейки (прозрачный тёмный)
+        base_bg = QColor(15, 23, 42, 30)
         painter.fillRect(rect, base_bg)
-
-        # Если нет брони — рисуем только сетку
+    
+        # Если нет брони — только сетка
         if not has_booking:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             grid_pen = QPen(QColor(255, 255, 255, 22))
@@ -139,53 +139,53 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
             painter.restore()
             return
-
-        # Есть бронь — рисуем цветной блок
+    
+        # Есть бронь
         accent = self._accent_for(booking)
-
+    
         # Яркая заливка
         fill = QColor(accent)
         fill.setAlpha(170)
-
+    
         r = rect.adjusted(2, 1, -2, -1)
         radius = 10
-
+    
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-
-        # Рисуем блок в зависимости от позиции (верх/середина/низ)
+    
+        # Рисуем основной блок (убираем лишние rect)
         if part == "top":
             path = QPainterPath()
-            path.addRoundedRect(rect.adjusted(2, 1, -2, 0), radius, radius)
-            path.addRect(rect.adjusted(2, rect.height() // 2, -2, 0))
+            path.addRoundedRect(r.left(), r.top(), r.width(), r.height() + radius, radius, radius)
+            path.addRect(r.left(), r.center().y(), r.width(), r.height() // 2 + 1)
             painter.drawPath(path)
         elif part == "bottom":
             path = QPainterPath()
-            path.addRoundedRect(rect.adjusted(2, 0, -2, -1), radius, radius)
-            path.addRect(rect.adjusted(2, 0, -2, -(rect.height() // 2)))
+            path.addRoundedRect(r.left(), r.top() - radius, r.width(), r.height() + radius, radius, radius)
+            path.addRect(r.left(), r.top(), r.width(), r.height() // 2 + 1)
             painter.drawPath(path)
         elif part == "middle":
-            painter.drawRect(rect.adjusted(2, 0, -2, 0))
+            painter.drawRect(r)
         else:  # single slot
-            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), radius, radius)
-
+            painter.drawRoundedRect(r, radius, radius)
+    
         # Левая акцентная полоса
         painter.setBrush(accent)
-        painter.drawRect(rect.adjusted(2, 1, -rect.width() + 6, -1))
-
-        # Обводка
-        border = QColor(accent)
-        border.setAlpha(220)
-        painter.setPen(QPen(border, 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(r.left(), r.top(), 4, r.height())
+    
+        # Обводка (только для top/bottom/single)
         if part in ("top", "bottom", None):
-            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), radius, radius)
-
+            border = QColor(accent)
+            border.setAlpha(220)
+            painter.setPen(QPen(border, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(r, radius, radius)
+    
         # Бейдж и текст только в верхней ячейке
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
-
+    
             if status == "cancelled":
                 badge_text = "ОТМ"
                 badge_bg = QColor(self.CANC)
@@ -194,7 +194,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
                 badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
                 badge_bg = QColor(accent)
                 badge_bg.setAlpha(235)
-
+    
             # Рисуем бейдж
             fm = painter.fontMetrics()
             pad_x, pad_y = 8, 3
@@ -202,32 +202,32 @@ class BookingBlockDelegate(QStyledItemDelegate):
             bh = max(18, fm.height() - 2 + pad_y * 2)
             bx = r.right() - bw - 8
             by = r.top() + 6
-
+    
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(badge_bg)
             painter.drawRoundedRect(bx, by, bw, bh, 8, 8)
-
+    
             painter.setPen(QPen(QColor(255, 255, 255, 245)))
             f = painter.font()
             f.setBold(True)
             painter.setFont(f)
-            painter.drawText(int(bx), int(by), int(bw), int(bh), 
+            painter.drawText(int(bx), int(by), int(bw), int(bh),
                            Qt.AlignmentFlag.AlignCenter, badge_text)
-
-            # Рисуем текст брони
+    
+            # Текст брони
             text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
             if text:
                 f2 = painter.font()
                 f2.setBold(False)
                 painter.setFont(f2)
                 painter.setPen(QPen(QColor(255, 255, 255, 238)))
-                text_rect = rect.adjusted(12, 8, -70, -8)
+                text_rect = r.adjusted(10, 8, -70, -8)
                 painter.drawText(
                     text_rect,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                     text,
                 )
-
+    
         painter.restore()
 
     def sizeHint(self, option, index):
