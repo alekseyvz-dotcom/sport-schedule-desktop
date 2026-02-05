@@ -1,21 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-from datetime import date, time, datetime, timedelta, timezone
+from datetime import date, time, timedelta, timezone
 from typing import Optional
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget,
-    QLineEdit, QTextEdit, QDateEdit, QCheckBox, QComboBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QTabWidget,
+    QWidget,
+    QLineEdit,
+    QTextEdit,
+    QDateEdit,
+    QCheckBox,
+    QComboBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QHeaderView,
+    QAbstractItemView,
 )
 
 from app.services.ref_service import list_active_orgs, list_active_venues
 from app.services.venue_units_service import list_venue_units
 from app.services.tenants_service import Tenant, update_tenant
 from app.services.tenant_rules_service import (
-    create_rule, list_rules_for_tenant, set_rule_active, TenantRule, generate_bookings_for_rule
+    create_rule,
+    list_rules_for_tenant,
+    TenantRule,
+    generate_bookings_for_rule,
 )
 
 
@@ -37,6 +53,8 @@ class TenantCardDialog(QDialog):
 
     def __init__(self, parent=None, tenant: Tenant | None = None):
         super().__init__(parent)
+        self.setObjectName("dialog")
+
         if tenant is None:
             raise ValueError("TenantCardDialog требует tenant")
         self.tenant = tenant
@@ -45,11 +63,15 @@ class TenantCardDialog(QDialog):
         self.setModal(True)
         self.resize(900, 600)
 
-        self.tabs = QTabWidget()
+        self.tabs = QTabWidget(self)
 
         # --- TAB 1: Данные контрагента ---
-        tab_data = QDialog()
-        form = QFormLayout(tab_data)
+        tab_data = QWidget(self.tabs)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.ed_name = QLineEdit(tenant.name)
         self.ed_inn = QLineEdit(tenant.inn or "")
@@ -63,14 +85,17 @@ class TenantCardDialog(QDialog):
 
         self.dt_contract_date = QDateEdit()
         self.dt_contract_date.setCalendarPopup(True)
+        self.dt_contract_date.setDisplayFormat("dd.MM.yyyy")
         self.dt_contract_date.setDate(_pydate_to_qdate(tenant.contract_date))
 
         self.dt_valid_from = QDateEdit()
         self.dt_valid_from.setCalendarPopup(True)
+        self.dt_valid_from.setDisplayFormat("dd.MM.yyyy")
         self.dt_valid_from.setDate(_pydate_to_qdate(tenant.contract_valid_from))
 
         self.dt_valid_to = QDateEdit()
         self.dt_valid_to.setCalendarPopup(True)
+        self.dt_valid_to.setDisplayFormat("dd.MM.yyyy")
         self.dt_valid_to.setDate(_pydate_to_qdate(tenant.contract_valid_to))
 
         self.ed_docs_delivery = QLineEdit(tenant.docs_delivery_method or "")
@@ -115,16 +140,26 @@ class TenantCardDialog(QDialog):
         self.btn_save = QPushButton("Сохранить")
         self.btn_save.clicked.connect(self._save_tenant)
 
+        data_footer = QHBoxLayout()
+        data_footer.addStretch(1)
+        data_footer.addWidget(self.btn_save)
+
         data_root = QVBoxLayout(tab_data)
-        data_root.addLayout(form)
-        data_root.addWidget(self.btn_save)
+        data_root.setContentsMargins(12, 12, 12, 12)
+        data_root.setSpacing(10)
+        data_root.addLayout(form, 1)
+        data_root.addLayout(data_footer)
 
         # --- TAB 2: Договорное расписание ---
-        tab_rules = QDialog()
+        tab_rules = QWidget(self.tabs)
         rules_root = QVBoxLayout(tab_rules)
+        rules_root.setContentsMargins(12, 12, 12, 12)
+        rules_root.setSpacing(10)
 
-        # выбор учреждение -> площадка -> часть площадки
         sel_row = QHBoxLayout()
+        sel_row.setContentsMargins(0, 0, 0, 0)
+        sel_row.setSpacing(10)
+
         self.cmb_org = QComboBox()
         self.cmb_venue = QComboBox()
         self.cmb_unit = QComboBox()
@@ -135,11 +170,14 @@ class TenantCardDialog(QDialog):
         sel_row.addWidget(self.cmb_org, 2)
         sel_row.addWidget(self.cmb_venue, 3)
         sel_row.addWidget(self.cmb_unit, 3)
-
         rules_root.addLayout(sel_row)
 
-        # параметры правила
         f2 = QFormLayout()
+        f2.setContentsMargins(0, 0, 0, 0)
+        f2.setHorizontalSpacing(12)
+        f2.setVerticalSpacing(10)
+        f2.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         self.cmb_weekday = QComboBox()
         for i, name in [(1, "Пн"), (2, "Вт"), (3, "Ср"), (4, "Чт"), (5, "Пт"), (6, "Сб"), (7, "Вс")]:
             self.cmb_weekday.addItem(name, i)
@@ -149,12 +187,18 @@ class TenantCardDialog(QDialog):
 
         self.dt_rule_from = QDateEdit()
         self.dt_rule_from.setCalendarPopup(True)
+        self.dt_rule_from.setDisplayFormat("dd.MM.yyyy")
+
         self.dt_rule_to = QDateEdit()
         self.dt_rule_to.setCalendarPopup(True)
+        self.dt_rule_to.setDisplayFormat("dd.MM.yyyy")
 
-        # по умолчанию подставим срок договора, если он есть
-        self.dt_rule_from.setDate(_pydate_to_qdate(tenant.contract_valid_from) if tenant.contract_valid_from else QDate.currentDate())
-        self.dt_rule_to.setDate(_pydate_to_qdate(tenant.contract_valid_to) if tenant.contract_valid_to else QDate.currentDate())
+        self.dt_rule_from.setDate(
+            _pydate_to_qdate(tenant.contract_valid_from) if tenant.contract_valid_from else QDate.currentDate()
+        )
+        self.dt_rule_to.setDate(
+            _pydate_to_qdate(tenant.contract_valid_to) if tenant.contract_valid_to else QDate.currentDate()
+        )
 
         self.ed_rule_title = QLineEdit("Аренда по договору")
 
@@ -168,6 +212,9 @@ class TenantCardDialog(QDialog):
         rules_root.addLayout(f2)
 
         btns = QHBoxLayout()
+        btns.setContentsMargins(0, 0, 0, 0)
+        btns.setSpacing(10)
+
         self.btn_add_rule = QPushButton("Добавить правило")
         self.btn_add_rule.clicked.connect(self._add_rule)
 
@@ -176,21 +223,39 @@ class TenantCardDialog(QDialog):
 
         btns.addWidget(self.btn_add_rule)
         btns.addWidget(self.btn_gen)
+        btns.addStretch(1)
         rules_root.addLayout(btns)
 
         self.tbl_rules = QTableWidget(0, 8)
-        self.tbl_rules.setHorizontalHeaderLabels([
-            "ID", "Активно", "Unit", "День", "С", "По", "Период", "Title"
-        ])
+        self.tbl_rules.setObjectName("tenantRulesTable")
+        self.tbl_rules.setHorizontalHeaderLabels(["ID", "Активно", "Unit", "День", "С", "По", "Период", "Title"])
         self.tbl_rules.setColumnHidden(0, True)
+        self.tbl_rules.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl_rules.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tbl_rules.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tbl_rules.setShowGrid(False)
+        self.tbl_rules.setAlternatingRowColors(False)
+        self.tbl_rules.verticalHeader().setVisible(False)
+
+        hdr = self.tbl_rules.horizontalHeader()
+        hdr.setHighlightSections(False)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+
         rules_root.addWidget(self.tbl_rules, 1)
 
-        # собрать вкладки
         self.tabs.addTab(tab_data, "Карточка")
         self.tabs.addTab(tab_rules, "Договорное расписание")
 
         root = QVBoxLayout(self)
-        root.addWidget(self.tabs)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+        root.addWidget(self.tabs, 1)
 
         self._load_orgs()
         self._reload_rules()
@@ -267,7 +332,8 @@ class TenantCardDialog(QDialog):
             it_id.setData(Qt.ItemDataRole.UserRole, r)
             self.tbl_rules.setItem(row, 0, it_id)
 
-            it_active = QTableWidgetItem("да" if r.is_active else "нет")
+            it_active = QTableWidgetItem("Да" if r.is_active else "Нет")
+            it_active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tbl_rules.setItem(row, 1, it_active)
 
             self.tbl_rules.setItem(row, 2, QTableWidgetItem(str(r.venue_unit_id)))
@@ -306,6 +372,7 @@ class TenantCardDialog(QDialog):
                 raise ValueError("Укажите период действия правила")
             weekday = int(self.cmb_weekday.currentData())
             title = self.ed_rule_title.text().strip()
+
             rid = create_rule(
                 tenant_id=self.tenant.id,
                 venue_unit_id=int(unit_id),
@@ -339,9 +406,8 @@ class TenantCardDialog(QDialog):
             QMessageBox.information(self, "Генерация", "Выберите правило в таблице.")
             return
 
-        # нужно получить venue_id по venue_unit_id
-        # простейший вариант: запросом здесь (или отдельным сервисом).
         from app.db import get_conn, put_conn
+
         conn = None
         try:
             conn = get_conn()
