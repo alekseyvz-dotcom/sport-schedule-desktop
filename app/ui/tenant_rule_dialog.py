@@ -50,6 +50,7 @@ class TenantRuleDialog(QDialog):
         tz_name: str = "Europe/Moscow",
     ):
         super().__init__(parent)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.setModal(True)
 
@@ -176,6 +177,9 @@ class TenantRuleDialog(QDialog):
         self.tbl_avail.setWordWrap(True)
         self.tbl_avail.horizontalHeader().setStretchLastSection(True)
         self.tbl_avail.cellClicked.connect(self._on_avail_row_clicked)
+        self.tbl_avail.setShowGrid(False)
+        self.tbl_avail.setAlternatingRowColors(False)
+        self.tbl_avail.horizontalHeader().setHighlightSections(False)
 
         self._avail_timer = QTimer(self)
         self._avail_timer.setSingleShot(True)
@@ -275,7 +279,11 @@ class TenantRuleDialog(QDialog):
             btn.toggled.connect(lambda checked, _uid=uid: self._on_tile_toggled(_uid, checked))
 
             # базовый стиль (дальше будет перекрашиваться по доступности)
-            btn.setStyleSheet(self._tile_style(selected=False, conflicts=None))
+            btn.setObjectName("zoneTile")
+            btn.setProperty("conflicts", -1)   # -1 = unknown
+            btn.setProperty("selected", False)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
             self._zone_btns[uid] = btn
             self.zones_grid.addWidget(btn, i // cols, i % cols)
@@ -284,46 +292,6 @@ class TenantRuleDialog(QDialog):
         self._schedule_avail_check()
 
         self._apply_selection_contiguous([], show_warning=False)
-
-    def _tile_style(self, *, selected: bool, conflicts: Optional[int]) -> str:
-        """
-        conflicts:
-          None  -> неизвестно (ещё не проверяли)
-          0     -> свободно
-          >0    -> есть конфликты
-        """
-        # base colors
-        if conflicts is None:
-            border = "#cfd6df"
-            bg = "#ffffff"
-            badge = "#6b7280"
-        elif conflicts == 0:
-            border = "#2da44e"
-            bg = "#f0fff4"
-            badge = "#137333"
-        else:
-            border = "#d1242f"
-            bg = "#fff5f5"
-            badge = "#a40e26"
-
-        if selected:
-            # сделать ярче для выбранных
-            bg = "#dbeafe" if conflicts is None else ("#c7f9cc" if conflicts == 0 else "#ffd6d6")
-            border = "#2563eb" if conflicts is None else border
-
-        return f"""
-        QToolButton {{
-            border: 2px solid {border};
-            border-radius: 10px;
-            padding: 8px 10px;
-            background: {bg};
-            color: #111827;
-            font-weight: 600;
-        }}
-        QToolButton:checked {{
-            /* checked управляем вручную, но пусть будет без сюрпризов */
-        }}
-        """
 
     def _current_selected_ids(self) -> List[int]:
         ids = [uid for uid, b in self._zone_btns.items() if b.isChecked()]
@@ -400,12 +368,15 @@ class TenantRuleDialog(QDialog):
         self._apply_selection_contiguous([], show_warning=False)
 
     def _repaint_tiles(self) -> None:
-        """
-        Перекрасить плитки по availability (если известна) и по selected.
-        """
         for uid, btn in self._zone_btns.items():
-            conf = self._conf_count.get(uid, None)
-            btn.setStyleSheet(self._tile_style(selected=btn.isChecked(), conflicts=conf))
+            conf = self._conf_count.get(uid, -1)  # -1 unknown
+            btn.setProperty("conflicts", int(conf))
+            btn.setProperty("selected", bool(btn.isChecked()))
+    
+            # форсим применение QSS по новым property
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
 
     # ---------------- Availability ----------------
     def _schedule_avail_check(self) -> None:
@@ -496,7 +467,7 @@ class TenantRuleDialog(QDialog):
 
             if int(a.venue_unit_id) in selected:
                 for it in (it_zone, it_cnt, it_days, it_who):
-                    it.setBackground(Qt.GlobalColor.lightGray)
+                    pass
 
             self.tbl_avail.setItem(r, 0, it_zone)
             self.tbl_avail.setItem(r, 1, it_cnt)
