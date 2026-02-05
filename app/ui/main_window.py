@@ -1,5 +1,5 @@
 # app/ui/main_window.py
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QApplication
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QApplication, QMessageBox
 from app.services.users_service import AuthUser
 from app.ui.tenants_page import TenantsPage
 from app.ui.orgs_venues_page import OrgsVenuesPage
@@ -23,10 +23,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.welcome)
 
     def on_logged_in(self, user: AuthUser):
-        self.user = user
-        self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
+        try:
+            print("on_logged_in:", user, getattr(user, "username", None))
+            self.user = user
+            self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
 
-        tabs = QTabWidget()
+            tabs = QTabWidget()
 
         if self._can_tab("tab.tenants"):
             tabs.addTab(TenantsPage(user), "Контрагенты")
@@ -42,6 +44,10 @@ class MainWindow(QMainWindow):
             tabs.addTab(SettingsPage(user), "Настройки")
 
         self.setCentralWidget(tabs)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка после входа", f"{type(e).__name__}: {e}")
+            raise
 
     def _can_tab(self, code: str) -> bool:
         if not self.user:
