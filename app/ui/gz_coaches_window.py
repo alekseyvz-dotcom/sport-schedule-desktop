@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QComboBox,
+    QWidget,
 )
 
 from app.services.users_service import AuthUser
@@ -29,7 +30,7 @@ from app.services.gz_service import (
     set_coach_active,
     get_coach_org_ids,
     set_coach_orgs,
-    list_coach_orgs_map,  # важно: функция должна быть обновлена и принимать org_ids=
+    list_coach_orgs_map,
 )
 from app.ui.gz_coach_dialog import GzCoachDialog
 
@@ -39,10 +40,11 @@ class GzCoachesWindow(QDialog):
         super().__init__(parent)
         self.user = user
 
+        self.setObjectName("dialog")
         self.setWindowTitle("Тренеры (ГЗ)")
         self.resize(860, 560)
 
-        self._orgs: list[dict] = []  # [{id, name}] только разрешённые пользователю
+        self._orgs: list[dict] = []
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск тренера…")
@@ -67,6 +69,8 @@ class GzCoachesWindow(QDialog):
         self.btn_close.clicked.connect(self.accept)
 
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(10)
         top.addWidget(self.ed_search, 1)
         top.addWidget(self.cmb_org)
         top.addWidget(self.cb_inactive)
@@ -81,15 +85,28 @@ class GzCoachesWindow(QDialog):
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.doubleClicked.connect(lambda *_: self._on_edit())
+        self.tbl.setShowGrid(False)
+        self.tbl.setAlternatingRowColors(False)
 
         hdr = self.tbl.horizontalHeader()
+        hdr.setHighlightSections(False)
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
+        # “карточка” под таблицу, чтобы фон был как у виджетов
+        table_card = QWidget(self)
+        table_card.setObjectName("detailsCard")  # используем уже существующий стиль карточки
+        table_lay = QVBoxLayout(table_card)
+        table_lay.setContentsMargins(10, 10, 10, 10)
+        table_lay.setSpacing(0)
+        table_lay.addWidget(self.tbl)
+
         bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
         bottom.addStretch(1)
         bottom.addWidget(self.btn_close)
 
@@ -97,7 +114,7 @@ class GzCoachesWindow(QDialog):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addLayout(top)
-        root.addWidget(self.tbl, 1)
+        root.addWidget(table_card, 1)
         root.addLayout(bottom)
 
         self._load_orgs()
@@ -142,7 +159,6 @@ class GzCoachesWindow(QDialog):
         allowed_org_ids_list = self._allowed_org_ids_list()
         allowed_org_ids_set = self._allowed_org_ids_set()
 
-        # если в комбобоксе каким-то образом оказался "чужой" org_id
         if org_id is not None and org_id not in allowed_org_ids_set:
             self.tbl.setRowCount(0)
             return
@@ -156,7 +172,6 @@ class GzCoachesWindow(QDialog):
                 user_id=self.user.id,
                 role_code=self.user.role_code,
             )
-
             coach_orgs = list_coach_orgs_map(
                 include_inactive_orgs=False,
                 org_ids=allowed_org_ids_list,
@@ -202,7 +217,6 @@ class GzCoachesWindow(QDialog):
 
         v = dlg.values()
 
-        # защита от подмены/ошибки: сохраняем только разрешённые org_ids
         allowed = self._allowed_org_ids_set()
         org_ids = [int(x) for x in (v.get("org_ids") or []) if int(x) in allowed]
 
