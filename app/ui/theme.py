@@ -2,11 +2,18 @@
 
 DARK_APP_QSS = """
 /* ---- Base ---- */
-QMainWindow, QWidget {
+QMainWindow {
     background: #0b1220;
     color: rgba(255, 255, 255, 0.88);
     font-size: 13px;
 }
+QWidget {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    background: transparent; /* ключевой фикс “заливки” */
+}
+
+QWidget#welcomeRoot { background: transparent; }
 
 QToolTip {
     background: rgba(2, 6, 23, 0.95);
