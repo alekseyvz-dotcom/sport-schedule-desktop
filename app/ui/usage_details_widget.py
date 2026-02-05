@@ -5,19 +5,17 @@ from typing import Optional, Tuple
 
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QFrame
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 
 
-PD_COLOR = QColor("#9bd7ff")  # ПД
-GZ_COLOR = QColor("#ffcc80")  # ГЗ (оранжевый)
-BG_BAR = QColor("#eef2f7")
-TEXT = QColor("#0f172a")
-MUTED = QColor("#475569")
+# Dark-friendly palette (no stylesheets)
+PD_COLOR = QColor("#60a5fa")  # blue
+GZ_COLOR = QColor("#f59e0b")  # amber
 
 
 @dataclass(frozen=True)
 class UsageTotals:
-    title: str  # "Площадка: ..." или "Учреждение: ..."
+    title: str
     period_title: str
 
     cap_sec: int
@@ -47,11 +45,16 @@ def _hours(sec: int) -> float:
 
 class _BarsWidget(QWidget):
     """3 stacked bars: Утро/День/Вечер, внутри ПД+ГЗ, фон = ёмкость смены."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: Optional[UsageTotals] = None
         self._shift_titles: Tuple[str, str, str] = ("Утро", "День", "Вечер")
         self.setMinimumHeight(170)
+
+        self._col_text = QColor(255, 255, 255, 235)
+        self._col_muted = QColor(226, 232, 240, 160)
+        self._col_bar_bg = QColor(255, 255, 255, 18)
 
     def set_data(self, data: Optional[UsageTotals]) -> None:
         self._data = data
@@ -67,18 +70,17 @@ class _BarsWidget(QWidget):
 
         r = self.rect().adjusted(16, 14, -16, -14)
 
-        p.setPen(QPen(MUTED))
+        p.setPen(QPen(self._col_muted))
         p.setFont(QFont(self.font().family(), self.font().pointSize(), QFont.Weight.DemiBold))
         p.drawText(r.x(), r.y(), "Загрузка по сменам (ПД / ГЗ)")
 
         if not self._data:
-            p.setPen(QPen(MUTED))
+            p.setPen(QPen(self._col_muted))
             p.setFont(self.font())
             p.drawText(r.x(), r.y() + 28, "Выберите площадку или итог по учреждению слева.")
             return
 
         m_title, d_title, e_title = self._shift_titles
-
         rows = [
             (m_title, self._data.m_cap, self._data.m_pd, self._data.m_gz),
             (d_title, self._data.d_cap, self._data.d_pd, self._data.d_gz),
@@ -88,53 +90,54 @@ class _BarsWidget(QWidget):
         y = r.y() + 42
         bar_h = 22
         gap = 18
-        label_w = 160  # было 120, чтобы помещались более длинные подписи
+        label_w = 160
         bar_w = max(260, r.width() - label_w - 90)
 
         p.setFont(self.font())
 
         for name, cap, pd, gz in rows:
             total = pd + gz
-            pd_w = 0 if cap <= 0 else bar_w * (pd / cap)
-            gz_w = 0 if cap <= 0 else bar_w * (gz / cap)
+            pd_w = 0.0 if cap <= 0 else bar_w * (pd / cap)
+            gz_w = 0.0 if cap <= 0 else bar_w * (gz / cap)
             tot_pct = _pct(total, cap)
 
-            # label
-            p.setPen(QPen(TEXT))
+            p.setPen(QPen(self._col_text))
             p.drawText(r.x(), y + bar_h - 4, name)
 
-            # background bar
             bx = r.x() + label_w
             by = y
+
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(BG_BAR)
+            p.setBrush(self._col_bar_bg)
             p.drawRoundedRect(QRectF(bx, by, bar_w, bar_h), 8, 8)
 
-            # PD chunk
             p.setBrush(PD_COLOR)
             p.drawRoundedRect(QRectF(bx, by, max(0.0, pd_w), bar_h), 8, 8)
 
-            # GZ chunk
             p.setBrush(GZ_COLOR)
             p.drawRoundedRect(QRectF(bx + pd_w, by, max(0.0, gz_w), bar_h), 8, 8)
 
-            # text right
-            p.setPen(QPen(TEXT))
+            p.setPen(QPen(self._col_text))
             p.drawText(int(bx + bar_w + 10), int(y + bar_h - 4), f"{tot_pct:.1f}%")
 
-            # small captions
-            p.setPen(QPen(MUTED))
-            p.drawText(int(bx), int(y - 2), f"ПД { _hours(pd):.1f}ч  ГЗ { _hours(gz):.1f}ч")
+            p.setPen(QPen(self._col_muted))
+            p.drawText(int(bx), int(y - 2), f"ПД {_hours(pd):.1f}ч  ГЗ {_hours(gz):.1f}ч")
 
             y += bar_h + gap
 
 
 class _DonutWidget(QWidget):
     """Donut: ПД / ГЗ / Свободно."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: Optional[UsageTotals] = None
         self.setMinimumHeight(210)
+
+        self._col_text = QColor(255, 255, 255, 235)
+        self._col_muted = QColor(226, 232, 240, 160)
+        self._col_free = QColor(255, 255, 255, 26)
+        self._col_hole = QColor(2, 6, 23, 160)
 
     def set_data(self, data: Optional[UsageTotals]) -> None:
         self._data = data
@@ -146,12 +149,12 @@ class _DonutWidget(QWidget):
 
         r = self.rect().adjusted(16, 14, -16, -14)
 
-        p.setPen(QPen(MUTED))
+        p.setPen(QPen(self._col_muted))
         p.setFont(QFont(self.font().family(), self.font().pointSize(), QFont.Weight.DemiBold))
         p.drawText(r.x(), r.y(), "Структура занятости за период")
 
         if not self._data or self._data.cap_sec <= 0:
-            p.setPen(QPen(MUTED))
+            p.setPen(QPen(self._col_muted))
             p.setFont(self.font())
             p.drawText(r.x(), r.y() + 28, "Нет данных.")
             return
@@ -185,12 +188,13 @@ class _DonutWidget(QWidget):
 
         draw_slice(pd, PD_COLOR)
         draw_slice(gz, GZ_COLOR)
-        draw_slice(free, QColor("#e5e7eb"))
+        draw_slice(free, self._col_free)
 
-        p.setBrush(QColor("#fbfbfc"))
+        p.setBrush(self._col_hole)
+        p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(donut.adjusted(size * 0.22, size * 0.22, -size * 0.22, -size * 0.22))
 
-        p.setPen(QPen(TEXT))
+        p.setPen(QPen(self._col_text))
         p.setFont(QFont(self.font().family(), self.font().pointSize() + 4, QFont.Weight.Bold))
         p.drawText(donut, Qt.AlignmentFlag.AlignCenter, f"{_pct(busy, cap):.1f}%")
 
@@ -198,11 +202,10 @@ class _DonutWidget(QWidget):
         ly = int(donut.top() + 10)
 
         p.setFont(self.font())
-        p.setPen(QPen(TEXT))
+        p.setPen(QPen(self._col_text))
         p.drawText(lx, ly, f"ПД: {pd_pct:.1f}% ({_hours(pd):.1f}ч)")
-        p.setPen(QPen(TEXT))
         p.drawText(lx, ly + 22, f"ГЗ: {gz_pct:.1f}% ({_hours(gz):.1f}ч)")
-        p.setPen(QPen(MUTED))
+        p.setPen(QPen(self._col_muted))
         p.drawText(lx, ly + 44, f"Свободно: {free_pct:.1f}% ({_hours(free):.1f}ч)")
 
 
@@ -211,16 +214,16 @@ class UsageDetailsWidget(QWidget):
         super().__init__(parent)
 
         self.lbl_title = QLabel("Детали")
-        self.lbl_title.setStyleSheet("font-weight:700; color:#0f172a; padding:0 2px;")
+        self.lbl_title.setObjectName("sectionTitle")
 
         self.lbl_period = QLabel("")
-        self.lbl_period.setStyleSheet("color:#475569; padding:0 2px;")
+        self.lbl_period.setObjectName("scheduleMeta")
 
         self.donut = _DonutWidget(self)
         self.bars = _BarsWidget(self)
 
-        card = QFrame(self)
-        card.setStyleSheet("QFrame{background:#ffffff; border:1px solid #e6e6e6; border-radius:12px;}")
+        card = QWidget(self)
+        card.setObjectName("detailsCard")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
@@ -236,17 +239,12 @@ class UsageDetailsWidget(QWidget):
         self.set_data(None)
 
     def set_shift_titles(self, morning_title: str, day_title: str, evening_title: str) -> None:
-        """
-        Теперь OrgUsagePage (или любой другой экран) может менять подписи смен,
-        чтобы не показывать фиксированные 08–12/12–18/18–22.
-        """
         self.bars.set_shift_titles(morning_title, day_title, evening_title)
 
     def set_data(self, data: Optional[UsageTotals]):
         if not data:
             self.lbl_title.setText("Детали")
             self.lbl_period.setText("")
-            # дефолтные подписи
             self.set_shift_titles("Утро", "День", "Вечер")
         else:
             self.lbl_title.setText(data.title)
