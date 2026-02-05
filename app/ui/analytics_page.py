@@ -10,6 +10,7 @@ from app.ui.tenant_usage_page import TenantUsagePage
 class AnalyticsPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
 
         tabs = QTabWidget(self)
         tabs.addTab(OrgUsagePage(self), "Учреждения")
