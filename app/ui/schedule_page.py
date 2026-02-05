@@ -147,6 +147,7 @@ class SchedulePage(QWidget):
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
         self.user = user
         
         self._gz_group_is_free: Dict[int, bool] = {}
