@@ -209,4 +209,5 @@ class LoginWindow(QWidget):
             self.lbl_status.setText("Неверный логин/пароль или пользователь неактивен.")
             return
 
-        self.logged_in.emit(auth_user)
+        print("LOGIN OK, emit logged_in:", user.username)
+        self.logged_in.emit(user)
