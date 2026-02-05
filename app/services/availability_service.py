@@ -96,7 +96,7 @@ agg AS (
   SELECT
     venue_unit_id,
     COUNT(*) AS conflict_count,
-    ARRAY_AGG(day ORDER BY day)[:%(days_limit)s] AS conflict_days_sample
+    (ARRAY_AGG(day ORDER BY day))[1:%(days_limit)s] AS conflict_days_sample
   FROM c
   GROUP BY venue_unit_id
 ),
