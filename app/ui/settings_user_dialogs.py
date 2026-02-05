@@ -22,7 +22,6 @@ class RoleSelectDialog(QDialog):
 
     def __init__(self, parent, title: str, roles: List[RoleRow], current_code: Optional[str] = None):
         super().__init__(parent)
-        self.setObjectName("page")
         self.setStyleSheet(_DIALOG_QSS)
         self.setWindowTitle(title)
         self.resize(520, 360)
