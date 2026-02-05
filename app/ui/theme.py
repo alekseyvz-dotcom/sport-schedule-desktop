@@ -324,4 +324,33 @@ QProgressBar#usagePctNeutral::chunk { background: rgba(255,255,255,0.18); border
 QLabel#dlgTitle { color: rgba(255,255,255,0.92); font-weight: 900; font-size: 14px; }
 QLabel#hint { color: rgba(226, 232, 240, 0.60); font-size: 12px; }
 
+/* --- TenantRuleDialog zone tiles (QToolButton) --- */
+QToolButton#zoneTile {
+    border: 2px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: rgba(2, 6, 23, 0.35);
+    color: rgba(255,255,255,0.92);
+    font-weight: 600;
+    min-height: 44px;
+}
+
+QToolButton#zoneTile:hover {
+    border: 2px solid rgba(255,255,255,0.28);
+    background: rgba(255,255,255,0.06);
+}
+
+/* conflicts property: -1 unknown, 0 ok, >0 bad */
+QToolButton#zoneTile[conflicts="-1"] { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
+QToolButton#zoneTile[conflicts="0"]  { border-color: rgba(34,197,94,0.85);  background: rgba(34,197,94,0.10); }
+
+/* Qt stylesheets не умеют [conflicts>0], поэтому используем флаг conflicts_bad */
+QToolButton#zoneTile[conflicts_bad="1"] { border-color: rgba(239,68,68,0.90); background: rgba(239,68,68,0.10); }
+
+/* selected flag */
+QToolButton#zoneTile[selected="true"] { background: rgba(96,165,250,0.16); border-color: rgba(96,165,250,0.95); }
+
+/* selected + ok/bad overrides */
+QToolButton#zoneTile[selected="true"][conflicts="0"] { background: rgba(34,197,94,0.18); border-color: rgba(34,197,94,0.90); }
+QToolButton#zoneTile[selected="true"][conflicts_bad="1"] { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.95); }
 """
