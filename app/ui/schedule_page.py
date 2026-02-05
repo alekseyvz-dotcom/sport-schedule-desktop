@@ -17,7 +17,7 @@ from app.services.users_service import AuthUser
 from app.services.gz_service import list_active_gz_groups_for_booking
 
 from PySide6.QtCore import Qt, QTimer, QSettings
-from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPainterPath
+from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPainterPath, QBrush
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -98,6 +98,15 @@ from app.ui.booking_dialog import BookingDialog
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
+    @staticmethod
+    def _as_color(v) -> QColor | None:
+        if isinstance(v, QColor):
+            return v if v.isValid() else None
+        if isinstance(v, QBrush):
+            c = v.color()
+            return c if c.isValid() else None
+        return None
+
     def paint(self, painter: QPainter, option, index):
         rect = option.rect
         booking = index.data(Qt.ItemDataRole.UserRole)
@@ -107,34 +116,29 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # --- EMPTY CELL: default paint + grid ---
+        # EMPTY
         if not has_booking:
             super().paint(painter, option, index)
-
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             grid_pen = QPen(QColor(255, 255, 255, 22))
-            grid_pen.setWidth(1)
             painter.setPen(grid_pen)
             painter.drawLine(rect.topLeft(), rect.bottomLeft())
             painter.drawLine(rect.topRight(), rect.bottomRight())
             painter.drawLine(rect.topLeft(), rect.topRight())
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-
             painter.restore()
             return
 
-        # --- BOOKING CELL: custom paint ---
-        bg = index.data(Qt.ItemDataRole.BackgroundRole)
-        accent = QColor(bg) if isinstance(bg, QColor) and bg.isValid() else QColor(96, 165, 250)
+        # BOOKING
+        bg_raw = index.data(Qt.ItemDataRole.BackgroundRole)
+        accent = self._as_color(bg_raw) or QColor(96, 165, 250)
 
-        # fill: more opaque so grid is not visible through it
         fill = QColor(accent)
-        fill.setAlpha(110)  # было 46 -> слишком прозрачно
+        fill.setAlpha(160)  # было 110 -> стало заметнее
 
         r = rect.adjusted(2, 1, -2, -1)
         radius = 10
 
-        # shape: rounded only at top/bottom (single block feeling)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
 
@@ -153,19 +157,19 @@ class BookingBlockDelegate(QStyledItemDelegate):
         else:
             painter.drawRoundedRect(QRectF(r), radius, radius)
 
-        # left accent bar
+        # left accent
         painter.setBrush(accent)
         painter.drawRect(QRectF(r.left(), r.top(), 4, r.height()))
 
-        # subtle border
+        # border
         border = QColor(accent)
-        border.setAlpha(190)
+        border.setAlpha(210)
         painter.setPen(QPen(border, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if part in ("top", "bottom", None):
             painter.drawRoundedRect(QRectF(r), radius, radius)
 
-        # --- pseudo badge (top cell only) ---
+        # badge (top only)
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
@@ -176,13 +180,12 @@ class BookingBlockDelegate(QStyledItemDelegate):
             else:
                 badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
                 badge_bg = QColor(accent)
-                badge_bg.setAlpha(230)
+                badge_bg.setAlpha(235)
 
             badge_fg = QColor(255, 255, 255, 245)
 
-            pad_x = 8
-            pad_y = 3
             fm = painter.fontMetrics()
+            pad_x, pad_y = 8, 3
             bw = fm.horizontalAdvance(badge_text) + pad_x * 2
             bh = max(18, fm.height() - 2 + pad_y * 2)
 
@@ -199,17 +202,14 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.setFont(f)
             painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
 
-        # --- booking text (ONLY in top cell) ---
+        # text (top only)
         if part == "top" or part is None:
             text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
             if text:
-                # restore normal font
                 f = painter.font()
                 f.setBold(False)
                 painter.setFont(f)
                 painter.setPen(QPen(QColor(255, 255, 255, 238)))
-
-                # text area: leave space for badge
                 text_rect = QRectF(r.left() + 10, r.top() + 8, r.width() - 10 - 70, r.height() - 12)
                 painter.drawText(
                     text_rect,
