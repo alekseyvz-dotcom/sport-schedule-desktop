@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from PySide6.QtCore import QDate, QTime, Qt, QTimer
 from PySide6.QtWidgets import (
@@ -20,11 +20,24 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGroupBox,
     QGridLayout,
-    QCheckBox,
+    QToolButton,
 )
 
 
 class TenantRuleDialog(QDialog):
+    """
+    Диалог правила с выбором зон "плитками".
+
+    - Зоны отображаются как checkable плитки (QToolButton).
+    - Разрешён выбор только соседних зон (contiguous) внутри площадки по sort_order.
+      Т.е. выбрать можно: Q2 или Q2+Q3 или Q1+Q2+Q3, но нельзя Q1+Q3.
+    - Таблица доступности показывает конфликты по всем зонам и кем занято (PD/GZ).
+    - Подсветка плиток:
+        * зелёная рамка/фон если конфликтов=0
+        * красная если конфликтов>0
+        * выбранные — с более насыщенной заливкой
+    """
+
     def __init__(
         self,
         parent=None,
@@ -58,13 +71,13 @@ class TenantRuleDialog(QDialog):
         for vid, lst in self._venue_units_sorted.items():
             lst.sort(key=lambda x: (int(x.get("sort_order", 0)), str(x.get("label", ""))))
 
-        # --- UI
+        # --- UI: basic rule fields
         self.cmb_venue = QComboBox()
         for vid in sorted(self._venue_label.keys(), key=lambda x: self._venue_label[x]):
             self.cmb_venue.addItem(self._venue_label[vid], vid)
 
         self.cmb_weekday = QComboBox()
-        days = [
+        for k, name in [
             (1, "Понедельник"),
             (2, "Вторник"),
             (3, "Среда"),
@@ -72,8 +85,7 @@ class TenantRuleDialog(QDialog):
             (5, "Пятница"),
             (6, "Суббота"),
             (7, "Воскресенье"),
-        ]
-        for k, name in days:
+        ]:
             self.cmb_weekday.addItem(name, k)
 
         self.tm_start = QTimeEdit()
@@ -101,7 +113,7 @@ class TenantRuleDialog(QDialog):
         else:
             self.dt_to.setDate(QDate.currentDate().addMonths(1))
 
-        # initial values (edit)
+        # initial values
         if "weekday" in initial:
             idx = self.cmb_weekday.findData(int(initial["weekday"]))
             if idx >= 0:
@@ -126,17 +138,15 @@ class TenantRuleDialog(QDialog):
 
         self.ed_title.setText(initial.get("title", "") or "")
 
-        # --- Zones block
-        self.grp_zones = QGroupBox("Зоны")
+        # --- Zones tiles
+        self.grp_zones = QGroupBox("Зоны (выбираются только соседние)")
         self.zones_grid = QGridLayout(self.grp_zones)
         self.zones_grid.setContentsMargins(10, 10, 10, 10)
-        self.zones_grid.setHorizontalSpacing(12)
-        self.zones_grid.setVerticalSpacing(6)
+        self.zones_grid.setHorizontalSpacing(10)
+        self.zones_grid.setVerticalSpacing(10)
 
-        self._zone_checks: Dict[int, QCheckBox] = {}  # unit_id -> checkbox
-
-        self.btn_select_all = QPushButton("Выбрать все")
-        self.btn_clear_all = QPushButton("Снять все")
+        self.btn_select_all = QPushButton("Вся площадка")
+        self.btn_clear_all = QPushButton("Снять выбор")
         self.btn_select_all.clicked.connect(self._select_all_zones)
         self.btn_clear_all.clicked.connect(self._clear_all_zones)
 
@@ -144,6 +154,14 @@ class TenantRuleDialog(QDialog):
         zones_btns.addWidget(self.btn_select_all)
         zones_btns.addWidget(self.btn_clear_all)
         zones_btns.addStretch(1)
+
+        # unit_id -> button
+        self._zone_btns: Dict[int, QToolButton] = {}
+        # ordered list of unit_ids for current venue (by sort_order)
+        self._venue_unit_order: List[int] = []
+
+        # availability cache: unit_id -> conflict_count
+        self._conf_count: Dict[int, int] = {}
 
         # --- Availability UI
         self.btn_check = QPushButton("Проверить доступность")
@@ -162,7 +180,7 @@ class TenantRuleDialog(QDialog):
         self._avail_timer.setInterval(250)
         self._avail_timer.timeout.connect(self._check_availability)
 
-        # --- Form layout
+        # --- Layout
         form = QFormLayout()
         form.addRow("Площадка:", self.cmb_venue)
         form.addRow("День недели:", self.cmb_weekday)
@@ -184,7 +202,7 @@ class TenantRuleDialog(QDialog):
         root.addWidget(self.tbl_avail, 1)
         root.addWidget(btns)
 
-        # signals
+        # signals for availability
         self.cmb_venue.currentIndexChanged.connect(self._on_venue_changed)
         self.cmb_weekday.currentIndexChanged.connect(lambda *_: self._schedule_avail_check())
         self.tm_start.timeChanged.connect(lambda *_: self._schedule_avail_check())
@@ -192,7 +210,7 @@ class TenantRuleDialog(QDialog):
         self.dt_from.dateChanged.connect(lambda *_: self._schedule_avail_check())
         self.dt_to.dateChanged.connect(lambda *_: self._schedule_avail_check())
 
-        # set initial venue by initial venue_unit_id (если редактирование)
+        # set initial venue by initial venue_unit_id (edit)
         if "venue_unit_id" in initial and initial["venue_unit_id"]:
             unit_id = int(initial["venue_unit_id"])
             u0 = next((u for u in self._units if int(u["id"]) == unit_id), None)
@@ -202,86 +220,256 @@ class TenantRuleDialog(QDialog):
                 if idx >= 0:
                     self.cmb_venue.setCurrentIndex(idx)
 
-        # init zones for current venue
+        # init venue tiles
         self._on_venue_changed()
 
         # initial zone selection
         if "venue_unit_ids" in initial and initial["venue_unit_ids"]:
-            selected = {int(x) for x in (initial["venue_unit_ids"] or [])}
+            selected = [int(x) for x in (initial["venue_unit_ids"] or [])]
         elif "venue_unit_id" in initial and initial["venue_unit_id"]:
-            selected = {int(initial["venue_unit_id"])}
+            selected = [int(initial["venue_unit_id"])]
         else:
-            selected = set()
+            selected = []
 
-        for uid, cb in self._zone_checks.items():
-            cb.setChecked(uid in selected)
-
+        self._apply_selection_contiguous(selected, show_warning=False)
         self._schedule_avail_check()
 
-    # ---------- zones ----------
+    # ---------------- Zones tiles ----------------
     def _on_venue_changed(self) -> None:
         vid = int(self.cmb_venue.currentData())
 
-        # пересоздать список чекбоксов
+        # clear grid
         for i in reversed(range(self.zones_grid.count())):
             w = self.zones_grid.itemAt(i).widget()
             if w:
                 w.setParent(None)
 
-        self._zone_checks.clear()
+        self._zone_btns.clear()
+        self._conf_count.clear()
 
         units = self._venue_units_sorted.get(vid, [])
+        self._venue_unit_order = [int(u["id"]) for u in units]
+
         if not units:
-            lbl = QCheckBox("Нет зон")
-            lbl.setEnabled(False)
-            self.zones_grid.addWidget(lbl, 0, 0)
+            b = QToolButton()
+            b.setText("Нет зон")
+            b.setEnabled(False)
+            self.zones_grid.addWidget(b, 0, 0)
             return
 
-        # раскладываем плиткой 4 в ряд (можно менять)
         cols = 4
         for i, u in enumerate(units):
             uid = int(u["id"])
-            # label вида "Орг / Площадка — Q1" → нам нужно "Q1"
             full = str(u.get("label") or "")
             unit_name = full.split(" — ")[-1].strip() if " — " in full else full
 
-            cb = QCheckBox(unit_name)
-            cb.stateChanged.connect(lambda *_: self._schedule_avail_check())
-            self._zone_checks[uid] = cb
+            btn = QToolButton()
+            btn.setText(unit_name)
+            btn.setCheckable(True)
+            btn.setAutoRaise(False)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            btn.setMinimumHeight(44)
+            btn.setProperty("unit_id", uid)
+            btn.clicked.connect(lambda checked=False, _uid=uid: self._on_tile_clicked(_uid))
 
-            self.zones_grid.addWidget(cb, i // cols, i % cols)
+            # базовый стиль (дальше будет перекрашиваться по доступности)
+            btn.setStyleSheet(self._tile_style(selected=False, conflicts=None))
 
+            self._zone_btns[uid] = btn
+            self.zones_grid.addWidget(btn, i // cols, i % cols)
+
+        # reset selection on venue change
+        self._apply_selection_contiguous([], show_warning=False)
         self._schedule_avail_check()
 
+    def _tile_style(self, *, selected: bool, conflicts: Optional[int]) -> str:
+        """
+        conflicts:
+          None  -> неизвестно (ещё не проверяли)
+          0     -> свободно
+          >0    -> есть конфликты
+        """
+        # base colors
+        if conflicts is None:
+            border = "#cfd6df"
+            bg = "#ffffff"
+            badge = "#6b7280"
+        elif conflicts == 0:
+            border = "#2da44e"
+            bg = "#f0fff4"
+            badge = "#137333"
+        else:
+            border = "#d1242f"
+            bg = "#fff5f5"
+            badge = "#a40e26"
+
+        if selected:
+            # сделать ярче для выбранных
+            bg = "#dbeafe" if conflicts is None else ("#c7f9cc" if conflicts == 0 else "#ffd6d6")
+            border = "#2563eb" if conflicts is None else border
+
+        return f"""
+        QToolButton {{
+            border: 2px solid {border};
+            border-radius: 10px;
+            padding: 8px 10px;
+            background: {bg};
+            color: #111827;
+            font-weight: 600;
+        }}
+        QToolButton:checked {{
+            /* checked управляем вручную, но пусть будет без сюрпризов */
+        }}
+        """
+
+    def _current_selected_ids(self) -> List[int]:
+        ids = [uid for uid, b in self._zone_btns.items() if b.isChecked()]
+        # Важно: вернуть в порядке sort_order
+        order = {uid: i for i, uid in enumerate(self._venue_unit_order)}
+        ids.sort(key=lambda x: order.get(x, 10**9))
+        return ids
+
+    @staticmethod
+    def _is_contiguous(indices: List[int]) -> bool:
+        if not indices:
+            return True
+        indices = sorted(indices)
+        return indices == list(range(indices[0], indices[-1] + 1))
+
+    def _selected_segment(self) -> Tuple[Optional[int], Optional[int]]:
+        """
+        Возвращает сегмент выбранных зон в индексах sort_order: (l, r) или (None, None).
+        """
+        sel = self._current_selected_ids()
+        if not sel:
+            return None, None
+        idx_map = {uid: i for i, uid in enumerate(self._venue_unit_order)}
+        idxs = [idx_map[uid] for uid in sel if uid in idx_map]
+        if not idxs:
+            return None, None
+        idxs.sort()
+        return idxs[0], idxs[-1]
+
+    def _apply_selection_contiguous(self, desired_ids: List[int], *, show_warning: bool) -> None:
+        """
+        Принудительно применяет выбор, обрезая/нормализуя до "соседнего" сегмента.
+        """
+        idx_map = {uid: i for i, uid in enumerate(self._venue_unit_order)}
+        idxs = [idx_map[uid] for uid in desired_ids if uid in idx_map]
+        idxs = sorted(set(idxs))
+
+        if not idxs:
+            for b in self._zone_btns.values():
+                b.blockSignals(True)
+                b.setChecked(False)
+                b.blockSignals(False)
+            self._repaint_tiles()
+            return
+
+        # если не contiguous — берём минимальный сегмент по границам (min..max)
+        l, r = min(idxs), max(idxs)
+        if not self._is_contiguous(idxs):
+            if show_warning:
+                QMessageBox.information(self, "Зоны", "Можно выбирать только соседние зоны. Выбор будет скорректирован.")
+        idxs = list(range(l, r + 1))
+
+        selected_ids = {self._venue_unit_order[i] for i in idxs if 0 <= i < len(self._venue_unit_order)}
+
+        for uid, b in self._zone_btns.items():
+            b.blockSignals(True)
+            b.setChecked(uid in selected_ids)
+            b.blockSignals(False)
+
+        self._repaint_tiles()
+
+    def _on_tile_clicked(self, uid: int) -> None:
+        """
+        Логика contiguous-выбора:
+        - если сейчас ничего не выбрано -> выбираем uid
+        - если есть сегмент [l..r]:
+            * клик по выбранной зоне:
+                - если в середине -> "обрезать" справа до uid (оставляем [l..idx])
+                - если это край -> снять край (уменьшить сегмент)
+            * клик по невыбранной зоне:
+                - если примыкает слева/справа -> расширяем сегмент
+                - иначе -> заменяем сегмент на одну зону uid
+        """
+        if uid not in self._zone_btns:
+            return
+
+        idx_map = {u: i for i, u in enumerate(self._venue_unit_order)}
+        if uid not in idx_map:
+            return
+
+        cur_sel = self._current_selected_ids()
+        if not cur_sel:
+            self._apply_selection_contiguous([uid], show_warning=False)
+            return
+
+        l, r = self._selected_segment()
+        if l is None or r is None:
+            self._apply_selection_contiguous([uid], show_warning=False)
+            return
+
+        idx = idx_map[uid]
+        selected_set = set(cur_sel)
+
+        if uid in selected_set:
+            # клик по выбранной зоне: уменьшение
+            if l == r:
+                self._apply_selection_contiguous([], show_warning=False)
+                return
+
+            if idx == l:
+                new_l, new_r = l + 1, r
+            elif idx == r:
+                new_l, new_r = l, r - 1
+            else:
+                # середина: обрежем справа до idx (это интуитивно)
+                new_l, new_r = l, idx
+
+            desired = [self._venue_unit_order[i] for i in range(new_l, new_r + 1)]
+            self._apply_selection_contiguous(desired, show_warning=False)
+            return
+
+        # клик по невыбранной зоне
+        if idx == l - 1:
+            new_l, new_r = idx, r
+        elif idx == r + 1:
+            new_l, new_r = l, idx
+        else:
+            # не рядом -> заменить выбор на одну зону
+            new_l, new_r = idx, idx
+
+        desired = [self._venue_unit_order[i] for i in range(new_l, new_r + 1)]
+        self._apply_selection_contiguous(desired, show_warning=False)
+
     def _select_all_zones(self) -> None:
-        for cb in self._zone_checks.values():
-            cb.setChecked(True)
+        self._apply_selection_contiguous(list(self._venue_unit_order), show_warning=False)
 
     def _clear_all_zones(self) -> None:
-        for cb in self._zone_checks.values():
-            cb.setChecked(False)
+        self._apply_selection_contiguous([], show_warning=False)
 
-    def _selected_unit_ids(self) -> List[int]:
-        picked = [uid for uid, cb in self._zone_checks.items() if cb.isChecked()]
-        picked.sort()
-        return picked
+    def _repaint_tiles(self) -> None:
+        """
+        Перекрасить плитки по availability (если известна) и по selected.
+        """
+        for uid, btn in self._zone_btns.items():
+            conf = self._conf_count.get(uid, None)
+            btn.setStyleSheet(self._tile_style(selected=btn.isChecked(), conflicts=conf))
 
-    # ---------- availability ----------
+    # ---------------- Availability ----------------
     def _schedule_avail_check(self) -> None:
         self._avail_timer.start()
 
     def _on_avail_row_clicked(self, row: int, col: int) -> None:
-        # клик по строке таблицы доступности переключает соответствующую зону
         it = self.tbl_avail.item(row, 0)
         if not it:
             return
         uid = it.data(Qt.ItemDataRole.UserRole)
         if uid is None:
             return
-        uid = int(uid)
-        cb = self._zone_checks.get(uid)
-        if cb:
-            cb.setChecked(not cb.isChecked())
+        self._on_tile_clicked(int(uid))
 
     def _check_availability(self) -> None:
         try:
@@ -295,9 +483,9 @@ class TenantRuleDialog(QDialog):
             if ends <= starts or valid_to < valid_from:
                 return
 
-            # проверяем все зоны площадки (а не только выбранные) — чтобы пользователь видел картину
-            units = self._venue_units_sorted.get(vid, [])
-            unit_ids = [int(u["id"]) for u in units]
+            unit_ids = list(self._venue_unit_order)
+            if not unit_ids:
+                return
 
             from app.services.availability_service import get_units_availability_for_rule
 
@@ -313,6 +501,10 @@ class TenantRuleDialog(QDialog):
             )
             self._fill_availability_table(avail)
 
+            # cache conflict counts for tile coloring
+            self._conf_count = {int(a.venue_unit_id): int(a.conflict_count) for a in avail}
+            self._repaint_tiles()
+
         except Exception as e:
             self.tbl_avail.setRowCount(0)
             self.tbl_avail.setRowCount(1)
@@ -324,7 +516,7 @@ class TenantRuleDialog(QDialog):
     def _fill_availability_table(self, avail) -> None:
         self.tbl_avail.setRowCount(0)
 
-        selected = set(self._selected_unit_ids())
+        selected = set(self._current_selected_ids())
 
         for r, a in enumerate(avail):
             self.tbl_avail.insertRow(r)
@@ -342,13 +534,11 @@ class TenantRuleDialog(QDialog):
                 who_lines.append(f"{c.day:%d.%m} {c.starts_at}-{c.ends_at} — {c.who}")
             it_who = QTableWidgetItem("\n".join(who_lines))
 
-            # подсветка конфликтов
             if a.conflict_count == 0:
                 it_cnt.setForeground(Qt.GlobalColor.darkGreen)
             else:
                 it_cnt.setForeground(Qt.GlobalColor.darkRed)
 
-            # подсветка выбранных зон
             if int(a.venue_unit_id) in selected:
                 for it in (it_zone, it_cnt, it_days, it_who):
                     it.setBackground(Qt.GlobalColor.lightGray)
@@ -360,7 +550,7 @@ class TenantRuleDialog(QDialog):
 
         self.tbl_avail.resizeColumnsToContents()
 
-    # ---------- accept/values ----------
+    # ---------------- Accept / values ----------------
     def _on_accept(self) -> None:
         if self.tm_end.time() <= self.tm_start.time():
             QMessageBox.warning(self, "Правило", "Время окончания должно быть больше времени начала.")
@@ -369,16 +559,22 @@ class TenantRuleDialog(QDialog):
             QMessageBox.warning(self, "Правило", "Дата 'по' не может быть раньше даты 'с'.")
             return
 
-        unit_ids = self._selected_unit_ids()
+        unit_ids = self._current_selected_ids()
         if not unit_ids:
             QMessageBox.warning(self, "Правило", "Выберите хотя бы одну зону.")
+            return
+
+        # contiguous-гарантия (на всякий случай)
+        idx_map = {uid: i for i, uid in enumerate(self._venue_unit_order)}
+        idxs = sorted(idx_map[uid] for uid in unit_ids if uid in idx_map)
+        if not self._is_contiguous(idxs):
+            QMessageBox.warning(self, "Правило", "Можно выбирать только соседние зоны.")
             return
 
         self.accept()
 
     def values(self) -> Dict:
-        unit_ids = self._selected_unit_ids()
-        # venue_unit_id оставим как первый элемент для совместимости со старым кодом
+        unit_ids = self._current_selected_ids()
         return {
             "venue_unit_id": int(unit_ids[0]),
             "venue_unit_ids": unit_ids,
