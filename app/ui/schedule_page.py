@@ -99,29 +99,36 @@ class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     def paint(self, painter: QPainter, option, index):
-        # Qt сам нарисует фон/текст/selection
-        super().paint(painter, option, index)
-
-        rect = option.rect
-        part = index.data(self.ROLE_PART)
-        booking = index.data(Qt.ItemDataRole.UserRole)
-        has_booking = bool(booking)
-
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # 1) СЕТКА: рисуем ТОЛЬКО для пустых слотов.
+        rect = option.rect
+
+        # 1) Рисуем фон из BackgroundRole вручную (это ключевое)
+        bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        if isinstance(bg, QColor) and bg.alpha() > 0:
+            painter.fillRect(rect, bg)
+
+        # 2) Потом стандартная отрисовка текста/selection (но без фона)
+        opt = option
+        # попытка не дать стилю заливать фон
+        opt.backgroundBrush = Qt.BrushStyle.NoBrush  # безопасно, если атрибут есть
+        super().paint(painter, opt, index)
+
+        # 3) Сетка только для пустых слотов
+        booking = index.data(Qt.ItemDataRole.UserRole)
+        has_booking = bool(booking)
         if not has_booking:
             grid_pen = QPen(QColor(255, 255, 255, 28))
             grid_pen.setWidth(1)
             painter.setPen(grid_pen)
-            # тонкие линии по границам ячейки (как grid)
             painter.drawLine(rect.topLeft(), rect.bottomLeft())
             painter.drawLine(rect.topRight(), rect.bottomRight())
             painter.drawLine(rect.topLeft(), rect.topRight())
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
-        # 2) РАМКА БЛОКА: рисуем для брони (по top/middle/bottom)
+        # 4) Рамка блока для брони
+        part = index.data(self.ROLE_PART)
         if part:
             border_pen = QPen(QColor(15, 23, 42, 160))
             border_pen.setWidth(2)
@@ -809,6 +816,8 @@ class SchedulePage(QWidget):
                 it0.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))
 
         self.tbl.resizeRowsToContents()
+        self.tbl.viewport().update()
+
 
     # -------- list reload --------
 
