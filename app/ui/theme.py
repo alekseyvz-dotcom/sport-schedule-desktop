@@ -371,4 +371,13 @@ QLabel#scheduleMeta { color: rgba(226,232,240,0.65); padding: 0 4px; }
 QLabel#scheduleMetaStrong { color: rgba(255,255,255,0.90); font-weight: 800; padding: 0 4px; }
 QLabel#kpiTitle { color: rgba(226,232,240,0.60); }
 QLabel#kpiValue { color: rgba(255,255,255,0.92); font-weight: 900; }
+
+/* ---- Schedule tables: do NOT paint cells via QSS (let BackgroundRole work) ---- */
+QTableWidget#scheduleGrid::item,
+QTableWidget#scheduleGrid::item:selected,
+QTableWidget#scheduleList::item,
+QTableWidget#scheduleList::item:selected {
+    background: transparent;
+    color: rgba(255,255,255,0.90); 
+}
 """
