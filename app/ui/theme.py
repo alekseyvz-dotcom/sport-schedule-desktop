@@ -321,5 +321,7 @@ QProgressBar#usagePctYellow::chunk  { background: #facc15; border-radius: 8px; }
 QProgressBar#usagePctOrange::chunk  { background: #f59e0b; border-radius: 8px; }
 QProgressBar#usagePctRed::chunk     { background: #ef4444; border-radius: 8px; }
 QProgressBar#usagePctNeutral::chunk { background: rgba(255,255,255,0.18); border-radius: 8px; }
+QLabel#dlgTitle { color: rgba(255,255,255,0.92); font-weight: 900; font-size: 14px; }
+QLabel#hint { color: rgba(226, 232, 240, 0.60); font-size: 12px; }
 
 """
