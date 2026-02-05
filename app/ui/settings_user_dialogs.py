@@ -4,17 +4,26 @@ from typing import Optional, Dict, List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QCheckBox, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QListWidget, QListWidgetItem
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QAbstractItemView,
+    QListWidget,
+    QListWidgetItem,
 )
 
 from app.services.users_admin_service import OrgPermRow, RoleRow
 
+
 class RoleSelectDialog(QDialog):
-    """
-    Выбор роли с названием + описанием.
-    """
     ROLE_DESCRIPTIONS = {
         "admin": "Полный доступ: пользователи, учреждения, расписание, отчёты.",
         "user": "Ограниченный доступ: работа только с назначенными учреждениями.",
@@ -22,7 +31,7 @@ class RoleSelectDialog(QDialog):
 
     def __init__(self, parent, title: str, roles: List[RoleRow], current_code: Optional[str] = None):
         super().__init__(parent)
-        self.setStyleSheet(_DIALOG_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(520, 360)
 
@@ -33,9 +42,11 @@ class RoleSelectDialog(QDialog):
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск роли…")
+        self.ed_search.setClearButtonEnabled(True)
         self.ed_search.textChanged.connect(self._apply_filter)
 
         self.lst = QListWidget()
+
         self.lbl_desc = QLabel("Выберите роль")
         self.lbl_desc.setObjectName("hint")
         self.lbl_desc.setWordWrap(True)
@@ -46,7 +57,7 @@ class RoleSelectDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(lbl_title)
         root.addWidget(self.ed_search)
@@ -115,7 +126,7 @@ class UserEditDialog(QDialog):
         current_admin_user_id: Optional[int] = None,
     ):
         super().__init__(parent)
-        self.setStyleSheet(_DIALOG_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(560, 300)
 
@@ -133,6 +144,7 @@ class UserEditDialog(QDialog):
 
         self.ed_role = QLineEdit()
         self.ed_role.setReadOnly(True)
+
         self.btn_pick_role = QPushButton("Выбрать роль…")
         self.btn_pick_role.clicked.connect(self._pick_role)
 
@@ -150,21 +162,24 @@ class UserEditDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(self.lbl_title)
 
         r1 = QHBoxLayout()
+        r1.setSpacing(10)
         r1.addWidget(QLabel("Логин:"), 0)
         r1.addWidget(self.ed_username, 1)
         root.addLayout(r1)
 
         r2 = QHBoxLayout()
+        r2.setSpacing(10)
         r2.addWidget(QLabel("ФИО:"), 0)
         r2.addWidget(self.ed_full_name, 1)
         root.addLayout(r2)
 
         r3 = QHBoxLayout()
+        r3.setSpacing(10)
         r3.addWidget(QLabel("Роль:"), 0)
         r3.addWidget(self.ed_role, 1)
         r3.addWidget(self.btn_pick_role, 0)
@@ -173,11 +188,13 @@ class UserEditDialog(QDialog):
 
         if self.ask_password:
             r4 = QHBoxLayout()
+            r4.setSpacing(10)
             r4.addWidget(QLabel("Пароль:"), 0)
             r4.addWidget(self.ed_password, 1)
             root.addLayout(r4)
 
             r5 = QHBoxLayout()
+            r5.setSpacing(10)
             r5.addWidget(QLabel("Повтор:"), 0)
             r5.addWidget(self.ed_password2, 1)
             root.addLayout(r5)
@@ -188,12 +205,10 @@ class UserEditDialog(QDialog):
         footer.addWidget(self.btn_cancel)
         root.addLayout(footer)
 
-        # initial fill
         if initial:
             self.ed_username.setText(str(initial.get("username") or ""))
             self.ed_full_name.setText(str(initial.get("full_name") or ""))
             self.ch_active.setChecked(bool(initial.get("is_active", True)))
-
             role_code = str(initial.get("role_code") or "")
             self._set_role_code(role_code)
 
@@ -229,7 +244,6 @@ class UserEditDialog(QDialog):
             QMessageBox.warning(self, "Проверка", "Выберите роль.")
             return
 
-        # запрет деактивировать / снять admin у самого себя
         if self.current_admin_user_id is not None and self._initial_user_id == self.current_admin_user_id:
             if not self.ch_active.isChecked():
                 QMessageBox.warning(self, "Ограничение", "Нельзя деактивировать самого себя.")
@@ -265,7 +279,7 @@ class UserEditDialog(QDialog):
 class PasswordDialog(QDialog):
     def __init__(self, parent, title: str, *, forbid_self: bool = False):
         super().__init__(parent)
-        self.setStyleSheet(_DIALOG_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(520, 190)
 
@@ -283,16 +297,18 @@ class PasswordDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(self.lbl_title)
 
         r1 = QHBoxLayout()
+        r1.setSpacing(10)
         r1.addWidget(QLabel("Новый пароль:"), 0)
         r1.addWidget(self.ed_pw1, 1)
         root.addLayout(r1)
 
         r2 = QHBoxLayout()
+        r2.setSpacing(10)
         r2.addWidget(QLabel("Повтор:"), 0)
         r2.addWidget(self.ed_pw2, 1)
         root.addLayout(r2)
@@ -317,6 +333,7 @@ class PasswordDialog(QDialog):
     def password(self) -> str:
         return self.ed_pw1.text() or ""
 
+
 class OrgPermissionsDialog(QDialog):
     def __init__(
         self,
@@ -327,11 +344,10 @@ class OrgPermissionsDialog(QDialog):
         show_inactive: bool = False,
     ):
         super().__init__(parent)
-        self.setStyleSheet(_DIALOG_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(860, 600)
 
-        # полный набор прав (включая неактивные) — это то, что будем сохранять
         self._perms_all: List[OrgPermRow] = perms[:]
 
         self.lbl_title = QLabel(title)
@@ -339,6 +355,7 @@ class OrgPermissionsDialog(QDialog):
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск учреждения…")
+        self.ed_search.setClearButtonEnabled(True)
         self.ed_search.textChanged.connect(self._apply_filter)
 
         self.ch_show_inactive = QCheckBox("Показывать неактивные")
@@ -346,11 +363,16 @@ class OrgPermissionsDialog(QDialog):
         self.ch_show_inactive.stateChanged.connect(lambda *_: self._apply_filter())
 
         self.tbl = QTableWidget(0, 5)
+        self.tbl.setObjectName("orgPermsTable")
         self.tbl.setHorizontalHeaderLabels(["org_id", "Активно", "Учреждение", "Просмотр", "Редактирование"])
         self.tbl.setColumnHidden(0, True)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setVisible(False)
 
         header = self.tbl.horizontalHeader()
+        header.setHighlightSections(False)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
@@ -371,10 +393,14 @@ class OrgPermissionsDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(10)
         top.addWidget(self.ed_search, 1)
         top.addWidget(self.ch_show_inactive, 0)
 
         footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(10)
         footer.addWidget(self.btn_only_one)
         footer.addStretch(1)
         footer.addWidget(self.btn_all_view)
@@ -384,7 +410,7 @@ class OrgPermissionsDialog(QDialog):
         footer.addWidget(self.btn_cancel)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(self.lbl_title)
         root.addLayout(top)
@@ -394,8 +420,7 @@ class OrgPermissionsDialog(QDialog):
         self._render_table_from_perms_all()
         self._apply_filter()
 
-    # ---------- render / mapping ----------
-
+    # --- остальная логика без изменений ---
     def _render_table_from_perms_all(self):
         self.tbl.setRowCount(len(self._perms_all))
 
@@ -412,7 +437,6 @@ class OrgPermissionsDialog(QDialog):
             ch_edit.setChecked(bool(p.can_edit))
             self.tbl.setCellWidget(r, 4, ch_edit)
 
-            # edit => view
             def sync_view(_state, rr=r):
                 cv: QCheckBox = self.tbl.cellWidget(rr, 3)  # type: ignore
                 ce: QCheckBox = self.tbl.cellWidget(rr, 4)  # type: ignore
@@ -421,7 +445,6 @@ class OrgPermissionsDialog(QDialog):
 
             ch_edit.stateChanged.connect(sync_view)
 
-            # неактивные — серым (но чекбоксы оставляем рабочими, если вы хотите запретить — скажите)
             if not p.org_is_active:
                 gray = Qt.GlobalColor.darkGray
                 for c in (1, 2):
@@ -452,28 +475,20 @@ class OrgPermissionsDialog(QDialog):
         cv.setChecked(bool(can_view) or bool(can_edit))
         ce.setChecked(bool(can_edit))
 
-    # ---------- bulk actions ----------
-
     def _set_all(self, *, view: bool, edit: bool):
         for r in range(self.tbl.rowCount()):
-            # применяем ко всем, включая скрытые строки (важно!)
             self._set_row(r, can_view=view, can_edit=edit)
 
     def _clear_all(self):
         for r in range(self.tbl.rowCount()):
             self._set_row(r, can_view=False, can_edit=False)
 
-    # ---------- "only one org" ----------
-
     def _only_one_org(self):
-        # список всех учреждений для выбора (можно выбирать и неактивные — решите сами)
-        items = [f"{p.org_name} (id={p.org_id})" for p in self._perms_all]
-        if not items:
+        if not self._perms_all:
             return
 
-        # маленький внутренний диалог выбора через QListWidget, чтобы было красиво и в стиле
         dlg = QDialog(self)
-        dlg.setStyleSheet(_DIALOG_QSS)
+        dlg.setObjectName("dialog")
         dlg.setWindowTitle("Выберите учреждение")
         dlg.resize(560, 460)
 
@@ -482,6 +497,7 @@ class OrgPermissionsDialog(QDialog):
 
         ed = QLineEdit()
         ed.setPlaceholderText("Поиск…")
+        ed.setClearButtonEnabled(True)
 
         lst = QListWidget()
         for p in self._perms_all:
@@ -511,7 +527,7 @@ class OrgPermissionsDialog(QDialog):
         footer.addWidget(btn_cancel)
 
         lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
         lay.addWidget(title)
         lay.addWidget(ed)
@@ -529,25 +545,16 @@ class OrgPermissionsDialog(QDialog):
 
         selected_org_id = int(it.data(Qt.ItemDataRole.UserRole))
 
-        # снимаем всё
         self._clear_all()
-
-        # ставим выбранному
         for r in range(self.tbl.rowCount()):
             if self._row_org_id(r) == selected_org_id:
                 self._set_row(r, can_view=True, can_edit=bool(ch_edit.isChecked()))
                 break
 
-        # чтобы пользователь увидел выбранное даже если оно неактивное
         self.ch_show_inactive.setChecked(True)
         self._apply_filter()
 
-    # ---------- output ----------
-
     def perms(self) -> List[OrgPermRow]:
-        """
-        Возвращаем полный набор (включая скрытые строки), чтобы не терять права.
-        """
         out: List[OrgPermRow] = []
         for r in range(self.tbl.rowCount()):
             org_id = int(self.tbl.item(r, 0).text())
@@ -571,10 +578,11 @@ class OrgPermissionsDialog(QDialog):
     def show_inactive(self) -> bool:
         return bool(self.ch_show_inactive.isChecked())
 
+
 class TabsPermissionsDialog(QDialog):
     def __init__(self, parent, title: str, perms: list):
         super().__init__(parent)
-        self.setStyleSheet(_DIALOG_QSS)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(640, 520)
 
@@ -583,14 +591,20 @@ class TabsPermissionsDialog(QDialog):
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск раздела…")
+        self.ed_search.setClearButtonEnabled(True)
         self.ed_search.textChanged.connect(self._apply_filter)
 
         self.tbl = QTableWidget(0, 3)
+        self.tbl.setObjectName("tabsPermsTable")
         self.tbl.setHorizontalHeaderLabels(["code", "Раздел", "Доступ"])
         self.tbl.setColumnHidden(0, True)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setVisible(False)
 
         header = self.tbl.horizontalHeader()
+        header.setHighlightSections(False)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
 
@@ -605,13 +619,15 @@ class TabsPermissionsDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(self.lbl_title)
         root.addWidget(self.ed_search)
         root.addWidget(self.tbl, 1)
 
         footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(10)
         footer.addWidget(self.btn_all)
         footer.addWidget(self.btn_none)
         footer.addStretch(1)
@@ -651,4 +667,3 @@ class TabsPermissionsDialog(QDialog):
             ch: QCheckBox = self.tbl.cellWidget(r, 2)  # type: ignore
             out.append(type("X", (), {"code": code, "title": title, "enabled": ch.isChecked()})())
         return out
-
