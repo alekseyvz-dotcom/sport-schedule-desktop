@@ -373,24 +373,7 @@ class SchedulePage(QWidget):
 
     def _make_details_panel(self) -> QWidget:
         w = QWidget(self)
-        w.setStyleSheet(
-            """
-            QWidget#detailsCard {
-                background: #ffffff;
-                border: 1px solid #e6e6e6;
-                border-radius: 10px;
-            }
-            QLabel#detailsTitle {
-                color:#0f172a;
-                font-weight:700;
-                padding: 10px 12px 0 12px;
-            }
-            QLabel#detailsText {
-                color:#334155;
-                padding: 2px 12px;
-            }
-            """
-        )
+
         w.setObjectName("detailsCard")
 
         self.lbl_d_title = QLabel("Детали брони")
