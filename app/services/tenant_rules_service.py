@@ -45,7 +45,8 @@ class TenantRule:
 @dataclass
 class GenerateReport:
     created: int
-    skipped: int
+    skipped_busy: int
+    skipped_error: int
     errors: List[str]
 
 
@@ -240,7 +241,8 @@ def _default_booking_title(*, tenant_name: str, tenant_kind: str) -> str:
 
 def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: timezone) -> GenerateReport:
     created = 0
-    skipped = 0
+    skipped_busy = 0
+    skipped_error = 0
     errors: List[str] = []
 
     tenant_name, tenant_kind = _get_tenant_name_and_kind(rule.tenant_id)
@@ -260,20 +262,20 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
                 ends_at=ends_dt,
             )
             created += 1
+
         except Exception as e:
-            skipped += 1
             msg = str(e)
 
-            # "занято" — ожидаемый пропуск
             if "Площадка занята" in msg:
+                skipped_busy += 1
                 continue
 
+            skipped_error += 1
             errors.append(
                 f"{d} {rule.starts_at}-{rule.ends_at} unit={rule.venue_unit_id} venue={venue_id}: {type(e).__name__}: {e}"
             )
 
-    return GenerateReport(created=created, skipped=skipped, errors=errors)
-
+    return GenerateReport(created=created, skipped_busy=skipped_busy, skipped_error=skipped_error, errors=errors)
 
 def generate_bookings_for_tenant(*, user_id: int, role_code: str, tenant_id: int, tz: timezone) -> GenerateReport:
     _require_rules_edit(user_id=user_id, role_code=role_code)
