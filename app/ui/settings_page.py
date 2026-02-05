@@ -19,53 +19,10 @@ from app.services.users_admin_service import (
 from app.ui.settings_user_dialogs import UserEditDialog, PasswordDialog, OrgPermissionsDialog, TabsPermissionsDialog
 
 
-_PAGE_QSS = """
-QWidget { background: #fbfbfc; }
-QLineEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 6px 10px;
-    min-height: 22px;
-}
-QLineEdit:focus { border: 1px solid #7fb3ff; }
-
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-
-QLabel#sectionTitle { color: #111111; font-weight: 700; padding: 0 4px; }
-
-QTableWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    selection-background-color: rgba(127,179,255,60);
-    selection-color: #111111;
-    gridline-color: #e9edf3;
-}
-QHeaderView::section {
-    background: #f6f7f9;
-    color: #111111;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #e6e6e6;
-    font-weight: 600;
-}
-QTableWidget::item { padding: 6px 10px; }
-"""
-
-
 class SettingsPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
         self.user = user
         self.setStyleSheet(_PAGE_QSS)
 
