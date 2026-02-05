@@ -292,4 +292,78 @@ QLabel#detailsText {
     color: rgba(226, 232, 240, 0.72);
     padding: 2px 12px;
 }
+
+/* ---- Labels (forms) ---- */
+QLabel {
+    color: rgba(226, 232, 240, 0.82);
+}
+QLabel:disabled {
+    color: rgba(226, 232, 240, 0.35);
+}
+
+/* ---- Dialog headings/info (BookingDialog uses rich text) ---- */
+QDialog QLabel {
+    color: rgba(226, 232, 240, 0.82);
+}
+QDialog QLabel b {
+    color: rgba(255, 255, 255, 0.92);
+}
+
+/* ---- FormLayout spacing looks better with tighter margins ---- */
+QFormLayout {
+    margin-top: 6px;
+}
+
+/* ---- Dialog buttons ---- */
+QDialogButtonBox {
+    padding-top: 6px;
+}
+QDialogButtonBox QPushButton {
+    min-width: 120px;
+}
+
+/* ---- ComboBox popup/list ---- */
+QComboBox QAbstractItemView {
+    background: rgba(2, 6, 23, 0.98);
+    color: rgba(255, 255, 255, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    selection-background-color: rgba(99, 102, 241, 0.35);
+    outline: 0;
+    padding: 6px;
+}
+
+/* ---- Table inside dialogs/widgets (TenantRulesWidget) ---- */
+QTableWidget, QTableView {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 12px;
+    gridline-color: transparent;
+    alternate-background-color: rgba(255, 255, 255, 0.03);
+    selection-background-color: rgba(99, 102, 241, 0.28);
+    selection-color: rgba(255, 255, 255, 0.92);
+}
+QHeaderView::section {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(226, 232, 240, 0.82);
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    font-weight: 800;
+}
+QTableView::item {
+    padding: 6px 10px;
+    border: none;
+}
+QTableView::item:selected {
+    background: rgba(99, 102, 241, 0.28);
+}
+
+/* ---- MessageBox ---- */
+QMessageBox {
+    background: #0b1220;
+}
+QMessageBox QLabel {
+    color: rgba(226, 232, 240, 0.82);
+}
 """
