@@ -7,14 +7,20 @@ QMainWindow {
     color: rgba(255, 255, 255, 0.88);
     font-size: 13px;
 }
+
+/* по умолчанию: не заливаем каждый QWidget (иначе “плашки” на логине) */
 QWidget {
     color: rgba(255, 255, 255, 0.88);
     font-size: 13px;
-    background: transparent; /* ключевой фикс “заливки” */
+    background: transparent;
 }
 
-QWidget#welcomeRoot { background: transparent; }
+/* ---- Unified page background (для корневых виджетов вкладок) ---- */
+QWidget#page {
+    background: rgba(2, 6, 23, 0.55);
+}
 
+/* ---- Tooltip ---- */
 QToolTip {
     background: rgba(2, 6, 23, 0.95);
     color: rgba(255, 255, 255, 0.92);
@@ -66,7 +72,7 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComb
     selection-background-color: rgba(99, 102, 241, 0.55);
 }
 QLineEdit::placeholder { color: rgba(226, 232, 240, 0.45); }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus {
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid rgba(99, 102, 241, 0.95);
     background: rgba(2, 6, 23, 0.52);
 }
@@ -85,16 +91,14 @@ QPushButton:hover {
     background: rgba(255, 255, 255, 0.10);
     border-color: rgba(255, 255, 255, 0.22);
 }
-QPushButton:pressed {
-    background: rgba(255, 255, 255, 0.07);
-}
+QPushButton:pressed { background: rgba(255, 255, 255, 0.07); }
 QPushButton:disabled {
     color: rgba(226, 232, 240, 0.35);
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.08);
 }
 
-/* Optional: если хочешь “primary” как на логине */
+/* “primary” */
 QPushButton#primary {
     color: rgba(255, 255, 255, 0.95);
     border: 1px solid rgba(99, 102, 241, 0.75);
@@ -103,9 +107,7 @@ QPushButton#primary {
         stop:1 rgba(34, 211, 238, 1.0)
     );
 }
-QPushButton#primary:hover {
-    border-color: rgba(255, 255, 255, 0.22);
-}
+QPushButton#primary:hover { border-color: rgba(255, 255, 255, 0.22); }
 
 /* ---- Checkbox ---- */
 QCheckBox { spacing: 8px; color: rgba(226, 232, 240, 0.82); }
@@ -138,15 +140,10 @@ QHeaderView::section {
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     font-weight: 800;
 }
-QTableView::item {
-    padding: 6px 10px;
-    border: none;
-}
-QTableView::item:selected {
-    background: rgba(99, 102, 241, 0.28);
-}
+QTableView::item { padding: 6px 10px; border: none; }
+QTableView::item:selected { background: rgba(99, 102, 241, 0.28); }
 
-/* ---- Scrollbar (чуть аккуратнее) ---- */
+/* ---- Scrollbar ---- */
 QScrollBar:vertical {
     background: transparent;
     width: 12px;
@@ -173,28 +170,17 @@ QScrollBar::handle:horizontal {
 QScrollBar::handle:horizontal:hover { background: rgba(255, 255, 255, 0.22); }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 
-/* ---- Dialogs ---- */
-QDialog {
-    background: #0b1220;
-}
-QMessageBox QLabel {
-    color: rgba(255, 255, 255, 0.88);
-}
+/* ---- Dialogs / MessageBox ---- */
+QDialog { background: #0b1220; }
+QMessageBox { background: #0b1220; }
+QMessageBox QLabel { color: rgba(226, 232, 240, 0.82); }
 
-/* ---- Dialog surface ---- */
-QDialog {
-    background: #0b1220;
-}
-QDialog QLabel {
-    color: rgba(226, 232, 240, 0.82);
-}
-
-/* ---- GroupBox (карточки) ---- */
+/* ---- GroupBox (cards) ---- */
 QGroupBox {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 14px;
-    margin-top: 14px; /* место под заголовок */
+    margin-top: 14px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
@@ -202,25 +188,26 @@ QGroupBox::title {
     padding: 0 8px;
     color: rgba(255, 255, 255, 0.90);
     font-weight: 800;
-    background: #0b1220; /* чтобы текст не "лежал" на рамке */
+    background: rgba(2, 6, 23, 0.95);
 }
 
 /* ---- DialogButtonBox ---- */
-QDialogButtonBox QPushButton {
-    min-width: 110px;
-}
+QDialogButtonBox { padding-top: 6px; }
+QDialogButtonBox QPushButton { min-width: 120px; }
 
-/* ---- ComboBox (стрелка/список) ---- */
-QComboBox {
-    padding-right: 28px; /* место под стрелку */
-}
+/* ---- ComboBox (arrow + popup) ---- */
+QComboBox { padding-right: 28px; }
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 26px;
     border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
-
+QComboBox::down-arrow {
+    width: 12px;
+    height: 12px;
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='rgb(226,232,240)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
 QComboBox QAbstractItemView {
     background: rgba(2, 6, 23, 0.98);
     color: rgba(255, 255, 255, 0.90);
@@ -259,11 +246,9 @@ QCalendarWidget QAbstractItemView:enabled {
 }
 
 /* ---- ScrollArea ---- */
-QScrollArea {
-    background: transparent;
-    border: none;
-}
+QScrollArea { background: transparent; border: none; }
 
+/* ---- View tabs (SchedulePage) ---- */
 QToolButton#viewTab {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -282,6 +267,7 @@ QToolButton#viewTab:checked {
     color: rgba(255, 255, 255, 0.92);
 }
 
+/* ---- Details card (SchedulePage list) ---- */
 QWidget#detailsCard {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.10);
@@ -297,109 +283,20 @@ QLabel#detailsText {
     padding: 2px 12px;
 }
 
-/* ---- Labels (forms) ---- */
-QLabel {
-    color: rgba(226, 232, 240, 0.82);
-}
-QLabel:disabled {
-    color: rgba(226, 232, 240, 0.35);
-}
-
-/* ---- Dialog headings/info (BookingDialog uses rich text) ---- */
-QDialog QLabel {
-    color: rgba(226, 232, 240, 0.82);
-}
-QDialog QLabel b {
-    color: rgba(255, 255, 255, 0.92);
-}
-
-/* ---- FormLayout spacing looks better with tighter margins ---- */
-QFormLayout {
-    margin-top: 6px;
-}
-
-/* ---- Dialog buttons ---- */
-QDialogButtonBox {
-    padding-top: 6px;
-}
-QDialogButtonBox QPushButton {
-    min-width: 120px;
-}
-
-/* ---- ComboBox popup/list ---- */
-QComboBox QAbstractItemView {
-    background: rgba(2, 6, 23, 0.98);
-    color: rgba(255, 255, 255, 0.90);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
-    selection-background-color: rgba(99, 102, 241, 0.35);
-    outline: 0;
-    padding: 6px;
-}
-
-/* ---- Table inside dialogs/widgets (TenantRulesWidget) ---- */
-QTableWidget, QTableView {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    border-radius: 12px;
-    gridline-color: transparent;
-    alternate-background-color: rgba(255, 255, 255, 0.03);
-    selection-background-color: rgba(99, 102, 241, 0.28);
-    selection-color: rgba(255, 255, 255, 0.92);
-}
-QHeaderView::section {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(226, 232, 240, 0.82);
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    font-weight: 800;
-}
-QTableView::item {
-    padding: 6px 10px;
-    border: none;
-}
-QTableView::item:selected {
-    background: rgba(99, 102, 241, 0.28);
-}
-
-/* ---- MessageBox ---- */
-QMessageBox {
-    background: #0b1220;
-}
-QMessageBox QLabel {
-    color: rgba(226, 232, 240, 0.82);
-}
-
+/* ---- Meta labels / KPI ---- */
 QLabel#scheduleMeta { color: rgba(226,232,240,0.65); padding: 0 4px; }
 QLabel#scheduleMetaStrong { color: rgba(255,255,255,0.90); font-weight: 800; padding: 0 4px; }
 QLabel#kpiTitle { color: rgba(226,232,240,0.60); }
 QLabel#kpiValue { color: rgba(255,255,255,0.92); font-weight: 900; }
 
-/* ---- Schedule tables: do NOT paint cells via QSS (let BackgroundRole work) ---- */
+/* ---- Schedule tables: let BackgroundRole control booking colors ---- */
 QTableWidget#scheduleGrid::item,
 QTableWidget#scheduleGrid::item:selected,
 QTableWidget#scheduleList::item,
 QTableWidget#scheduleList::item:selected {
     background: transparent;
-    color: rgba(255,255,255,0.90); 
-}
-
-QComboBox::down-arrow {
-    width: 12px;
-    height: 12px;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='rgb(226,232,240)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-}
-/* ---- Schedule tables: let item roles control colors (important) ---- */
-QTableWidget#scheduleGrid::item,
-QTableWidget#scheduleGrid::item:selected,
-QTableWidget#scheduleList::item,
-QTableWidget#scheduleList::item:selected {
-    background: transparent;      /* не мешаем BackgroundRole */
     color: rgba(255,255,255,0.90);
 }
-
-/* И отдельно гасим влияние "selection-background-color" на эти таблицы */
 QTableWidget#scheduleGrid,
 QTableWidget#scheduleList {
     selection-background-color: transparent;
