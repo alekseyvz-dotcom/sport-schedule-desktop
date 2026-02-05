@@ -28,6 +28,7 @@ from app.services.ref_service import list_active_orgs
 from app.services.usage_service import calc_usage_by_venues, UsageRow
 from app.ui.usage_details_widget import UsageDetailsWidget, UsageTotals
 
+
 @dataclass(frozen=True)
 class Period:
     start: date
@@ -85,7 +86,7 @@ class OrgUsagePage(QWidget):
         self.btn_refresh.clicked.connect(self.reload)
 
         top = QHBoxLayout()
-        top.setContentsMargins(12, 12, 12, 8)
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(10)
         top.addWidget(self.lbl_title)
         top.addWidget(QLabel("Учреждение:"))
@@ -98,32 +99,27 @@ class OrgUsagePage(QWidget):
         top.addWidget(self.btn_refresh)
 
         self.lbl_period = QLabel("")
-        self.lbl_period.setStyleSheet("color:#334155; padding:0 4px;")
+        self.lbl_period.setObjectName("scheduleMeta")
 
         self.lbl_total = QLabel("")
-        self.lbl_total.setStyleSheet("color:#0f172a; font-weight:600; padding:0 4px;")
+        self.lbl_total.setObjectName("scheduleMetaStrong")
 
         meta = QHBoxLayout()
-        meta.setContentsMargins(12, 0, 12, 0)
+        meta.setContentsMargins(0, 0, 0, 0)
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
         self.tbl = QTableWidget(0, 7)
+        self.tbl.setObjectName("usageTable")
         self.tbl.setHorizontalHeaderLabels(
-            [
-                "Учреждение",
-                "Площадка",
-                "Загрузка",
-                "Итого, %",
-                "ПД, ч",
-                "ГЗ, ч",
-                "Итого, ч",
-            ]
+            ["Учреждение", "Площадка", "Загрузка", "Итого, %", "ПД, ч", "ГЗ, ч", "Итого, ч"]
         )
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setShowGrid(False)
+        self.tbl.setAlternatingRowColors(False)
         self.tbl.itemSelectionChanged.connect(self._on_selection_changed)
 
         header = self.tbl.horizontalHeader()
@@ -145,15 +141,9 @@ class OrgUsagePage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.tbl)
         splitter.addWidget(self.details)
-        
-        # Минимальная ширина правой панели, чтобы подписи/проценты помещались
-        self.details.setMinimumWidth(420)   # подбери: 380..480
-        
-        # Пропорции: левый шире, но правый не слишком узкий
+        self.details.setMinimumWidth(420)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 2)
-        
-        # Стартовые размеры (под широкие экраны; можно подправить)
         splitter.setSizes([800, 420])
 
         root = QVBoxLayout(self)
@@ -165,7 +155,6 @@ class OrgUsagePage(QWidget):
 
         QTimer.singleShot(0, self._load_orgs)
 
-    # ... остальной код без изменений ...
     def _load_orgs(self):
         try:
             orgs = list_active_orgs()
@@ -193,11 +182,7 @@ class OrgUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "month":
             start = d.replace(day=1)
-            next_month = (
-                start.replace(year=start.year + 1, month=1, day=1)
-                if start.month == 12
-                else start.replace(month=start.month + 1, day=1)
-            )
+            next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
             end = next_month - timedelta(days=1)
             return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
         if mode == "quarter":
@@ -220,33 +205,18 @@ class OrgUsagePage(QWidget):
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
 
+        # только objectName -> цвет задаём в theme.py
         if pct >= 100:
-            chunk = "#22c55e"  # green
+            pb.setObjectName("usagePctGreen")
         elif pct >= 71:
-            chunk = "#facc15"  # yellow
+            pb.setObjectName("usagePctYellow")
         elif pct >= 51:
-            chunk = "#f59e0b"  # orange
+            pb.setObjectName("usagePctOrange")
         elif pct >= 1:
-            chunk = "#ef4444"  # red
+            pb.setObjectName("usagePctRed")
         else:
-            chunk = "#e5e7eb"  # 0% (neutral)
+            pb.setObjectName("usagePctNeutral")
 
-        pb.setStyleSheet(
-            f"""
-            QProgressBar {{
-                border: 1px solid #e6e6e6;
-                border-radius: 8px;
-                background: #ffffff;
-                text-align: center;
-                padding: 2px;
-                min-width: 120px;
-            }}
-            QProgressBar::chunk {{
-                border-radius: 8px;
-                background: {chunk};
-            }}
-            """
-        )
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
@@ -255,9 +225,7 @@ class OrgUsagePage(QWidget):
         e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
         self.details.set_shift_titles(m, d, e)
 
-    # остальное без изменений...
     def reload(self):
-        # твой код reload без изменений
         p = self._calc_period()
         self._period = p
         self.lbl_period.setText(f"Период: {p.title}")
@@ -331,10 +299,11 @@ class OrgUsagePage(QWidget):
             self.tbl.setItem(r0, 5, QTableWidgetItem(f"{_hours(org_gz):.1f}"))
             self.tbl.setItem(r0, 6, QTableWidgetItem(f"{_hours(org_busy):.1f}"))
 
+            # тёмный “итоговый” тон вместо белого
             for c in range(7):
                 it = self.tbl.item(r0, c)
                 if it:
-                    it.setBackground(QColor("#f8fafc"))
+                    it.setBackground(QColor(255, 255, 255, 18))
                     if c >= 3:
                         it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -371,7 +340,7 @@ class OrgUsagePage(QWidget):
             self.details.set_data(None)
 
     def _on_selection_changed(self):
-        # без изменений
+        # твой код без изменений
         if not self._period:
             self.details.set_data(None)
             return
