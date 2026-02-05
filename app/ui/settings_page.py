@@ -5,18 +5,40 @@ from typing import Optional, List
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QMessageBox, QLineEdit
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QAbstractItemView,
+    QMessageBox,
+    QLineEdit,
+    QHeaderView,
 )
 
 from app.services.users_service import AuthUser
 from app.services.users_admin_service import (
-    list_users, create_user, update_user, set_password,
-    list_roles, list_org_permissions, save_org_permissions,
-    user_tabs_summary, list_tab_permissions, save_tab_permissions,
-    OrgPermRow, AdminUserRow, RoleRow
+    list_users,
+    create_user,
+    update_user,
+    set_password,
+    list_roles,
+    list_org_permissions,
+    save_org_permissions,
+    user_tabs_summary,
+    list_tab_permissions,
+    save_tab_permissions,
+    AdminUserRow,
+    RoleRow,
 )
-from app.ui.settings_user_dialogs import UserEditDialog, PasswordDialog, OrgPermissionsDialog, TabsPermissionsDialog
+from app.ui.settings_user_dialogs import (
+    UserEditDialog,
+    PasswordDialog,
+    OrgPermissionsDialog,
+    TabsPermissionsDialog,
+)
 
 
 class SettingsPage(QWidget):
@@ -25,9 +47,14 @@ class SettingsPage(QWidget):
         self.setObjectName("page")
         self.user = user
 
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(10)
+
         if (self.user.role_code or "").lower() != "admin":
-            lay = QVBoxLayout(self)
-            lay.addWidget(QLabel("Доступ запрещён"))
+            lbl = QLabel("Доступ запрещён")
+            lbl.setObjectName("sectionTitle")
+            root.addWidget(lbl)
             return
 
         self._roles: List[RoleRow] = []
@@ -39,14 +66,29 @@ class SettingsPage(QWidget):
 
         self.ed_search_user = QLineEdit()
         self.ed_search_user.setPlaceholderText("Поиск пользователя (логин/ФИО)…")
+        self.ed_search_user.setClearButtonEnabled(True)
         self.ed_search_user.textChanged.connect(self._apply_user_filter)
 
         self.tbl = QTableWidget(0, 6)
+        self.tbl.setObjectName("settingsUsersTable")
         self.tbl.setHorizontalHeaderLabels(["id", "Логин", "ФИО", "Роль", "Активен", "Разделы"])
         self.tbl.setColumnHidden(0, True)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tbl.setShowGrid(False)
+        self.tbl.setAlternatingRowColors(False)
+        self.tbl.verticalHeader().setVisible(False)
+
+        hdr = self.tbl.horizontalHeader()
+        hdr.setHighlightSections(False)
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # hidden, but ok
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
 
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
@@ -65,8 +107,10 @@ class SettingsPage(QWidget):
         self.btn_perms.clicked.connect(self._edit_org_perms)
         self.btn_tabs.clicked.connect(self._edit_tabs_perms)
         self.btn_refresh.clicked.connect(self.reload)
-        
+
         btns = QHBoxLayout()
+        btns.setContentsMargins(0, 0, 0, 0)
+        btns.setSpacing(10)
         btns.addWidget(self.btn_add)
         btns.addWidget(self.btn_edit)
         btns.addWidget(self.btn_password)
@@ -75,13 +119,18 @@ class SettingsPage(QWidget):
         btns.addStretch(1)
         btns.addWidget(self.btn_refresh)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        # карточка под таблицу
+        table_card = QWidget(self)
+        table_card.setObjectName("detailsCard")
+        card_lay = QVBoxLayout(table_card)
+        card_lay.setContentsMargins(10, 10, 10, 10)
+        card_lay.setSpacing(0)
+        card_lay.addWidget(self.tbl)
+
         root.addWidget(title)
         root.addWidget(self.ed_search_user)
         root.addLayout(btns)
-        root.addWidget(self.tbl, 1)
+        root.addWidget(table_card, 1)
 
         self.reload()
 
@@ -116,7 +165,9 @@ class SettingsPage(QWidget):
             self.tbl.setItem(i, 2, QTableWidgetItem(u.full_name))
             self.tbl.setItem(i, 3, QTableWidgetItem(u.role_code))
             self.tbl.setItem(i, 4, QTableWidgetItem("Да" if u.is_active else "Нет"))
-            self.tbl.setItem(i, 5, QTableWidgetItem("Все" if u.role_code.lower() == "admin" else user_tabs_summary(u.id)))
+            self.tbl.setItem(
+                i, 5, QTableWidgetItem("Все" if u.role_code.lower() == "admin" else user_tabs_summary(u.id))
+            )
         if users:
             self.tbl.selectRow(0)
 
