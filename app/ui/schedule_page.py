@@ -783,39 +783,45 @@ class SchedulePage(QWidget):
             cur += step
         return out
 
-
     def _setup_table(self):
         times = self._time_slots()
         resource_count = len(self._resources)
-
+    
         self.tbl.clear()
         self.tbl.setRowCount(len(times))
         self.tbl.setColumnCount(1 + resource_count)
-
+    
         headers = ["Время"] + [r.resource_name for r in self._resources]
         self.tbl.setHorizontalHeaderLabels(headers)
-
+    
         header = self.tbl.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for c in range(1, 1 + resource_count):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
-
+    
+        # Заполняем колонку времени
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            
+            # ДОБАВИТЬ: явно задать цвет текста и фона
+            it.setForeground(QColor(226, 232, 240, 210))  # светлый текст
+            it.setBackground(QColor(15, 23, 42, 90))      # полупрозрачный тёмный фон
+            
             self.tbl.setItem(r, 0, it)
-
+    
+        # Остальные ячейки (зоны бронирования)
         for r in range(len(times)):
             for c in range(1, 1 + resource_count):
                 it = QTableWidgetItem("")
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
                 self.tbl.setItem(r, c, it)
-
+    
         self.tbl.setColumnWidth(0, 70)
         self.tbl.resizeRowsToContents()
-
+    
     def _reload_grid(self):
         self.meta_row.setVisible(False)
         
