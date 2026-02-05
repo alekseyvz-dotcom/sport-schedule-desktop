@@ -277,4 +277,19 @@ QToolButton#viewTab:checked {
     border-color: rgba(99, 102, 241, 0.65);
     color: rgba(255, 255, 255, 0.92);
 }
+
+QWidget#detailsCard {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 12px;
+}
+QLabel#detailsTitle {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 900;
+    padding: 10px 12px 0 12px;
+}
+QLabel#detailsText {
+    color: rgba(226, 232, 240, 0.72);
+    padding: 2px 12px;
+}
 """
