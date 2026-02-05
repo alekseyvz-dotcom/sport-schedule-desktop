@@ -155,6 +155,8 @@ class TenantRuleDialog(QDialog):
         zones_btns.addWidget(self.btn_clear_all)
         zones_btns.addStretch(1)
 
+        self._applying_selection = False
+
         # unit_id -> button
         self._zone_btns: Dict[int, QToolButton] = {}
         # ordered list of unit_ids for current venue (by sort_order)
@@ -270,17 +272,18 @@ class TenantRuleDialog(QDialog):
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             btn.setMinimumHeight(44)
             btn.setProperty("unit_id", uid)
-            btn.clicked.connect(lambda checked=False, _uid=uid: self._on_tile_clicked(_uid))
+            btn.toggled.connect(lambda checked, _uid=uid: self._on_tile_toggled(_uid, checked))
 
             # базовый стиль (дальше будет перекрашиваться по доступности)
             btn.setStyleSheet(self._tile_style(selected=False, conflicts=None))
 
             self._zone_btns[uid] = btn
             self.zones_grid.addWidget(btn, i // cols, i % cols)
-
-        # reset selection on venue change
-        self._apply_selection_contiguous([], show_warning=False)
+            
+        self._repaint_tiles()
         self._schedule_avail_check()
+
+        self._apply_selection_contiguous([], show_warning=False)
 
     def _tile_style(self, *, selected: bool, conflicts: Optional[int]) -> str:
         """
@@ -351,97 +354,43 @@ class TenantRuleDialog(QDialog):
         return idxs[0], idxs[-1]
 
     def _apply_selection_contiguous(self, desired_ids: List[int], *, show_warning: bool) -> None:
-        """
-        Принудительно применяет выбор, обрезая/нормализуя до "соседнего" сегмента.
-        """
         idx_map = {uid: i for i, uid in enumerate(self._venue_unit_order)}
         idxs = [idx_map[uid] for uid in desired_ids if uid in idx_map]
         idxs = sorted(set(idxs))
-
+    
         if not idxs:
-            for b in self._zone_btns.values():
-                b.blockSignals(True)
-                b.setChecked(False)
-                b.blockSignals(False)
+            self._applying_selection = True
+            try:
+                for b in self._zone_btns.values():
+                    b.setChecked(False)
+            finally:
+                self._applying_selection = False
             self._repaint_tiles()
             return
-
-        # если не contiguous — берём минимальный сегмент по границам (min..max)
+    
         l, r = min(idxs), max(idxs)
         if not self._is_contiguous(idxs):
             if show_warning:
                 QMessageBox.information(self, "Зоны", "Можно выбирать только соседние зоны. Выбор будет скорректирован.")
-        idxs = list(range(l, r + 1))
-
+            idxs = list(range(l, r + 1))
+    
         selected_ids = {self._venue_unit_order[i] for i in idxs if 0 <= i < len(self._venue_unit_order)}
-
-        for uid, b in self._zone_btns.items():
-            b.blockSignals(True)
-            b.setChecked(uid in selected_ids)
-            b.blockSignals(False)
-
+    
+        self._applying_selection = True
+        try:
+            for uid, b in self._zone_btns.items():
+                b.setChecked(uid in selected_ids)
+        finally:
+            self._applying_selection = False
+    
         self._repaint_tiles()
 
-    def _on_tile_clicked(self, uid: int) -> None:
-        """
-        Логика contiguous-выбора:
-        - если сейчас ничего не выбрано -> выбираем uid
-        - если есть сегмент [l..r]:
-            * клик по выбранной зоне:
-                - если в середине -> "обрезать" справа до uid (оставляем [l..idx])
-                - если это край -> снять край (уменьшить сегмент)
-            * клик по невыбранной зоне:
-                - если примыкает слева/справа -> расширяем сегмент
-                - иначе -> заменяем сегмент на одну зону uid
-        """
-        if uid not in self._zone_btns:
+
+    def _on_tile_toggled(self, uid: int, checked: bool) -> None:
+        if getattr(self, "_applying_selection", False):
             return
-
-        idx_map = {u: i for i, u in enumerate(self._venue_unit_order)}
-        if uid not in idx_map:
-            return
-
-        cur_sel = self._current_selected_ids()
-        if not cur_sel:
-            self._apply_selection_contiguous([uid], show_warning=False)
-            return
-
-        l, r = self._selected_segment()
-        if l is None or r is None:
-            self._apply_selection_contiguous([uid], show_warning=False)
-            return
-
-        idx = idx_map[uid]
-        selected_set = set(cur_sel)
-
-        if uid in selected_set:
-            # клик по выбранной зоне: уменьшение
-            if l == r:
-                self._apply_selection_contiguous([], show_warning=False)
-                return
-
-            if idx == l:
-                new_l, new_r = l + 1, r
-            elif idx == r:
-                new_l, new_r = l, r - 1
-            else:
-                # середина: обрежем справа до idx (это интуитивно)
-                new_l, new_r = l, idx
-
-            desired = [self._venue_unit_order[i] for i in range(new_l, new_r + 1)]
-            self._apply_selection_contiguous(desired, show_warning=False)
-            return
-
-        # клик по невыбранной зоне
-        if idx == l - 1:
-            new_l, new_r = idx, r
-        elif idx == r + 1:
-            new_l, new_r = l, idx
-        else:
-            # не рядом -> заменить выбор на одну зону
-            new_l, new_r = idx, idx
-
-        desired = [self._venue_unit_order[i] for i in range(new_l, new_r + 1)]
+    
+        desired = self._current_selected_ids()
         self._apply_selection_contiguous(desired, show_warning=False)
 
     def _select_all_zones(self) -> None:
@@ -469,7 +418,13 @@ class TenantRuleDialog(QDialog):
         uid = it.data(Qt.ItemDataRole.UserRole)
         if uid is None:
             return
-        self._on_tile_clicked(int(uid))
+        uid = int(uid)
+    
+        btn = self._zone_btns.get(uid)
+        if not btn:
+            return
+
+        btn.toggle()
 
     def _check_availability(self) -> None:
         try:
