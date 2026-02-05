@@ -61,7 +61,9 @@ QTabBar::tab:hover {
 }
 
 /* ---- Inputs ---- */
-QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox {
+QLineEdit, QPlainTextEdit, QTextEdit,
+QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit,
+QComboBox, QAbstractSpinBox {
     background: rgba(11, 18, 32, 0.65);
     color: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -69,9 +71,24 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComb
     padding: 8px 10px;
     selection-background-color: rgba(99, 102, 241, 0.55);
 }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
+
+QLineEdit::placeholder { color: rgba(226, 232, 240, 0.45); }
+
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QComboBox:focus, QDateEdit:focus, QTimeEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QAbstractSpinBox:focus {
     border: 1px solid rgba(99, 102, 241, 0.95);
     background: rgba(11, 18, 32, 0.78);
+}
+
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
+    width: 18px;
+    border: none;
+    background: transparent;
+}
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
+    background: rgba(255,255,255,0.06);
+    border-radius: 6px;
 }
 
 /* ---- Buttons ---- */
