@@ -15,59 +15,103 @@ from app.services.users_service import authenticate, AuthUser
 _LOGIN_QSS = """
 QWidget#loginForm { background: transparent; }
 
-QLabel#logo {
-    padding: 8px 0 2px 0;
-}
+/* Лого */
+QLabel#logo { padding: 6px 0 0 0; }
 
+/* Статус/ошибка */
 QLabel#status {
-    color: #b00020;
+    color: #fb7185;               /* rose-400 */
     padding: 2px 2px;
-}
-
-QLabel#copyright {
-    color: #64748b;
-    padding: 6px 2px 2px 2px;
     font-size: 12px;
 }
 
+/* Подпись */
+QLabel#copyright {
+    color: rgba(226, 232, 240, 0.45);
+    padding: 8px 2px 2px 2px;
+    font-size: 11px;
+}
+
+/* Поля ввода */
 QLineEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 9px 12px;
-    min-height: 22px;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(2, 6, 23, 0.35);        /* slate-950 с прозрачностью */
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 10px 12px;
+    min-height: 24px;
+    selection-background-color: rgba(99, 102, 241, 0.55);
 }
-QLineEdit:focus { border: 1px solid #7fb3ff; }
 
+/* placeholder */
+QLineEdit::placeholder {
+    color: rgba(226, 232, 240, 0.45);
+}
+
+/* focus: “кольцо” + чуть светлее фон */
+QLineEdit:focus {
+    background: rgba(2, 6, 23, 0.45);
+    border: 1px solid rgba(99, 102, 241, 0.95);
+}
+
+/* Кнопки базовые */
 QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 9px 12px;
-    font-weight: 700;
-    min-height: 36px;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 800;
+    min-height: 38px;
 }
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
 
+/* Primary: градиент + лёгкая “глянцевость” */
 QPushButton#primary {
-    background: #2563eb;
-    border: 1px solid #2563eb;
-    color: white;
+    color: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(99, 102, 241, 0.75);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(99, 102, 241, 1.0),
+        stop:1 rgba(34, 211, 238, 1.0)
+    );
 }
-QPushButton#primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
-QPushButton#primary:pressed { background: #1e40af; border-color: #1e40af; }
+QPushButton#primary:hover {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(129, 140, 248, 1.0),
+        stop:1 rgba(34, 211, 238, 1.0)
+    );
+}
+QPushButton#primary:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(79, 70, 229, 1.0),
+        stop:1 rgba(6, 182, 212, 1.0)
+    );
+}
 
+/* Ghost: прозрачная тёмная кнопка */
 QPushButton#ghost {
-    background: transparent;
-    border: 1px solid #e6e6e6;
-    color: #0f172a;
+    color: rgba(226, 232, 240, 0.80);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+QPushButton#ghost:hover {
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.20);
+}
+QPushButton#ghost:pressed {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* Disabled (на будущее, если добавишь валидацию) */
+QPushButton:disabled {
+    color: rgba(226, 232, 240, 0.35);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.10);
 }
 """
+
 
 def resource_path(rel_path: str) -> str:
     base = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base, rel_path)
+
 
 class LoginWindow(QWidget):
     logged_in = Signal(object)  # AuthUser
@@ -97,10 +141,12 @@ class LoginWindow(QWidget):
 
         self.ed_user = QLineEdit()
         self.ed_user.setPlaceholderText("Логин")
+        self.ed_user.setClearButtonEnabled(True)
 
         self.ed_pass = QLineEdit()
         self.ed_pass.setPlaceholderText("Пароль")
         self.ed_pass.setEchoMode(QLineEdit.Password)
+        self.ed_pass.setClearButtonEnabled(True)
 
         self.btn_login = QPushButton("Войти")
         self.btn_login.setObjectName("primary")
@@ -130,7 +176,7 @@ class LoginWindow(QWidget):
         root.addWidget(self.ed_pass)
         root.addWidget(self.lbl_status)
         root.addLayout(btns)
-        root.addWidget(self.lbl_copyright)  # <-- в самый низ
+        root.addWidget(self.lbl_copyright)
 
         self.ed_user.returnPressed.connect(self._on_login)
         self.ed_pass.returnPressed.connect(self._on_login)
