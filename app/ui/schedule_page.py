@@ -788,7 +788,7 @@ class SchedulePage(QWidget):
                     self.tbl.setItem(rr, col, it)
 
                 it.setData(Qt.ItemDataRole.BackgroundRole, base)
-                it.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))  # тёмный текст на пастели
+                it.setData(Qt.ItemDataRole.ForegroundRole, None)
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
                 if rr == r0:
@@ -897,7 +897,7 @@ class SchedulePage(QWidget):
             base = self._base_color_for_booking(b)
             for it in (it0, it1, it2, it3, it4, it5, it6):
                 it.setData(Qt.ItemDataRole.BackgroundRole, base)
-                it.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))
+                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(255, 255, 255, 230))
 
             for it in (it1, it5, it6):
                 it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
