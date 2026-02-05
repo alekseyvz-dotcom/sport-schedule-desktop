@@ -38,53 +38,6 @@ def _qdate_to_pydate(qd: QDate) -> Optional[date]:
         return None
     return date(qd.year(), qd.month(), qd.day())
 
-
-_DIALOG_QSS = """
-QDialog { background: #fbfbfc; }
-QLineEdit, QTextEdit, QComboBox, QDateEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 10px;
-}
-QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateEdit:focus {
-    border: 1px solid #7fb3ff;
-}
-
-/* Comment fields: very small */
-QTextEdit#smallText {
-    min-height: 34px;
-    max-height: 54px;
-}
-
-QGroupBox {
-    border: 1px solid #e6e6e6;
-    border-radius: 12px;
-    margin-top: 10px;
-    background: #ffffff;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
-    color: #111111;
-    font-weight: 700;
-}
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 14px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-
-QScrollArea { border: none; background: transparent; }
-"""
-
-
 _OBLIGATION_OPTIONS = [
     "орг группа 60 минут",
     "орг группа 90 минут",
@@ -95,7 +48,6 @@ _DELIVERY_OPTIONS = [
     "ЭДО",
     "физически",
 ]
-
 
 class TenantDialog(QDialog):
     """
@@ -115,7 +67,6 @@ class TenantDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setStyleSheet(_DIALOG_QSS)
 
         self._is_admin = bool(is_admin)
         self._user_id = int(user_id)
