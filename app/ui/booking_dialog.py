@@ -1,4 +1,3 @@
-# app/ui/booking_dialog.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -36,26 +35,25 @@ class BookingDialog(QDialog):
         starts_at: datetime,
         ends_at: datetime,
         venue_name: str,
-        tenants: List[Dict],            # [{id, name}]
-        gz_groups: List[Dict],          # [{id, name}]
-        venue_units: Optional[List[Dict]] = None,  # [{id, name}]
-        initial: Optional[Dict] = None,            # {kind, tenant_id|gz_group_id, venue_unit_id, title}
+        tenants: List[Dict],
+        gz_groups: List[Dict],
+        venue_units: Optional[List[Dict]] = None,
+        initial: Optional[Dict] = None,
         selection_title: Optional[str] = None,
         selection_lines: Optional[List[str]] = None,
-        allowed_kinds: Optional[Set[str]] = None,  # {"PD","GZ"}; если None -> оба
+        allowed_kinds: Optional[Set[str]] = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
+        self.setObjectName("dialog")  # для точечной стилизации при необходимости
 
         self._venue_units = venue_units or []
         self._tenants = tenants or []
         self._gz_groups = gz_groups or []
         initial = initial or {}
 
-        self._allowed_kinds = {k.upper() for k in (allowed_kinds or {"PD", "GZ"})}
-        if not self._allowed_kinds:
-            self._allowed_kinds = {"PD", "GZ"}
+        self._allowed_kinds = {k.upper() for k in (allowed_kinds or {"PD", "GZ"})} or {"PD", "GZ"}
 
         self.lbl_info = QLabel(
             f"Площадка: <b>{venue_name}</b><br>"
@@ -103,10 +101,7 @@ class BookingDialog(QDialog):
         # --- initial ---
         k = (initial.get("kind") or "PD").upper()
         i = self.cmb_kind.findData(k)
-        if i >= 0:
-            self.cmb_kind.setCurrentIndex(i)
-        else:
-            self.cmb_kind.setCurrentIndex(0)
+        self.cmb_kind.setCurrentIndex(i if i >= 0 else 0)
 
         self._rebuild_subjects()
 
@@ -134,15 +129,16 @@ class BookingDialog(QDialog):
         # --- end initial ---
 
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
         form.addRow("Тип занятости:", self.cmb_kind)
         form.addRow(self.lbl_subject, self.cmb_subject)
         if self._venue_units:
             form.addRow("Зона:", self.cmb_unit)
         form.addRow("Название:", self.ed_title)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         ok_btn = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn:
             ok_btn.setDefault(True)
@@ -152,6 +148,8 @@ class BookingDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
         root.addWidget(self.lbl_info)
         root.addWidget(self.lbl_selection)
         root.addLayout(form)
