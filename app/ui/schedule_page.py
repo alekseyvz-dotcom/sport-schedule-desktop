@@ -273,6 +273,9 @@ class SchedulePage(QWidget):
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+        self.tbl.setObjectName("scheduleGrid")
+        self.tbl_list.setObjectName("scheduleList")
+
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
