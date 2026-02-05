@@ -32,13 +32,15 @@ def _weekday_name(w: int) -> str:
 
 class TenantRulesWidget(QWidget):
     """
-    Виджет правил расписания (tenant_recurring_rules).
+    Готовый виджет правил (tenant_recurring_rules) для встраивания в TenantDialog.
 
-    - Держит локальную копию правил self._rules_local, чтобы TenantDialog мог вернуть payload.
-    - Для существующего tenant_id подтягивает правила из БД.
-    - Отключение (disable): ставит is_active=false в БД + опционально отменяет будущие брони.
-    - Удаление (delete, только админ): DELETE правила + отмена будущих броней (эвристика).
+    Особенности:
+    - self._rules_local хранит локальные изменения (нужно для создания нового контрагента).
+    - если tenant_id задан: читает/пишет в БД (disable/delete реально меняют БД).
+    - add/edit работают через TenantRuleDialog (с проверкой доступности).
     """
+
+    COLS = ["День", "Время", "Зона", "Период", "Комментарий", "Активно"]
 
     def __init__(
         self,
@@ -47,10 +49,11 @@ class TenantRulesWidget(QWidget):
         tenant_id: Optional[int],
         contract_from: Optional[date],
         contract_to: Optional[date],
-        tenant_kind: str = "legal",  # NEW: 'legal'|'person'
+        tenant_kind: str = "legal",  # 'legal'|'person'
         is_admin: bool = False,
         user_id: int,
         role_code: str,
+        tz_name: str = "Europe/Moscow",
     ):
         super().__init__(parent)
         self._tenant_id = tenant_id
@@ -60,23 +63,27 @@ class TenantRulesWidget(QWidget):
         self._is_admin = bool(is_admin)
         self._user_id = int(user_id)
         self._role_code = str(role_code or "")
+        self._tz_name = tz_name
 
-        # список [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
+        # [{"id": unit_id, "venue_id": venue_id, "sort_order": int, "label": "..."}]
         self._units: List[Dict] = []
+        # [{"id","weekday","venue_unit_id","starts_at","ends_at","valid_from","valid_to","title","is_active","op"}]
         self._rules_local: List[Dict] = []
 
-        self.tbl = QTableWidget(0, 6)
-        self.tbl.setHorizontalHeaderLabels(["День", "Время", "Зона", "Период", "Комментарий", "Active"])
+        # ---- UI
+        self.tbl = QTableWidget(0, len(self.COLS))
+        self.tbl.setHorizontalHeaderLabels(self.COLS)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.horizontalHeader().setStretchLastSection(True)
+        self.tbl.setAlternatingRowColors(True)
 
-        self.btn_add = QPushButton("Добавить правило")
+        self.btn_add = QPushButton("Добавить")
         self.btn_edit = QPushButton("Изменить")
         self.btn_disable = QPushButton("Отключить")
-        self.btn_delete = QPushButton("Удалить правило")
+        self.btn_delete = QPushButton("Удалить")
         self.btn_delete.setVisible(self._is_admin)
 
         self.btn_add.clicked.connect(self._on_add)
@@ -96,9 +103,11 @@ class TenantRulesWidget(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl)
 
-        QTimer.singleShot(0, self._deferred_init)
+        QTimer.singleShot(0, self.reload)
 
-    def _deferred_init(self) -> None:
+    # ---------- Public API ----------
+    def reload(self) -> None:
+        """Перезагрузка правил и справочников зон."""
         try:
             self._units = self._load_units_flat()
             if self._tenant_id:
@@ -109,15 +118,28 @@ class TenantRulesWidget(QWidget):
             QMessageBox.critical(self, "Правила", f"Ошибка загрузки:\n{type(e).__name__}: {e}")
             self._refresh()
 
-    def _default_rule_title(self) -> str:
-        # именно "Оферта" / "Аренда по договору" (без ФИО/названия)
-        return "Оферта" if self._tenant_kind == "person" else "Аренда по договору"
+    def set_tenant_id(self, tenant_id: Optional[int]) -> None:
+        """После создания контрагента можно установить tenant_id и перечитать правила из БД."""
+        self._tenant_id = tenant_id
+        self.reload()
+
+    def set_contract_period(self, contract_from: Optional[date], contract_to: Optional[date]) -> None:
+        self._contract_from = contract_from
+        self._contract_to = contract_to
 
     def set_tenant_kind(self, tenant_kind: str) -> None:
-        """
-        Чтобы TenantDialog мог динамически менять тип и это влияло на дефолт заголовка.
-        """
         self._tenant_kind = (tenant_kind or "legal").strip()
+
+    def rules_payload(self) -> List[Dict]:
+        """
+        Payload для TenantDialog: список правил с op (keep/new/deactivate/delete).
+        Для существующего tenant_id обычно не нужен, но оставляем совместимость.
+        """
+        return list(self._rules_local)
+
+    # ---------- Internals ----------
+    def _default_rule_title(self) -> str:
+        return "Оферта" if self._tenant_kind == "person" else "Аренда по договору"
 
     def _load_units_flat(self) -> List[Dict]:
         out: List[Dict] = []
@@ -137,7 +159,7 @@ class TenantRulesWidget(QWidget):
                     )
         return out
 
-    def _load_from_db(self):
+    def _load_from_db(self) -> None:
         rules = list_rules_for_tenant(
             user_id=self._user_id,
             role_code=self._role_code,
@@ -155,14 +177,11 @@ class TenantRulesWidget(QWidget):
                 "valid_to": r.valid_to,
                 "title": r.title,
                 "is_active": bool(r.is_active),
-                "op": "keep",  # keep / new / deactivate / delete
+                "op": "keep",
             }
             for r in rules
         ]
         self._refresh()
-
-    def rules_payload(self) -> List[Dict]:
-        return list(self._rules_local)
 
     def _selected_index(self) -> Optional[int]:
         row = self.tbl.currentRow()
@@ -173,63 +192,62 @@ class TenantRulesWidget(QWidget):
             return None
         return int(it.data(Qt.ItemDataRole.UserRole))
 
-    def _refresh(self):
+    def _unit_label(self, unit_id: int) -> str:
+        return next((u["label"] for u in self._units if int(u["id"]) == int(unit_id)), f"unit_id={unit_id}")
+
+    def _refresh(self) -> None:
         self.tbl.setRowCount(0)
+
         for idx, r in enumerate(self._rules_local):
             self.tbl.insertRow(idx)
 
-            day = QTableWidgetItem(_weekday_name(r["weekday"]))
-            day.setData(Qt.ItemDataRole.UserRole, idx)
+            it_day = QTableWidgetItem(_weekday_name(r["weekday"]))
+            it_day.setData(Qt.ItemDataRole.UserRole, idx)
 
-            tm = QTableWidgetItem(f"{r['starts_at']:%H:%M}–{r['ends_at']:%H:%M}")
-
-            unit_label = next(
-                (u["label"] for u in self._units if u["id"] == r["venue_unit_id"]),
-                f"unit_id={r['venue_unit_id']}",
-            )
-            zone = QTableWidgetItem(unit_label)
-
-            period = QTableWidgetItem(f"{r['valid_from']:%d.%m.%Y}–{r['valid_to']:%d.%m.%Y}")
-            title = QTableWidgetItem(r.get("title", "") or "")
+            it_time = QTableWidgetItem(f"{r['starts_at']:%H:%M}–{r['ends_at']:%H:%M}")
+            it_zone = QTableWidgetItem(self._unit_label(int(r["venue_unit_id"])))
+            it_period = QTableWidgetItem(f"{r['valid_from']:%d.%m.%Y}–{r['valid_to']:%d.%m.%Y}")
+            it_title = QTableWidgetItem(r.get("title", "") or "")
 
             is_active = bool(r.get("is_active", True)) and r.get("op") != "deactivate"
-            active = QTableWidgetItem("Да" if is_active else "Нет")
+            it_active = QTableWidgetItem("Да" if is_active else "Нет")
 
-            self.tbl.setItem(idx, 0, day)
-            self.tbl.setItem(idx, 1, tm)
-            self.tbl.setItem(idx, 2, zone)
-            self.tbl.setItem(idx, 3, period)
-            self.tbl.setItem(idx, 4, title)
-            self.tbl.setItem(idx, 5, active)
+            self.tbl.setItem(idx, 0, it_day)
+            self.tbl.setItem(idx, 1, it_time)
+            self.tbl.setItem(idx, 2, it_zone)
+            self.tbl.setItem(idx, 3, it_period)
+            self.tbl.setItem(idx, 4, it_title)
+            self.tbl.setItem(idx, 5, it_active)
 
             if r.get("op") == "deactivate" or not r.get("is_active", True):
-                for c in range(6):
+                for c in range(self.tbl.columnCount()):
                     item = self.tbl.item(idx, c)
                     if item:
                         item.setForeground(Qt.GlobalColor.gray)
 
         self.tbl.resizeColumnsToContents()
 
-    def _on_add(self):
+    # ---------- Actions ----------
+    def _on_add(self) -> None:
         dlg = TenantRuleDialog(
             self,
             venue_units=self._units,
             contract_valid_from=self._contract_from,
             contract_valid_to=self._contract_to,
+            tz_name=self._tz_name,
         )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 
         v = dlg.values()
         unit_ids = v.get("venue_unit_ids") or [v["venue_unit_id"]]
-
         title = (v.get("title") or "").strip() or self._default_rule_title()
 
         for uid in unit_ids:
             self._rules_local.append(
                 {
                     "id": None,
-                    "weekday": v["weekday"],
+                    "weekday": int(v["weekday"]),
                     "venue_unit_id": int(uid),
                     "starts_at": v["starts_at"],
                     "ends_at": v["ends_at"],
@@ -240,10 +258,9 @@ class TenantRulesWidget(QWidget):
                     "op": "new",
                 }
             )
-
         self._refresh()
 
-    def _on_edit(self):
+    def _on_edit(self) -> None:
         idx = self._selected_index()
         if idx is None:
             QMessageBox.information(self, "Правила", "Выберите правило.")
@@ -251,11 +268,7 @@ class TenantRulesWidget(QWidget):
 
         r = self._rules_local[idx]
         if r.get("op") == "deactivate" or not r.get("is_active", True):
-            QMessageBox.information(
-                self,
-                "Правила",
-                "Правило отключено. Включение сделаем отдельной кнопкой при необходимости.",
-            )
+            QMessageBox.information(self, "Правила", "Правило отключено и не редактируется.")
             return
 
         dlg = TenantRuleDialog(
@@ -265,25 +278,26 @@ class TenantRulesWidget(QWidget):
             initial=r,
             contract_valid_from=self._contract_from,
             contract_valid_to=self._contract_to,
+            tz_name=self._tz_name,
         )
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 
         v = dlg.values()
-
-        # если пользователь очистил title — подставим дефолт согласно типу контрагента
         title = (v.get("title") or "").strip() or self._default_rule_title()
 
-        # Простая стратегия без update_rule: если правило из БД — старое отключаем, новое добавляем
+        # Если правило уже в БД — старая запись отключается, новая создаётся (без update_rule)
         if r.get("id"):
             r["op"] = "deactivate"
             r["is_active"] = False
 
+            # В edit оставляем только первую выбранную зону (venue_unit_id),
+            # потому что старое правило было про одну зону.
             self._rules_local.append(
                 {
                     "id": None,
-                    "weekday": v["weekday"],
-                    "venue_unit_id": v["venue_unit_id"],
+                    "weekday": int(v["weekday"]),
+                    "venue_unit_id": int(v["venue_unit_id"]),
                     "starts_at": v["starts_at"],
                     "ends_at": v["ends_at"],
                     "valid_from": v["valid_from"],
@@ -296,8 +310,8 @@ class TenantRulesWidget(QWidget):
         else:
             r.update(
                 {
-                    "weekday": v["weekday"],
-                    "venue_unit_id": v["venue_unit_id"],
+                    "weekday": int(v["weekday"]),
+                    "venue_unit_id": int(v["venue_unit_id"]),
                     "starts_at": v["starts_at"],
                     "ends_at": v["ends_at"],
                     "valid_from": v["valid_from"],
@@ -308,7 +322,7 @@ class TenantRulesWidget(QWidget):
 
         self._refresh()
 
-    def _on_disable(self):
+    def _on_disable(self) -> None:
         idx = self._selected_index()
         if idx is None:
             QMessageBox.information(self, "Правила", "Выберите правило.")
@@ -318,47 +332,53 @@ class TenantRulesWidget(QWidget):
         if r.get("op") == "deactivate" or not r.get("is_active", True):
             return
 
-        if r.get("id"):
-            try:
-                set_rule_active(
-                    user_id=self._user_id,
-                    role_code=self._role_code,
-                    rule_id=int(r["id"]),
-                    is_active=False,
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
-                return
+        # Если правила ещё не в БД (создание контрагента) — просто помечаем локально
+        if not self._tenant_id or not r.get("id"):
+            r["op"] = "deactivate"
+            r["is_active"] = False
+            self._refresh()
+            return
 
-            ans = QMessageBox.question(
-                self,
-                "Правило отключено",
-                "Правило отключено. Уже созданные бронирования останутся.\n\n"
-                "Отменить будущие бронирования автоматически?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+        try:
+            set_rule_active(
+                user_id=self._user_id,
+                role_code=self._role_code,
+                rule_id=int(r["id"]),
+                is_active=False,
             )
+        except Exception as e:
+            QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
+            return
 
-            if ans == QMessageBox.StandardButton.Yes:
-                try:
-                    cancelled = cancel_future_bookings_like_rule(
-                        tenant_id=int(self._tenant_id),
-                        venue_unit_id=int(r["venue_unit_id"]),
-                        weekday=int(r["weekday"]),
-                        starts_at=r["starts_at"],
-                        ends_at=r["ends_at"],
-                        from_day=date.today(),
-                        activity="PD",
-                    )
-                    QMessageBox.information(self, "Бронирования", f"Отменено бронирований: {cancelled}")
-                except Exception as e:
-                    QMessageBox.warning(self, "Бронирования", f"Не удалось отменить бронирования:\n{e}")
+        ans = QMessageBox.question(
+            self,
+            "Правило отключено",
+            "Правило отключено. Уже созданные бронирования останутся.\n\n"
+            "Отменить будущие бронирования автоматически?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if ans == QMessageBox.StandardButton.Yes:
+            try:
+                cancelled = cancel_future_bookings_like_rule(
+                    tenant_id=int(self._tenant_id),
+                    venue_unit_id=int(r["venue_unit_id"]),
+                    weekday=int(r["weekday"]),
+                    starts_at=r["starts_at"],
+                    ends_at=r["ends_at"],
+                    from_day=date.today(),
+                    activity="PD",
+                )
+                QMessageBox.information(self, "Бронирования", f"Отменено бронирований: {cancelled}")
+            except Exception as e:
+                QMessageBox.warning(self, "Бронирования", f"Не удалось отменить бронирования:\n{e}")
 
         r["op"] = "deactivate"
         r["is_active"] = False
         self._refresh()
 
-    def _on_delete(self):
+    def _on_delete(self) -> None:
         if not self._is_admin:
             QMessageBox.warning(self, "Правила", "Недостаточно прав.")
             return
@@ -370,9 +390,14 @@ class TenantRulesWidget(QWidget):
 
         r = self._rules_local[idx]
 
+        # локальное (ещё не в БД) — просто убрать
         if not r.get("id"):
             self._rules_local.pop(idx)
             self._refresh()
+            return
+
+        if not self._tenant_id:
+            QMessageBox.warning(self, "Правила", "Нельзя удалить правило: контрагент ещё не сохранён.")
             return
 
         if (
