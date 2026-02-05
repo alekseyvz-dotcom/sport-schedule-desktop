@@ -112,7 +112,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
         # 1) СЕТКА: рисуем ТОЛЬКО для пустых слотов.
         if not has_booking:
-            grid_pen = QPen(QColor("#e9edf3"))
+            grid_pen = QPen(QColor(255, 255, 255, 28))
             grid_pen.setWidth(1)
             painter.setPen(grid_pen)
             # тонкие линии по границам ячейки (как grid)
@@ -123,7 +123,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
         # 2) РАМКА БЛОКА: рисуем для брони (по top/middle/bottom)
         if part:
-            border_pen = QPen(QColor("#5a6a7a"))
+            border_pen = QPen(QColor(15, 23, 42, 160))
             border_pen.setWidth(2)
             painter.setPen(border_pen)
 
@@ -249,10 +249,10 @@ class SchedulePage(QWidget):
         meta_lay.setContentsMargins(12, 0, 12, 0)
 
         self.lbl_period = QLabel("")
-        self.lbl_period.setStyleSheet("color:#334155; padding:0 4px;")
+        self.lbl_period.setObjectName("scheduleMeta")
 
         self.lbl_total = QLabel("")
-        self.lbl_total.setStyleSheet("color:#0f172a; font-weight:600; padding:0 4px;")
+        self.lbl_total.setObjectName("scheduleMetaStrong")
 
         meta_lay.addWidget(self.lbl_period, 1)
         meta_lay.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
@@ -366,9 +366,9 @@ class SchedulePage(QWidget):
 
     def _make_kpi(self, title: str):
         t = QLabel(title)
-        t.setStyleSheet("color:#334155;")
+        t.setObjectName("kpiTitle")
         v = QLabel("—")
-        v.setStyleSheet("color:#0f172a; font-weight:700;")
+        v.setObjectName("kpiValue")
         return t, v
 
     def _make_details_panel(self) -> QWidget:
@@ -439,27 +439,30 @@ class SchedulePage(QWidget):
         self.tbl_list.setFont(f)
 
     # -------- colors / text helpers --------
+    _PD_COLOR = QColor("#9bd7ff")      # пастельно голубой
+    _GZ_COLOR = QColor("#ffcc80")      # пастельно оранжевый
+    _CANCELLED_COLOR = QColor("#d5dbe3")
+    _EMPTY_SLOT_COLOR = QColor(0, 0, 0, 0)  # прозрачный (пусть виден фон таблицы)
 
     def _base_color_for_booking(self, b) -> QColor:
-        if getattr(b, "status", "") == "cancelled":
-            return QColor("#d5dbe3")
+        if (getattr(b, "status", "") or "").lower() == "cancelled":
+            return QColor(self._CANCELLED_COLOR)
     
         kind = (getattr(b, "kind", None) or getattr(b, "activity", "") or "").upper()
     
         if kind == "PD":
-            return QColor("#9bd7ff")
+            return QColor(self._PD_COLOR)
     
         if kind == "GZ":
-            base = QColor("#ffcc80")
-    
+            base = QColor(self._GZ_COLOR)
             gz_group_id = getattr(b, "gz_group_id", None)
             if gz_group_id is not None and self._gz_group_is_free.get(int(gz_group_id), False):
-                # два тона светлее
+                # на два тона светлее
                 return self._lighten(base, steps=2, amount=120)
-    
             return base
     
         return QColor("#e5e7eb")
+
 
     def _kind_title(self, kind: str) -> str:
         k = (kind or "").upper()
@@ -721,7 +724,8 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                it.setBackground(QColor("#ffffff"))
+                it.setData(Qt.ItemDataRole.BackgroundRole, self._EMPTY_SLOT_COLOR)
+                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(0, 0, 0, 0))  # текст скрыт в пустых
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
 
@@ -779,7 +783,8 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(rr, col, it)
 
-                it.setBackground(base)
+                it.setData(Qt.ItemDataRole.BackgroundRole, base)
+                it.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))  # тёмный текст на пастели
                 it.setData(Qt.ItemDataRole.UserRole, b)
 
                 if rr == r0:
@@ -797,6 +802,7 @@ class SchedulePage(QWidget):
                     tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
                 title = (getattr(b, "title", "") or "").strip()
                 it0.setText(f"{tenant_name}\n{title}" if title else f"{tenant_name}")
+                it0.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))
 
         self.tbl.resizeRowsToContents()
 
@@ -886,12 +892,13 @@ class SchedulePage(QWidget):
 
             base = self._base_color_for_booking(b)
             for it in (it0, it1, it2, it3, it4, it5, it6):
-                it.setBackground(base)
+                it.setData(Qt.ItemDataRole.BackgroundRole, base)
+                it.setData(Qt.ItemDataRole.ForegroundRole, QColor("#0b1220"))
 
             for it in (it1, it5, it6):
                 it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            it6.setForeground(self._status_color(getattr(b, "status", "")))
+            it6.setData(Qt.ItemDataRole.ForegroundRole, self._status_color(getattr(b, "status", "")))
 
             self.tbl_list.setItem(row, 0, it0)
             self.tbl_list.setItem(row, 1, it1)
@@ -1377,5 +1384,3 @@ class SchedulePage(QWidget):
         for _ in range(max(0, int(steps))):
             c = c.lighter(int(amount))
         return c
-
-
