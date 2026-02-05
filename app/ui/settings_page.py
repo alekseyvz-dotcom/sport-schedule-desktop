@@ -24,7 +24,6 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self.setObjectName("page")
         self.user = user
-        self.setStyleSheet(_PAGE_QSS)
 
         if (self.user.role_code or "").lower() != "admin":
             lay = QVBoxLayout(self)
