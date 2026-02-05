@@ -190,7 +190,6 @@ class OrgsVenuesPage(QWidget):
         tbl.setSortingEnabled(True)
         tbl.setShowGrid(False)
         tbl.verticalHeader().setVisible(False)
-        tbl.setStyleSheet(_TABLE_QSS)
 
         header = tbl.horizontalHeader()
         header.setStretchLastSection(True)
