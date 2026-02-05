@@ -1,4 +1,5 @@
 # app/ui/main_window.py
+import os, tempfile, traceback
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
 from app.services.users_service import AuthUser
 from app.ui.tenants_page import TenantsPage
@@ -23,7 +24,6 @@ class MainWindow(QMainWindow):
 
     def on_logged_in(self, user: AuthUser):
         try:
-            print("on_logged_in:", user, getattr(user, "username", None))
             self.user = user
             self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
 
@@ -45,8 +45,15 @@ class MainWindow(QMainWindow):
             self.setCentralWidget(tabs)
 
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка после входа", f"{type(e).__name__}: {e}")
-            raise
+            path = os.path.join(tempfile.gettempdir(), "app_login_error.log")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n=== on_logged_in ERROR ===\n")
+                f.write(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Ошибка после входа",
+                f"{type(e).__name__}: {e}\n\nЛог: {path}",
+            )
 
     def _can_tab(self, code: str) -> bool:
         if not self.user:
