@@ -813,7 +813,7 @@ class SchedulePage(QWidget):
         self.tbl.resizeRowsToContents()
 
     def _reload_grid(self):
-        self.meta_row.setVisible(False)  # ensure hidden even if somehow visible
+        self.meta_row.setVisible(False)
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -821,18 +821,19 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                it.setData(Qt.ItemDataRole.BackgroundRole, self._EMPTY_SLOT_COLOR)
+                # УБРАТЬ эту строку:
+                # it.setData(Qt.ItemDataRole.BackgroundRole, self._EMPTY_SLOT_COLOR)
                 it.setData(Qt.ItemDataRole.ForegroundRole, None)
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
-
+    
         if not self._resources:
             return
-
+    
         day = self.dt_day.date().toPython()
         include_cancelled = self.cb_cancelled.isChecked()
         venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
-
+    
         try:
             bookings = list_bookings_for_day(venue_ids, day, include_cancelled=include_cancelled)
         except Exception as e:
@@ -840,7 +841,7 @@ class SchedulePage(QWidget):
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
-
+    
         unit_col: Dict[int, int] = {}
         venue_fallback_col: Dict[int, int] = {}
         for i, rsrc in enumerate(self._resources):
@@ -849,10 +850,10 @@ class SchedulePage(QWidget):
                 unit_col[int(rsrc.venue_unit_id)] = col
             else:
                 venue_fallback_col[int(rsrc.venue_id)] = col
-
+    
         day_start = datetime.combine(day, self._work_start, tzinfo=self.TZ)
         day_end = datetime.combine(day, self._work_end, tzinfo=self.TZ)
-
+    
         for b in bookings:
             col = None
             if getattr(b, "venue_unit_id", None) is not None:
@@ -861,36 +862,35 @@ class SchedulePage(QWidget):
                 col = venue_fallback_col.get(int(b.venue_id))
             if not col:
                 continue
-
+    
             start = max(b.starts_at, day_start)
             end = min(b.ends_at, day_end)
             if end <= start:
                 continue
-
+    
             r0 = int((start - day_start).total_seconds() // (self.SLOT_MINUTES * 60))
             r1 = int(((end - day_start).total_seconds() - 1) // (self.SLOT_MINUTES * 60))
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
-
-            base = self._base_color_for_booking(b)
-
+    
             for rr in range(r0, r1 + 1):
                 it = self.tbl.item(rr, col)
                 if it is None:
                     it = QTableWidgetItem("")
                     self.tbl.setItem(rr, col, it)
-
-                it.setData(Qt.ItemDataRole.BackgroundRole, base)
-                it.setData(Qt.ItemDataRole.ForegroundRole, None)
+    
+                # УБРАТЬ эту строку:
+                # it.setData(Qt.ItemDataRole.BackgroundRole, base)
+                it.setData(Qt.ItemDataRole.ForegroundRole, None)  # delegate сам рисует текст
                 it.setData(Qt.ItemDataRole.UserRole, b)
-
+    
                 if rr == r0:
                     it.setData(BookingBlockDelegate.ROLE_PART, "top")
                 elif rr == r1:
                     it.setData(BookingBlockDelegate.ROLE_PART, "bottom")
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
-
+    
             it0 = self.tbl.item(r0, col)
             if it0:
                 kind = (getattr(b, "kind", "") or "").upper()
@@ -899,11 +899,10 @@ class SchedulePage(QWidget):
                     tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
                 title = (getattr(b, "title", "") or "").strip()
                 it0.setText(f"{tenant_name}\n{title}" if title else f"{tenant_name}")
-                it0.setData(Qt.ItemDataRole.ForegroundRole, QColor(255, 255, 255, 235))
-
+                # ForegroundRole тоже можно убрать — delegate сам рисует
+    
         self.tbl.resizeRowsToContents()
         self.tbl.viewport().update()
-
 
     # -------- list reload --------
 
