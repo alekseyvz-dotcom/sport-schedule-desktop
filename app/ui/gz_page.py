@@ -179,4 +179,227 @@ class GzPage(QWidget):
                     if it:
                         it.setForeground(Qt.GlobalColor.darkGray)
 
-    # остальная логика без изменений ...
+    def _apply_rules_and_maybe_generate(self, gz_group_id: int, rules_payload: list[dict]) -> None:
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение правил/генерацию бронирований.")
+            return
+
+        try:
+            for r in rules_payload:
+                op = r.get("op", "keep")
+                if op == "new":
+                    create_rule(
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
+                        gz_group_id=int(gz_group_id),
+                        venue_unit_id=int(r["venue_unit_id"]),
+                        weekday=int(r["weekday"]),
+                        starts_at=r["starts_at"],
+                        ends_at=r["ends_at"],
+                        valid_from=r["valid_from"],
+                        valid_to=r["valid_to"],
+                        title=r.get("title", "") or "",
+                    )
+                elif op == "deactivate" and r.get("id"):
+                    set_rule_active(
+                        user_id=self._user.id,
+                        role_code=self._user.role_code,
+                        rule_id=int(r["id"]),
+                        is_active=False,
+                    )
+        except Exception as e:
+            QMessageBox.critical(self, "Правила ГЗ", f"Ошибка сохранения правил:\n{e}")
+            return
+
+        has_new = any(r.get("op") == "new" for r in rules_payload)
+        if not has_new:
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Генерация бронирований",
+                "Создать бронирования ГЗ по новым правилам до конца периода действия правила?\n\n"
+                "Если какие-то даты уже заняты — они будут пропущены.",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        try:
+            rep = generate_bookings_for_group(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                gz_group_id=int(gz_group_id),
+                tz=self.TZ,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
+            return
+
+        msg = (
+            f"Создано бронирований: {rep.created}\n"
+            f"Занято/уже существует: {rep.skipped_busy}\n"
+            f"Ошибок: {rep.skipped_error}"
+        )
+        if rep.errors:
+            msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
+            if len(rep.errors) > 8:
+                msg += f"\n... и ещё {len(rep.errors) - 8}"
+        QMessageBox.information(self, "Генерация бронирований", msg)
+
+    def _on_add(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на создание групп ГЗ.")
+            return
+
+        try:
+            coaches = list_coaches(
+                include_inactive=False,
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
+            return
+
+        if not coaches:
+            QMessageBox.information(self, "Гос. задание", "Нет доступных тренеров для ваших учреждений.")
+            return
+
+        dlg = GzGroupDialog(self, title="Создать группу ГЗ", coaches=coaches, is_admin=self._is_admin, user_id=int(self._user.id), role_code=str(self._user.role_code))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+
+        try:
+            new_id = create_group(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                coach_id=data["coach_id"],
+                group_year=data["group_year"],
+                notes=data.get("notes", ""),
+                is_free=bool(data.get("is_free", False)),
+                period_from=data.get("period_from"),
+                period_to=data.get("period_to"),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Создать группу ГЗ", f"Ошибка:\n{e}")
+            return
+
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(new_id, rules_payload)
+
+        self.reload()
+        self._select_row_by_id(new_id)
+
+    def _on_edit(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование групп ГЗ.")
+            return
+
+        g = self._selected_group()
+        if not g:
+            QMessageBox.information(self, "Редактировать", "Выберите группу.")
+            return
+
+        try:
+            coaches = list_coaches(
+                include_inactive=False,
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Тренеры", f"Ошибка загрузки тренеров:\n{e}")
+            return
+
+        dlg = GzGroupDialog(
+            self,
+            title=f"Редактировать: {g.coach_name} — {g.group_year}",
+            coaches=coaches,
+            is_admin=self._is_admin,
+            user_id=int(self._user.id),
+            role_code=str(self._user.role_code),
+            data={
+                "id": g.id,
+                "coach_id": g.coach_id,
+                "group_year": g.group_year,
+                "notes": g.notes,
+                "is_free": getattr(g, "is_free", False),
+                "period_from": getattr(g, "period_from", None),
+                "period_to": getattr(g, "period_to", None),
+            },
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        data = dlg.values()
+        rules_payload = dlg.rules_payload() if hasattr(dlg, "rules_payload") else []
+
+        try:
+            update_group(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                group_id=g.id,
+                coach_id=data["coach_id"],
+                group_year=data["group_year"],
+                notes=data.get("notes", ""),
+                is_free=bool(data.get("is_free", False)),
+                period_from=data.get("period_from"),
+                period_to=data.get("period_to"),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Редактировать группу ГЗ", f"Ошибка:\n{e}")
+            return
+
+        if rules_payload:
+            self._apply_rules_and_maybe_generate(g.id, rules_payload)
+
+        self.reload()
+        self._select_row_by_id(g.id)
+
+    def _on_toggle_active(self):
+        if not self._can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на изменение статуса групп ГЗ.")
+            return
+
+        g = self._selected_group()
+        if not g:
+            QMessageBox.information(self, "Архив", "Выберите группу.")
+            return
+
+        new_state = not g.is_active
+        action = "восстановить" if new_state else "архивировать"
+        if (
+            QMessageBox.question(
+                self,
+                "Подтверждение",
+                f"Вы действительно хотите {action} группу «{g.coach_name} — {g.group_year}»?",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        try:
+            set_group_active(
+                user_id=self._user.id,
+                role_code=self._user.role_code,
+                group_id=g.id,
+                is_active=new_state,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Архив", f"Ошибка:\n{e}")
+            return
+
+        self.reload()
+        self._select_row_by_id(g.id)
+
+    def _select_row_by_id(self, group_id: int) -> None:
+        for r in range(self.tbl.rowCount()):
+            it = self.tbl.item(r, 0)
+            if it and it.text() == str(group_id):
+                self.tbl.setCurrentCell(r, 0)
+                self.tbl.scrollToItem(it)
+                return
