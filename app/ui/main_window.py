@@ -26,9 +26,6 @@ class MainWindow(QMainWindow):
         self.user = user
         self.setWindowTitle(f"ИАС ФУТБОЛ — {user.username}")
 
-        # Применяем общую тёмную тему на всё приложение
-        QApplication.instance().setStyleSheet(DARK_APP_QSS)
-
         tabs = QTabWidget()
 
         if self._can_tab("tab.tenants"):
