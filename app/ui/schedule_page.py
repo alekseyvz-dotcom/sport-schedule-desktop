@@ -95,62 +95,6 @@ from app.services.bookings_service import (
 )
 from app.ui.booking_dialog import BookingDialog
 
-
-_PAGE_QSS = """
-QWidget { background: #fbfbfc; }
-QComboBox, QDateEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 6px 10px;
-    min-height: 22px;
-}
-QComboBox:focus, QDateEdit:focus { border: 1px solid #7fb3ff; }
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-QCheckBox { padding: 0 6px; }
-QLabel#sectionTitle { color: #111111; font-weight: 700; padding: 0 4px; }
-
-QToolButton#viewTab {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 7px 10px;
-    font-weight: 700;
-}
-QToolButton#viewTab:checked {
-    border: 1px solid #7fb3ff;
-    background: #f0f7ff;
-}
-QToolButton#viewTab:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-
-QTableWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    selection-background-color: rgba(127,179,255,60);
-    selection-color: #111111;
-    gridline-color: #e9edf3;
-}
-QHeaderView::section {
-    background: #f6f7f9;
-    color: #111111;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #e6e6e6;
-    font-weight: 600;
-}
-QTableWidget::item { padding: 6px 10px; }
-"""
-
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
@@ -204,8 +148,7 @@ class SchedulePage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self.user = user
-        self.setStyleSheet(_PAGE_QSS)
-
+        
         self._gz_group_is_free: Dict[int, bool] = {}
 
         self._gz_groups: List[Dict] = []
