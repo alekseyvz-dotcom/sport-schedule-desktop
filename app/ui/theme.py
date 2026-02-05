@@ -173,4 +173,90 @@ QDialog {
 QMessageBox QLabel {
     color: rgba(255, 255, 255, 0.88);
 }
+
+/* ---- Dialog surface ---- */
+QDialog {
+    background: #0b1220;
+}
+QDialog QLabel {
+    color: rgba(226, 232, 240, 0.82);
+}
+
+/* ---- GroupBox (карточки) ---- */
+QGroupBox {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+    margin-top: 14px; /* место под заголовок */
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 8px;
+    color: rgba(255, 255, 255, 0.90);
+    font-weight: 800;
+    background: #0b1220; /* чтобы текст не "лежал" на рамке */
+}
+
+/* ---- DialogButtonBox ---- */
+QDialogButtonBox QPushButton {
+    min-width: 110px;
+}
+
+/* ---- ComboBox (стрелка/список) ---- */
+QComboBox {
+    padding-right: 28px; /* место под стрелку */
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 26px;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    background: rgba(2, 6, 23, 0.98);
+    color: rgba(255, 255, 255, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    selection-background-color: rgba(99, 102, 241, 0.35);
+    outline: 0;
+    padding: 6px;
+}
+
+/* ---- Calendar popup (QDateEdit) ---- */
+QCalendarWidget QWidget {
+    alternate-background-color: rgba(255, 255, 255, 0.04);
+}
+QCalendarWidget QToolButton {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    padding: 6px 10px;
+}
+QCalendarWidget QToolButton:hover {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.10);
+}
+QCalendarWidget QMenu {
+    background: rgba(2, 6, 23, 0.98);
+    color: rgba(255, 255, 255, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+QCalendarWidget QAbstractItemView:enabled {
+    background: rgba(2, 6, 23, 0.92);
+    color: rgba(255, 255, 255, 0.88);
+    selection-background-color: rgba(99, 102, 241, 0.35);
+    selection-color: rgba(255, 255, 255, 0.95);
+    outline: 0;
+}
+
+/* ---- ScrollArea ---- */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
 """
