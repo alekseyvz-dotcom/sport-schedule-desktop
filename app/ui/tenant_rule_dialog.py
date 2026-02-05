@@ -7,6 +7,7 @@ from PySide6.QtCore import QDate, QTime, Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
+    QHBoxLayout,
     QFormLayout,
     QComboBox,
     QTimeEdit,
@@ -17,24 +18,19 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QPushButton,
+    QGroupBox,
+    QGridLayout,
+    QCheckBox,
 )
 
 
 class TenantRuleDialog(QDialog):
-    """
-    Диалог создания/редактирования правила.
-
-    Новое:
-    - Показывает доступность по всем зонам выбранной площадки на выбранный слот (weekday + time + period).
-    - В таблице отображается: конфликтов и пример "кем занято" (PD/GZ).
-    """
-
     def __init__(
         self,
         parent=None,
         *,
         title: str = "Правило расписания",
-        venue_units: List[Dict],  # {"id","venue_id","sort_order","label", ...}
+        venue_units: List[Dict],  # {"id","venue_id","sort_order","label"}
         initial: Optional[Dict] = None,
         contract_valid_from: Optional[date] = None,
         contract_valid_to: Optional[date] = None,
@@ -48,7 +44,7 @@ class TenantRuleDialog(QDialog):
         self._tz_name = tz_name
         initial = initial or {}
 
-        # ---- build venues: venue_id -> venue_label; + venue_id -> sorted units
+        # venue_id -> label ; venue_id -> units[]
         self._venue_label: Dict[int, str] = {}
         self._venue_units_sorted: Dict[int, List[Dict]] = {}
 
@@ -62,25 +58,10 @@ class TenantRuleDialog(QDialog):
         for vid, lst in self._venue_units_sorted.items():
             lst.sort(key=lambda x: (int(x.get("sort_order", 0)), str(x.get("label", ""))))
 
-        # ---- UI
+        # --- UI
         self.cmb_venue = QComboBox()
         for vid in sorted(self._venue_label.keys(), key=lambda x: self._venue_label[x]):
             self.cmb_venue.addItem(self._venue_label[vid], vid)
-
-        # Важно: у некоторых площадок может быть не 4 четверти, а 2 половины или 1 main.
-        # Но ваш сценарий выбора "сколько четвертей" предполагает линейный набор зон.
-        # Поэтому оставляем как есть и подсказываем пользователю через availability-таблицу.
-        self.cmb_start_quarter = QComboBox()  # позиция в списке зон (0..3)
-        self.cmb_start_quarter.addItem("1", 0)
-        self.cmb_start_quarter.addItem("2", 1)
-        self.cmb_start_quarter.addItem("3", 2)
-        self.cmb_start_quarter.addItem("4", 3)
-
-        self.cmb_quarters = QComboBox()
-        self.cmb_quarters.addItem("1/4", 1)
-        self.cmb_quarters.addItem("2/4", 2)
-        self.cmb_quarters.addItem("3/4", 3)
-        self.cmb_quarters.addItem("4/4", 4)
 
         self.cmb_weekday = QComboBox()
         days = [
@@ -109,22 +90,6 @@ class TenantRuleDialog(QDialog):
 
         self.ed_title = QLineEdit()
 
-        # ---- Availability UI
-        self.btn_check = QPushButton("Проверить доступность")
-        self.btn_check.clicked.connect(self._check_availability)
-
-        self.tbl_avail = QTableWidget(0, 4)
-        self.tbl_avail.setHorizontalHeaderLabels(["Зона", "Конфликтов", "Даты (пример)", "Кем занято (пример)"])
-        self.tbl_avail.verticalHeader().setVisible(False)
-        self.tbl_avail.setSortingEnabled(False)
-        self.tbl_avail.setWordWrap(True)
-        self.tbl_avail.horizontalHeader().setStretchLastSection(True)
-
-        self._avail_timer = QTimer(self)
-        self._avail_timer.setSingleShot(True)
-        self._avail_timer.setInterval(250)
-        self._avail_timer.timeout.connect(self._check_availability)
-
         # defaults from contract
         if contract_valid_from:
             self.dt_from.setDate(QDate(contract_valid_from.year, contract_valid_from.month, contract_valid_from.day))
@@ -136,20 +101,7 @@ class TenantRuleDialog(QDialog):
         else:
             self.dt_to.setDate(QDate.currentDate().addMonths(1))
 
-        # initial (edit)
-        if "venue_unit_id" in initial and initial["venue_unit_id"]:
-            unit_id = int(initial["venue_unit_id"])
-            u0 = next((u for u in self._units if int(u["id"]) == unit_id), None)
-            if u0:
-                vid = int(u0["venue_id"])
-                idx = self.cmb_venue.findData(vid)
-                if idx >= 0:
-                    self.cmb_venue.setCurrentIndex(idx)
-
-                lst = self._venue_units_sorted.get(vid, [])
-                pos = next((i for i, uu in enumerate(lst) if int(uu["id"]) == unit_id), 0)
-                self.cmb_start_quarter.setCurrentIndex(max(0, min(3, pos)))
-
+        # initial values (edit)
         if "weekday" in initial:
             idx = self.cmb_weekday.findData(int(initial["weekday"]))
             if idx >= 0:
@@ -174,11 +126,45 @@ class TenantRuleDialog(QDialog):
 
         self.ed_title.setText(initial.get("title", "") or "")
 
-        # ---- form
+        # --- Zones block
+        self.grp_zones = QGroupBox("Зоны")
+        self.zones_grid = QGridLayout(self.grp_zones)
+        self.zones_grid.setContentsMargins(10, 10, 10, 10)
+        self.zones_grid.setHorizontalSpacing(12)
+        self.zones_grid.setVerticalSpacing(6)
+
+        self._zone_checks: Dict[int, QCheckBox] = {}  # unit_id -> checkbox
+
+        self.btn_select_all = QPushButton("Выбрать все")
+        self.btn_clear_all = QPushButton("Снять все")
+        self.btn_select_all.clicked.connect(self._select_all_zones)
+        self.btn_clear_all.clicked.connect(self._clear_all_zones)
+
+        zones_btns = QHBoxLayout()
+        zones_btns.addWidget(self.btn_select_all)
+        zones_btns.addWidget(self.btn_clear_all)
+        zones_btns.addStretch(1)
+
+        # --- Availability UI
+        self.btn_check = QPushButton("Проверить доступность")
+        self.btn_check.clicked.connect(self._check_availability)
+
+        self.tbl_avail = QTableWidget(0, 4)
+        self.tbl_avail.setHorizontalHeaderLabels(["Зона", "Конфликтов", "Даты (пример)", "Кем занято (пример)"])
+        self.tbl_avail.verticalHeader().setVisible(False)
+        self.tbl_avail.setSortingEnabled(False)
+        self.tbl_avail.setWordWrap(True)
+        self.tbl_avail.horizontalHeader().setStretchLastSection(True)
+        self.tbl_avail.cellClicked.connect(self._on_avail_row_clicked)
+
+        self._avail_timer = QTimer(self)
+        self._avail_timer.setSingleShot(True)
+        self._avail_timer.setInterval(250)
+        self._avail_timer.timeout.connect(self._check_availability)
+
+        # --- Form layout
         form = QFormLayout()
         form.addRow("Площадка:", self.cmb_venue)
-        form.addRow("С какой зоны (позиция):", self.cmb_start_quarter)
-        form.addRow("Сколько зон:", self.cmb_quarters)
         form.addRow("День недели:", self.cmb_weekday)
         form.addRow("Начало:", self.tm_start)
         form.addRow("Окончание:", self.tm_end)
@@ -192,65 +178,110 @@ class TenantRuleDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addLayout(form)
+        root.addLayout(zones_btns)
+        root.addWidget(self.grp_zones)
         root.addWidget(self.btn_check)
         root.addWidget(self.tbl_avail, 1)
         root.addWidget(btns)
 
-        # ---- auto-check scheduling
-        self.cmb_venue.currentIndexChanged.connect(lambda *_: self._schedule_avail_check())
+        # signals
+        self.cmb_venue.currentIndexChanged.connect(self._on_venue_changed)
         self.cmb_weekday.currentIndexChanged.connect(lambda *_: self._schedule_avail_check())
         self.tm_start.timeChanged.connect(lambda *_: self._schedule_avail_check())
         self.tm_end.timeChanged.connect(lambda *_: self._schedule_avail_check())
         self.dt_from.dateChanged.connect(lambda *_: self._schedule_avail_check())
         self.dt_to.dateChanged.connect(lambda *_: self._schedule_avail_check())
 
-        # initial availability
+        # set initial venue by initial venue_unit_id (если редактирование)
+        if "venue_unit_id" in initial and initial["venue_unit_id"]:
+            unit_id = int(initial["venue_unit_id"])
+            u0 = next((u for u in self._units if int(u["id"]) == unit_id), None)
+            if u0:
+                vid = int(u0["venue_id"])
+                idx = self.cmb_venue.findData(vid)
+                if idx >= 0:
+                    self.cmb_venue.setCurrentIndex(idx)
+
+        # init zones for current venue
+        self._on_venue_changed()
+
+        # initial zone selection
+        if "venue_unit_ids" in initial and initial["venue_unit_ids"]:
+            selected = {int(x) for x in (initial["venue_unit_ids"] or [])}
+        elif "venue_unit_id" in initial and initial["venue_unit_id"]:
+            selected = {int(initial["venue_unit_id"])}
+        else:
+            selected = set()
+
+        for uid, cb in self._zone_checks.items():
+            cb.setChecked(uid in selected)
+
         self._schedule_avail_check()
 
+    # ---------- zones ----------
+    def _on_venue_changed(self) -> None:
+        vid = int(self.cmb_venue.currentData())
+
+        # пересоздать список чекбоксов
+        for i in reversed(range(self.zones_grid.count())):
+            w = self.zones_grid.itemAt(i).widget()
+            if w:
+                w.setParent(None)
+
+        self._zone_checks.clear()
+
+        units = self._venue_units_sorted.get(vid, [])
+        if not units:
+            lbl = QCheckBox("Нет зон")
+            lbl.setEnabled(False)
+            self.zones_grid.addWidget(lbl, 0, 0)
+            return
+
+        # раскладываем плиткой 4 в ряд (можно менять)
+        cols = 4
+        for i, u in enumerate(units):
+            uid = int(u["id"])
+            # label вида "Орг / Площадка — Q1" → нам нужно "Q1"
+            full = str(u.get("label") or "")
+            unit_name = full.split(" — ")[-1].strip() if " — " in full else full
+
+            cb = QCheckBox(unit_name)
+            cb.stateChanged.connect(lambda *_: self._schedule_avail_check())
+            self._zone_checks[uid] = cb
+
+            self.zones_grid.addWidget(cb, i // cols, i % cols)
+
+        self._schedule_avail_check()
+
+    def _select_all_zones(self) -> None:
+        for cb in self._zone_checks.values():
+            cb.setChecked(True)
+
+    def _clear_all_zones(self) -> None:
+        for cb in self._zone_checks.values():
+            cb.setChecked(False)
+
+    def _selected_unit_ids(self) -> List[int]:
+        picked = [uid for uid, cb in self._zone_checks.items() if cb.isChecked()]
+        picked.sort()
+        return picked
+
+    # ---------- availability ----------
     def _schedule_avail_check(self) -> None:
         self._avail_timer.start()
 
-    def _selected_unit_ids(self) -> List[int]:
-        vid = int(self.cmb_venue.currentData())
-        start_pos = int(self.cmb_start_quarter.currentData())  # 0..3
-        need = int(self.cmb_quarters.currentData())            # 1..4
-
-        lst = self._venue_units_sorted.get(vid, [])
-        picked = lst[start_pos: start_pos + need]
-        if len(picked) != need:
-            return []
-        return [int(u["id"]) for u in picked]
-
-    def _fill_availability_table(self, avail) -> None:
-        self.tbl_avail.setRowCount(0)
-
-        for r, a in enumerate(avail):
-            self.tbl_avail.insertRow(r)
-
-            it_zone = QTableWidgetItem(str(getattr(a, "unit_label", "")))
-            it_cnt = QTableWidgetItem(str(getattr(a, "conflict_count", 0)))
-
-            days = getattr(a, "conflict_days_sample", []) or []
-            days_txt = ", ".join(d.strftime("%d.%m") for d in days)
-            it_days = QTableWidgetItem(days_txt)
-
-            who_lines = []
-            for c in (getattr(a, "conflicts_sample", []) or [])[:3]:
-                # c: SlotConflict(day, starts_at, ends_at, who, ...)
-                who_lines.append(f"{c.day:%d.%m} {c.starts_at}-{c.ends_at} — {c.who}")
-            it_who = QTableWidgetItem("\n".join(who_lines))
-
-            if int(getattr(a, "conflict_count", 0) or 0) == 0:
-                it_cnt.setForeground(Qt.GlobalColor.darkGreen)
-            else:
-                it_cnt.setForeground(Qt.GlobalColor.darkRed)
-
-            self.tbl_avail.setItem(r, 0, it_zone)
-            self.tbl_avail.setItem(r, 1, it_cnt)
-            self.tbl_avail.setItem(r, 2, it_days)
-            self.tbl_avail.setItem(r, 3, it_who)
-
-        self.tbl_avail.resizeColumnsToContents()
+    def _on_avail_row_clicked(self, row: int, col: int) -> None:
+        # клик по строке таблицы доступности переключает соответствующую зону
+        it = self.tbl_avail.item(row, 0)
+        if not it:
+            return
+        uid = it.data(Qt.ItemDataRole.UserRole)
+        if uid is None:
+            return
+        uid = int(uid)
+        cb = self._zone_checks.get(uid)
+        if cb:
+            cb.setChecked(not cb.isChecked())
 
     def _check_availability(self) -> None:
         try:
@@ -264,7 +295,7 @@ class TenantRuleDialog(QDialog):
             if ends <= starts or valid_to < valid_from:
                 return
 
-            # все зоны выбранной площадки (main либо набор зон)
+            # проверяем все зоны площадки (а не только выбранные) — чтобы пользователь видел картину
             units = self._venue_units_sorted.get(vid, [])
             unit_ids = [int(u["id"]) for u in units]
 
@@ -290,7 +321,47 @@ class TenantRuleDialog(QDialog):
             self.tbl_avail.setItem(0, 2, QTableWidgetItem("—"))
             self.tbl_avail.setItem(0, 3, QTableWidgetItem(f"Ошибка: {type(e).__name__}: {e}"))
 
-    def _on_accept(self):
+    def _fill_availability_table(self, avail) -> None:
+        self.tbl_avail.setRowCount(0)
+
+        selected = set(self._selected_unit_ids())
+
+        for r, a in enumerate(avail):
+            self.tbl_avail.insertRow(r)
+
+            it_zone = QTableWidgetItem(str(a.unit_label))
+            it_zone.setData(Qt.ItemDataRole.UserRole, int(a.venue_unit_id))
+
+            it_cnt = QTableWidgetItem(str(a.conflict_count))
+
+            days_txt = ", ".join(d.strftime("%d.%m") for d in (a.conflict_days_sample or []))
+            it_days = QTableWidgetItem(days_txt)
+
+            who_lines = []
+            for c in (a.conflicts_sample or [])[:3]:
+                who_lines.append(f"{c.day:%d.%m} {c.starts_at}-{c.ends_at} — {c.who}")
+            it_who = QTableWidgetItem("\n".join(who_lines))
+
+            # подсветка конфликтов
+            if a.conflict_count == 0:
+                it_cnt.setForeground(Qt.GlobalColor.darkGreen)
+            else:
+                it_cnt.setForeground(Qt.GlobalColor.darkRed)
+
+            # подсветка выбранных зон
+            if int(a.venue_unit_id) in selected:
+                for it in (it_zone, it_cnt, it_days, it_who):
+                    it.setBackground(Qt.GlobalColor.lightGray)
+
+            self.tbl_avail.setItem(r, 0, it_zone)
+            self.tbl_avail.setItem(r, 1, it_cnt)
+            self.tbl_avail.setItem(r, 2, it_days)
+            self.tbl_avail.setItem(r, 3, it_who)
+
+        self.tbl_avail.resizeColumnsToContents()
+
+    # ---------- accept/values ----------
+    def _on_accept(self) -> None:
         if self.tm_end.time() <= self.tm_start.time():
             QMessageBox.warning(self, "Правило", "Время окончания должно быть больше времени начала.")
             return
@@ -299,20 +370,15 @@ class TenantRuleDialog(QDialog):
             return
 
         unit_ids = self._selected_unit_ids()
-        need = int(self.cmb_quarters.currentData())
-        if len(unit_ids) != need:
-            QMessageBox.warning(
-                self,
-                "Правило",
-                "Не удалось подобрать нужное количество зон.\n"
-                "Проверьте, что у площадки заведены зоны и корректный sort_order.",
-            )
+        if not unit_ids:
+            QMessageBox.warning(self, "Правило", "Выберите хотя бы одну зону.")
             return
 
         self.accept()
 
     def values(self) -> Dict:
         unit_ids = self._selected_unit_ids()
+        # venue_unit_id оставим как первый элемент для совместимости со старым кодом
         return {
             "venue_unit_id": int(unit_ids[0]),
             "venue_unit_ids": unit_ids,
