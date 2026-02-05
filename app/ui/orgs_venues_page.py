@@ -52,7 +52,6 @@ class OrgsVenuesPage(QWidget):
         super().__init__(parent)
         self.setObjectName("page")
         self.user = user
-        self.setStyleSheet(_PAGE_QSS)
 
         # ---------- Orgs (left)
         self.lbl_orgs = QLabel("Учреждения")
