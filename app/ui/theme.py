@@ -380,4 +380,25 @@ QTableWidget#scheduleList::item:selected {
     background: transparent;
     color: rgba(255,255,255,0.90); 
 }
+
+QComboBox::down-arrow {
+    width: 12px;
+    height: 12px;
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='rgb(226,232,240)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+/* ---- Schedule tables: let item roles control colors (important) ---- */
+QTableWidget#scheduleGrid::item,
+QTableWidget#scheduleGrid::item:selected,
+QTableWidget#scheduleList::item,
+QTableWidget#scheduleList::item:selected {
+    background: transparent;      /* не мешаем BackgroundRole */
+    color: rgba(255,255,255,0.90);
+}
+
+/* И отдельно гасим влияние "selection-background-color" на эти таблицы */
+QTableWidget#scheduleGrid,
+QTableWidget#scheduleList {
+    selection-background-color: transparent;
+    selection-color: rgba(255,255,255,0.90);
+}
 """
