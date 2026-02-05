@@ -64,7 +64,6 @@ def _fmt_h(sec: int) -> str:
 
 # ----------------- small chart widgets (no external deps) -----------------
 
-
 class DonutChart(QWidget):
     """Donut chart: PD vs GZ vs Other(0) with center label."""
 
@@ -293,7 +292,6 @@ class TenantUsagePage(QWidget):
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(_PAGE_QSS)
         self._user = user
         self._period: Optional[Period] = None
         self._rows: List[TenantUsageRow] = []
