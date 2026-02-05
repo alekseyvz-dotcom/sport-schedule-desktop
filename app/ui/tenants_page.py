@@ -44,13 +44,13 @@ class TenantsPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
+
         self._user = user
         self._role = (getattr(user, "role_code", "") or "").lower()
         self._is_admin = self._role == "admin"
-        self._can_edit = self._role in ("admin",)  # синхронизируйте с TENANTS_EDIT_ROLES в tenants_service
+        self._can_edit = self._role in ("admin",)
         self._edit_open = False
 
-        # --- Top bar ---
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Поиск: имя / ИНН / телефон")
         self.ed_search.setClearButtonEnabled(True)
@@ -71,7 +71,7 @@ class TenantsPage(QWidget):
             b.setMinimumHeight(34)
 
         top = QHBoxLayout()
-        top.setContentsMargins(12, 12, 12, 8)
+        top.setContentsMargins(0, 0, 0, 0)  # root уже задаёт отступы
         top.setSpacing(10)
         top.addWidget(self.ed_search, 1)
         top.addWidget(self.cb_inactive)
@@ -79,8 +79,8 @@ class TenantsPage(QWidget):
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_archive)
 
-        # --- Table ---
         self.tbl = QTableWidget(0, 14)
+        self.tbl.setObjectName("tenantsTable")
         self.tbl.setHorizontalHeaderLabels(
             [
                 "ID",
@@ -103,14 +103,12 @@ class TenantsPage(QWidget):
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setAlternatingRowColors(False)
         self.tbl.setSortingEnabled(True)
         self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
 
-        # двойной клик: только если можно редактировать
         self.tbl.doubleClicked.connect(lambda *_: self._on_edit())
-
         self.tbl.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         header = self.tbl.horizontalHeader()
@@ -119,10 +117,10 @@ class TenantsPage(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
 
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)   # ID
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)   # Тип
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)   # Аренда
-        header.setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)  # Активен
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(12, QHeaderView.ResizeMode.ResizeToContents)
 
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(13, QHeaderView.ResizeMode.Interactive)
@@ -140,12 +138,6 @@ class TenantsPage(QWidget):
         self.tbl.setColumnWidth(10, 95)
         self.tbl.setColumnWidth(11, 120)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 8, 12, 12)
-        root.setSpacing(10)
-        root.addLayout(top)
-        root.addWidget(self.tbl, 1)
-
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
@@ -155,6 +147,19 @@ class TenantsPage(QWidget):
         self._ico_legal = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
         self._ico_one_time = style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop)
         self._ico_long = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
+
+        tbl_card = QWidget(self)
+        tbl_card.setObjectName("detailsCard")
+        tbl_card_lay = QVBoxLayout(tbl_card)
+        tbl_card_lay.setContentsMargins(10, 10, 10, 10)
+        tbl_card_lay.setSpacing(0)
+        tbl_card_lay.addWidget(self.tbl)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 12)
+        root.setSpacing(10)
+        root.addLayout(top)
+        root.addWidget(tbl_card, 1)
 
         self._apply_ui_access()
         self.reload()
