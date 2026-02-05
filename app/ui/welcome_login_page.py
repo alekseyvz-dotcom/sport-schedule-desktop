@@ -1,7 +1,13 @@
 # app/ui/welcome_login_page.py
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import (
+    Qt, Signal, QEasingCurve, QPoint, QRect, QEvent,
+    QPropertyAnimation, QParallelAnimationGroup
+)
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QGraphicsDropShadowEffect
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QFrame,
+    QGraphicsDropShadowEffect, QGraphicsOpacityEffect
+)
 
 from app.ui.login_window import LoginWindow
 from app.services.users_service import AuthUser
@@ -9,7 +15,6 @@ from app.services.users_service import AuthUser
 
 _WELCOME_QSS = """
 QWidget#welcomeRoot {
-    /* Глубокий, но спокойный фон */
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 #0b1220,
         stop:0.45 #111b33,
@@ -17,43 +22,39 @@ QWidget#welcomeRoot {
     );
 }
 
-/* Декоративные "пятна" на фоне */
 QFrame#blobA {
     background: qradialgradient(cx:0.3, cy:0.3, radius:0.9,
-        stop:0 rgba(99, 102, 241, 170),
-        stop:0.35 rgba(99, 102, 241, 80),
+        stop:0 rgba(99, 102, 241, 160),
+        stop:0.35 rgba(99, 102, 241, 70),
         stop:1 rgba(99, 102, 241, 0)
     );
     border-radius: 260px;
 }
 QFrame#blobB {
     background: qradialgradient(cx:0.7, cy:0.6, radius:1.0,
-        stop:0 rgba(34, 211, 238, 150),
-        stop:0.35 rgba(34, 211, 238, 70),
+        stop:0 rgba(34, 211, 238, 140),
+        stop:0.35 rgba(34, 211, 238, 60),
         stop:1 rgba(34, 211, 238, 0)
     );
     border-radius: 300px;
 }
 
-/* Свечение под карточкой */
 QFrame#glowLayer {
     background: qradialgradient(cx:0.5, cy:0.35, radius:0.9,
-        stop:0 rgba(99, 102, 241, 190),
-        stop:0.3 rgba(34, 211, 238, 120),
-        stop:0.75 rgba(255, 255, 255, 18),
+        stop:0 rgba(99, 102, 241, 150),
+        stop:0.32 rgba(34, 211, 238, 95),
+        stop:0.78 rgba(255, 255, 255, 14),
         stop:1 rgba(255, 255, 255, 0)
     );
     border-radius: 28px;
 }
 
-/* Стеклянная карточка */
 QFrame#loginCard {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 22px;
 }
 
-/* Внутренняя "плашка", чтобы контент читался ещё лучше */
 QFrame#cardInner {
     background: rgba(15, 23, 42, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.10);
@@ -66,13 +67,10 @@ QLabel#appTitle {
     font-weight: 800;
     letter-spacing: 0.6px;
 }
-
 QLabel#appSubtitle {
     color: rgba(226, 232, 240, 0.78);
     font-size: 13px;
 }
-
-/* Небольшая подпись снизу (опционально) */
 QLabel#hint {
     color: rgba(226, 232, 240, 0.55);
     font-size: 11px;
@@ -87,40 +85,60 @@ class WelcomeLoginPage(QWidget):
         super().__init__()
         self.setObjectName("welcomeRoot")
         self.setStyleSheet(_WELCOME_QSS)
+        self.setMouseTracking(True)
 
-        # --- Фоновые "пятна" (декор) ---
-        blob_a = QFrame(self)
-        blob_a.setObjectName("blobA")
-        blob_a.setFixedSize(520, 520)
-        blob_a.move(-140, -160)
-        blob_a.lower()
+        # --- Blobs ---
+        self._blob_a = QFrame(self)
+        self._blob_a.setObjectName("blobA")
+        self._blob_a.setFixedSize(520, 520)
+        self._blob_a.move(-140, -160)
+        self._blob_a.lower()
 
-        blob_b = QFrame(self)
-        blob_b.setObjectName("blobB")
-        blob_b.setFixedSize(600, 600)
-        blob_b.move(420, 140)
-        blob_b.lower()
+        self._blob_b = QFrame(self)
+        self._blob_b.setObjectName("blobB")
+        self._blob_b.setFixedSize(600, 600)
+        self._blob_b.move(420, 140)
+        self._blob_b.lower()
 
-        # --- Свечение под карточкой ---
-        glow = QFrame(self)
-        glow.setObjectName("glowLayer")
-        glow.setFixedSize(520, 420)
-        glow.lower()
+        # Лёгкая “дымка” через opacity (дороже выглядит, чем просто size)
+        self._blob_a_op = QGraphicsOpacityEffect(self._blob_a)
+        self._blob_a_op.setOpacity(1.0)
+        self._blob_a.setGraphicsEffect(self._blob_a_op)
 
-        # --- Карточка ---
-        card = QFrame(self)
-        card.setObjectName("loginCard")
-        card.setFixedWidth(480)
+        self._blob_b_op = QGraphicsOpacityEffect(self._blob_b)
+        self._blob_b_op.setOpacity(0.95)
+        self._blob_b.setGraphicsEffect(self._blob_b_op)
 
-        # Тень карточки (даёт "премиум" ощущение глубины)
-        shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(40)
+        # Базы
+        self._blob_a_base_pos = self._blob_a.pos()
+        self._blob_b_base_pos = self._blob_b.pos()
+        self._blob_a_base_geo = self._blob_a.geometry()
+        self._blob_b_base_geo = self._blob_b.geometry()
+
+        # --- Glow under card ---
+        self._glow = QFrame(self)
+        self._glow.setObjectName("glowLayer")
+        self._glow.setFixedSize(520, 420)
+        self._glow.lower()
+
+        self._glow_op = QGraphicsOpacityEffect(self._glow)
+        self._glow_op.setOpacity(0.78)
+        self._glow.setGraphicsEffect(self._glow_op)
+
+        # --- Card ---
+        self._card = QFrame(self)
+        self._card.setObjectName("loginCard")
+        self._card.setFixedWidth(480)
+        self._card.setAttribute(Qt.WA_Hover, True)
+        self._card.installEventFilter(self)
+
+        shadow = QGraphicsDropShadowEffect(self._card)
+        shadow.setBlurRadius(42)
         shadow.setOffset(0, 18)
         shadow.setColor(QColor(0, 0, 0, 140))
-        card.setGraphicsEffect(shadow)
+        self._card.setGraphicsEffect(shadow)
 
-        # Внутренняя область (повышаем читабельность)
-        inner = QFrame(card)
+        inner = QFrame(self._card)
         inner.setObjectName("cardInner")
 
         title = QLabel("ИАС ФУТБОЛ")
@@ -148,25 +166,187 @@ class WelcomeLoginPage(QWidget):
         inner_lay.addSpacing(6)
         inner_lay.addWidget(hint)
 
-        card_lay = QVBoxLayout(card)
+        card_lay = QVBoxLayout(self._card)
         card_lay.setContentsMargins(14, 14, 14, 14)
         card_lay.addWidget(inner)
 
-        # Центрирование
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 28, 28, 28)
         root.addStretch(1)
-        root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        root.addWidget(self._card, 0, Qt.AlignmentFlag.AlignHCenter)
         root.addStretch(1)
 
-        # Позиционируем glow по центру под карточкой
-        # (после layout — просто двигаем при первом show/resize через resizeEvent)
-        self._card = card
-        self._glow = glow
+        # --- Card micro animation ---
+        self._base_card_pos = None
+        self._shadow = shadow
+
+        self._hover_anim = QPropertyAnimation(self._card, b"pos", self)
+        self._hover_anim.setDuration(180)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._shadow_anim = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        self._shadow_anim.setDuration(180)
+        self._shadow_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        # Glow чуть усиливаем на hover/focus (очень “дорого” выглядит)
+        self._glow_hover_op_anim = QPropertyAnimation(self._glow_op, b"opacity", self)
+        self._glow_hover_op_anim.setDuration(180)
+        self._glow_hover_op_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self.login.ed_user.installEventFilter(self)
+        self.login.ed_pass.installEventFilter(self)
+
+        # --- Premium background motion (super soft) ---
+        self._start_premium_background_motion()
+
+    def _start_premium_background_motion(self):
+        # Амплитуды маленькие, длительности большие, easing мягкий.
+        # “Дорого” — это когда движение едва заметно.
+        def center_breathe(base: QRect, delta: int) -> tuple[QRect, QRect, QRect]:
+            a = QRect(base.x(), base.y(), base.width(), base.height())
+            b = QRect(base.x() - delta // 2, base.y() - delta // 2, base.width() + delta, base.height() + delta)
+            c = QRect(base.x() - (delta // 3), base.y() - (delta // 3), base.width() + (2 * delta // 3), base.height() + (2 * delta // 3))
+            return a, b, c
+
+        # --- Blob A group ---
+        d_a = 26
+        ga0, ga1, ga2 = center_breathe(self._blob_a_base_geo, d_a)
+
+        self._blob_a_pos_anim = QPropertyAnimation(self._blob_a, b"pos", self)
+        self._blob_a_pos_anim.setDuration(16000)
+        self._blob_a_pos_anim.setLoopCount(-1)
+        self._blob_a_pos_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_a_pos_anim.setStartValue(self._blob_a_base_pos + QPoint(0, 0))
+        self._blob_a_pos_anim.setKeyValueAt(0.35, self._blob_a_base_pos + QPoint(18, 10))
+        self._blob_a_pos_anim.setKeyValueAt(0.70, self._blob_a_base_pos + QPoint(8, 22))
+        self._blob_a_pos_anim.setEndValue(self._blob_a_base_pos + QPoint(0, 0))
+
+        self._blob_a_geo_anim = QPropertyAnimation(self._blob_a, b"geometry", self)
+        self._blob_a_geo_anim.setDuration(19000)
+        self._blob_a_geo_anim.setLoopCount(-1)
+        self._blob_a_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_a_geo_anim.setStartValue(ga0)
+        self._blob_a_geo_anim.setKeyValueAt(0.5, ga1)
+        self._blob_a_geo_anim.setEndValue(ga0)
+
+        self._blob_a_op_anim = QPropertyAnimation(self._blob_a_op, b"opacity", self)
+        self._blob_a_op_anim.setDuration(21000)
+        self._blob_a_op_anim.setLoopCount(-1)
+        self._blob_a_op_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_a_op_anim.setStartValue(0.92)
+        self._blob_a_op_anim.setKeyValueAt(0.5, 1.0)
+        self._blob_a_op_anim.setEndValue(0.92)
+
+        self._blob_a_group = QParallelAnimationGroup(self)
+        self._blob_a_group.addAnimation(self._blob_a_pos_anim)
+        self._blob_a_group.addAnimation(self._blob_a_geo_anim)
+        self._blob_a_group.addAnimation(self._blob_a_op_anim)
+        self._blob_a_group.start()
+
+        # --- Blob B group (противофаза/другие периоды) ---
+        d_b = 34
+        gb0, gb1, gb2 = center_breathe(self._blob_b_base_geo, d_b)
+
+        self._blob_b_pos_anim = QPropertyAnimation(self._blob_b, b"pos", self)
+        self._blob_b_pos_anim.setDuration(22000)
+        self._blob_b_pos_anim.setLoopCount(-1)
+        self._blob_b_pos_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_b_pos_anim.setStartValue(self._blob_b_base_pos + QPoint(0, 0))
+        self._blob_b_pos_anim.setKeyValueAt(0.40, self._blob_b_base_pos + QPoint(-22, -12))
+        self._blob_b_pos_anim.setKeyValueAt(0.75, self._blob_b_base_pos + QPoint(-10, -26))
+        self._blob_b_pos_anim.setEndValue(self._blob_b_base_pos + QPoint(0, 0))
+
+        self._blob_b_geo_anim = QPropertyAnimation(self._blob_b, b"geometry", self)
+        self._blob_b_geo_anim.setDuration(24000)
+        self._blob_b_geo_anim.setLoopCount(-1)
+        self._blob_b_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_b_geo_anim.setStartValue(gb0)
+        self._blob_b_geo_anim.setKeyValueAt(0.5, gb1)
+        self._blob_b_geo_anim.setEndValue(gb0)
+
+        self._blob_b_op_anim = QPropertyAnimation(self._blob_b_op, b"opacity", self)
+        self._blob_b_op_anim.setDuration(26000)
+        self._blob_b_op_anim.setLoopCount(-1)
+        self._blob_b_op_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_b_op_anim.setStartValue(0.86)
+        self._blob_b_op_anim.setKeyValueAt(0.5, 0.96)
+        self._blob_b_op_anim.setEndValue(0.86)
+
+        self._blob_b_group = QParallelAnimationGroup(self)
+        self._blob_b_group.addAnimation(self._blob_b_pos_anim)
+        self._blob_b_group.addAnimation(self._blob_b_geo_anim)
+        self._blob_b_group.addAnimation(self._blob_b_op_anim)
+        self._blob_b_group.start()
+
+        # --- Glow breathe (очень мягко) ---
+        self._glow_base_geo = self._glow.geometry()
+
+        self._glow_geo_anim = QPropertyAnimation(self._glow, b"geometry", self)
+        self._glow_geo_anim.setDuration(12000)
+        self._glow_geo_anim.setLoopCount(-1)
+        self._glow_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
+
+        # геометрию glow мы корректнее зададим после первого resizeEvent (когда он центрирован)
+        # поэтому тут стартуем позже — значения выставим в resizeEvent, а затем start()
+        self._glow_op_anim = QPropertyAnimation(self._glow_op, b"opacity", self)
+        self._glow_op_anim.setDuration(12000)
+        self._glow_op_anim.setLoopCount(-1)
+        self._glow_op_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._glow_op_anim.setStartValue(0.72)
+        self._glow_op_anim.setKeyValueAt(0.5, 0.86)
+        self._glow_op_anim.setEndValue(0.72)
+
+        self._glow_group = QParallelAnimationGroup(self)
+        self._glow_group.addAnimation(self._glow_geo_anim)
+        self._glow_group.addAnimation(self._glow_op_anim)
+        # стартуем в resizeEvent, когда будет известна базовая геометрия glow
+        # (но opacity можно уже сейчас)
+        self._glow_op_anim.start()
+
+    def _animate_card(self, lifted: bool):
+        if self._base_card_pos is None:
+            self._base_card_pos = self._card.pos()
+
+        self._hover_anim.stop()
+        self._shadow_anim.stop()
+        self._glow_hover_op_anim.stop()
+
+        end_pos = self._base_card_pos + QPoint(0, -6) if lifted else self._base_card_pos
+        self._hover_anim.setStartValue(self._card.pos())
+        self._hover_anim.setEndValue(end_pos)
+        self._hover_anim.start()
+
+        self._shadow_anim.setStartValue(self._shadow.blurRadius())
+        self._shadow_anim.setEndValue(56 if lifted else 42)
+        self._shadow_anim.start()
+
+        # Чуть усиливаем glow на hover/focus
+        base = 0.78
+        self._glow_hover_op_anim.setStartValue(self._glow_op.opacity())
+        self._glow_hover_op_anim.setEndValue(min(1.0, base + (0.12 if lifted else -0.02)))
+        self._glow_hover_op_anim.start()
+
+    def eventFilter(self, obj, event):
+        if obj is self._card:
+            if event.type() == QEvent.Enter:
+                self._animate_card(True)
+            elif event.type() == QEvent.Leave:
+                if not (self.login.ed_user.hasFocus() or self.login.ed_pass.hasFocus()):
+                    self._animate_card(False)
+
+        if obj in (self.login.ed_user, self.login.ed_pass):
+            if event.type() == QEvent.FocusIn:
+                self._animate_card(True)
+            elif event.type() == QEvent.FocusOut:
+                if not self._card.underMouse():
+                    self._animate_card(False)
+
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Центрируем glow относительно карточки, чуть выше центра для "хайлайта"
+
+        # glow под карточкой (центрирование)
         card_geo = self._card.geometry()
         glow_w = self._glow.width()
         glow_h = self._glow.height()
@@ -174,3 +354,20 @@ class WelcomeLoginPage(QWidget):
         y = card_geo.center().y() - glow_h // 2 - 20
         self._glow.move(x, y)
         self._glow.lower()
+
+        # база карточки
+        self._base_card_pos = self._card.pos()
+
+        # Старт/обновление "дыхания" glow (после того как он центрирован)
+        base_geo = self._glow.geometry()
+        d = 26
+        g0 = QRect(base_geo.x(), base_geo.y(), base_geo.width(), base_geo.height())
+        g1 = QRect(base_geo.x() - d // 2, base_geo.y() - d // 2, base_geo.width() + d, base_geo.height() + d)
+
+        # Если анимация уже запускалась — не дёргаем постоянно.
+        if not getattr(self, "_glow_geo_started", False):
+            self._glow_geo_anim.setStartValue(g0)
+            self._glow_geo_anim.setKeyValueAt(0.5, g1)
+            self._glow_geo_anim.setEndValue(g0)
+            self._glow_geo_anim.start()
+            self._glow_geo_started = True
