@@ -259,4 +259,22 @@ QScrollArea {
     background: transparent;
     border: none;
 }
+
+QToolButton#viewTab {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-weight: 800;
+    color: rgba(226, 232, 240, 0.82);
+}
+QToolButton#viewTab:hover {
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+QToolButton#viewTab:checked {
+    background: rgba(15, 23, 42, 0.55);
+    border-color: rgba(99, 102, 241, 0.65);
+    color: rgba(255, 255, 255, 0.92);
+}
 """
