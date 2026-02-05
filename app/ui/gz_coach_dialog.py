@@ -17,29 +17,6 @@ from PySide6.QtWidgets import (
 )
 
 
-_QSS = """
-QDialog { background: #fbfbfc; }
-QLineEdit, QTextEdit, QListWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 10px;
-}
-QLineEdit:focus, QTextEdit:focus, QListWidget:focus { border: 1px solid #7fb3ff; }
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-    min-height: 34px;
-}
-QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-QPushButton:pressed { background: #eef1f5; }
-QLabel#title { font-weight: 700; color: #111111; }
-"""
-
-
 class GzCoachDialog(QDialog):
     def __init__(
         self,
@@ -51,7 +28,8 @@ class GzCoachDialog(QDialog):
         selected_org_ids: Optional[List[int]] = None,
     ):
         super().__init__(parent)
-        self.setStyleSheet(_QSS)
+
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.resize(520, 420)
 
@@ -59,17 +37,18 @@ class GzCoachDialog(QDialog):
         selected = {int(x) for x in (selected_org_ids or [])}
 
         lbl = QLabel(title)
-        lbl.setObjectName("title")
+        lbl.setObjectName("dialogTitle")  # можно добавить стиль в theme.py при желании
 
         self.ed_name = QLineEdit(data.get("full_name", "") or "")
         self.ed_name.setPlaceholderText("Фамилия Имя Отчество")
 
         self.ed_comment = QTextEdit(data.get("comment", "") or "")
         self.ed_comment.setPlaceholderText("Комментарий…")
-        self.ed_comment.setFixedHeight(80)
+        self.ed_comment.setFixedHeight(90)
 
         self.lst_orgs = QListWidget()
-        self.lst_orgs.setMinimumHeight(160)
+        self.lst_orgs.setMinimumHeight(170)
+        self.lst_orgs.setSelectionMode(QListWidget.SelectionMode.NoSelection)
 
         for o in orgs:
             it = QListWidgetItem(str(o["name"]))
@@ -80,19 +59,21 @@ class GzCoachDialog(QDialog):
 
         btn_ok = QPushButton("Сохранить")
         btn_cancel = QPushButton("Отмена")
+        btn_ok.setObjectName("primary")  # будет “primary” из theme.py
         btn_ok.clicked.connect(self._on_ok)
         btn_cancel.clicked.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
+
         root.addWidget(lbl)
 
         root.addWidget(QLabel("ФИО тренера *:"))
         root.addWidget(self.ed_name)
 
         root.addWidget(QLabel("Объекты (учреждения) *:"))
-        root.addWidget(self.lst_orgs)
+        root.addWidget(self.lst_orgs, 1)
 
         root.addWidget(QLabel("Комментарий:"))
         root.addWidget(self.ed_comment)
