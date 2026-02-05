@@ -121,8 +121,13 @@ class BookingBlockDelegate(QStyledItemDelegate):
         has_booking = bool(booking)
 
         painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # EMPTY: draw grid only (no default paint to avoid style overrides)
+        # ВСЕГДА рисуем базовый фон ячейки
+        base_bg = QColor(15, 23, 42, 30)  # прозрачный темный
+        painter.fillRect(rect, base_bg)
+
+        # Если нет брони — рисуем только сетку
         if not has_booking:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             grid_pen = QPen(QColor(255, 255, 255, 22))
@@ -135,11 +140,10 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
+        # Есть бронь — рисуем цветной блок
         accent = self._accent_for(booking)
 
-        # brighter fill
+        # Яркая заливка
         fill = QColor(accent)
         fill.setAlpha(170)
 
@@ -149,34 +153,35 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
 
+        # Рисуем блок в зависимости от позиции (верх/середина/низ)
         if part == "top":
             path = QPainterPath()
-            path.addRoundedRect(QRectF(r), radius, radius)
-            path.addRect(QRectF(r.left(), r.center().y(), r.width(), r.height()))
+            path.addRoundedRect(rect.adjusted(2, 1, -2, 0), radius, radius)
+            path.addRect(rect.adjusted(2, rect.height() // 2, -2, 0))
             painter.drawPath(path)
         elif part == "bottom":
             path = QPainterPath()
-            path.addRoundedRect(QRectF(r), radius, radius)
-            path.addRect(QRectF(r.left(), r.top(), r.width(), r.height() / 2))
+            path.addRoundedRect(rect.adjusted(2, 0, -2, -1), radius, radius)
+            path.addRect(rect.adjusted(2, 0, -2, -(rect.height() // 2)))
             painter.drawPath(path)
         elif part == "middle":
-            painter.drawRect(QRectF(r))
-        else:
-            painter.drawRoundedRect(QRectF(r), radius, radius)
+            painter.drawRect(rect.adjusted(2, 0, -2, 0))
+        else:  # single slot
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), radius, radius)
 
-        # left accent bar
+        # Левая акцентная полоса
         painter.setBrush(accent)
-        painter.drawRect(QRectF(r.left(), r.top(), 4, r.height()))
+        painter.drawRect(rect.adjusted(2, 1, -rect.width() + 6, -1))
 
-        # border
+        # Обводка
         border = QColor(accent)
         border.setAlpha(220)
         painter.setPen(QPen(border, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if part in ("top", "bottom", None):
-            painter.drawRoundedRect(QRectF(r), radius, radius)
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), radius, radius)
 
-        # badge + text only in top cell
+        # Бейдж и текст только в верхней ячейке
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
@@ -190,7 +195,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
                 badge_bg = QColor(accent)
                 badge_bg.setAlpha(235)
 
-            # badge
+            # Рисуем бейдж
             fm = painter.fontMetrics()
             pad_x, pad_y = 8, 3
             bw = fm.horizontalAdvance(badge_text) + pad_x * 2
@@ -200,22 +205,23 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(badge_bg)
-            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
+            painter.drawRoundedRect(bx, by, bw, bh, 8, 8)
 
             painter.setPen(QPen(QColor(255, 255, 255, 245)))
             f = painter.font()
             f.setBold(True)
             painter.setFont(f)
-            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
+            painter.drawText(int(bx), int(by), int(bw), int(bh), 
+                           Qt.AlignmentFlag.AlignCenter, badge_text)
 
-            # text
+            # Рисуем текст брони
             text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
             if text:
                 f2 = painter.font()
                 f2.setBold(False)
                 painter.setFont(f2)
                 painter.setPen(QPen(QColor(255, 255, 255, 238)))
-                text_rect = QRectF(r.left() + 10, r.top() + 8, r.width() - 10 - 70, r.height() - 12)
+                text_rect = rect.adjusted(12, 8, -70, -8)
                 painter.drawText(
                     text_rect,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
@@ -225,9 +231,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option, index):
-        # keep default sizing
         return super().sizeHint(option, index)
-
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
@@ -814,6 +818,8 @@ class SchedulePage(QWidget):
 
     def _reload_grid(self):
         self.meta_row.setVisible(False)
+        
+        # Очищаем все ячейки
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -821,9 +827,7 @@ class SchedulePage(QWidget):
                     it = QTableWidgetItem("")
                     self.tbl.setItem(r, c, it)
                 it.setText("")
-                # УБРАТЬ эту строку:
-                # it.setData(Qt.ItemDataRole.BackgroundRole, self._EMPTY_SLOT_COLOR)
-                it.setData(Qt.ItemDataRole.ForegroundRole, None)
+                # НЕ устанавливаем BackgroundRole!
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
     
@@ -842,6 +846,7 @@ class SchedulePage(QWidget):
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки бронирований:\n{e}")
             return
     
+        # Маппинг venue_unit_id -> column
         unit_col: Dict[int, int] = {}
         venue_fallback_col: Dict[int, int] = {}
         for i, rsrc in enumerate(self._resources):
@@ -854,6 +859,7 @@ class SchedulePage(QWidget):
         day_start = datetime.combine(day, self._work_start, tzinfo=self.TZ)
         day_end = datetime.combine(day, self._work_end, tzinfo=self.TZ)
     
+        # Заполняем бронирования
         for b in bookings:
             col = None
             if getattr(b, "venue_unit_id", None) is not None:
@@ -873,17 +879,17 @@ class SchedulePage(QWidget):
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
     
+            # Заполняем все ячейки брони
             for rr in range(r0, r1 + 1):
                 it = self.tbl.item(rr, col)
                 if it is None:
                     it = QTableWidgetItem("")
                     self.tbl.setItem(rr, col, it)
     
-                # УБРАТЬ эту строку:
-                # it.setData(Qt.ItemDataRole.BackgroundRole, base)
-                it.setData(Qt.ItemDataRole.ForegroundRole, None)  # delegate сам рисует текст
+                # Сохраняем объект брони
                 it.setData(Qt.ItemDataRole.UserRole, b)
     
+                # Определяем часть блока
                 if rr == r0:
                     it.setData(BookingBlockDelegate.ROLE_PART, "top")
                 elif rr == r1:
@@ -891,6 +897,7 @@ class SchedulePage(QWidget):
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
     
+            # В верхнюю ячейку записываем текст
             it0 = self.tbl.item(r0, col)
             if it0:
                 kind = (getattr(b, "kind", "") or "").upper()
@@ -898,8 +905,7 @@ class SchedulePage(QWidget):
                 if kind == "GZ":
                     tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
                 title = (getattr(b, "title", "") or "").strip()
-                it0.setText(f"{tenant_name}\n{title}" if title else f"{tenant_name}")
-                # ForegroundRole тоже можно убрать — delegate сам рисует
+                it0.setText(f"{tenant_name}\n{title}" if title else tenant_name)
     
         self.tbl.resizeRowsToContents()
         self.tbl.viewport().update()
