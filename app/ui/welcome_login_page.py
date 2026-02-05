@@ -87,6 +87,10 @@ class WelcomeLoginPage(QWidget):
         self.setStyleSheet(_WELCOME_QSS)
         self.setMouseTracking(True)
 
+        # Создаём login СРАЗУ (важно для eventFilter, чтобы не словить AttributeError)
+        self.login = LoginWindow()
+        self.login.logged_in.connect(self.logged_in)
+
         # --- Blobs ---
         self._blob_a = QFrame(self)
         self._blob_a.setObjectName("blobA")
@@ -100,7 +104,6 @@ class WelcomeLoginPage(QWidget):
         self._blob_b.move(420, 140)
         self._blob_b.lower()
 
-        # Лёгкая “дымка” через opacity (дороже выглядит, чем просто size)
         self._blob_a_op = QGraphicsOpacityEffect(self._blob_a)
         self._blob_a_op.setOpacity(1.0)
         self._blob_a.setGraphicsEffect(self._blob_a_op)
@@ -109,7 +112,6 @@ class WelcomeLoginPage(QWidget):
         self._blob_b_op.setOpacity(0.95)
         self._blob_b.setGraphicsEffect(self._blob_b_op)
 
-        # Базы
         self._blob_a_base_pos = self._blob_a.pos()
         self._blob_b_base_pos = self._blob_b.pos()
         self._blob_a_base_geo = self._blob_a.geometry()
@@ -130,7 +132,6 @@ class WelcomeLoginPage(QWidget):
         self._card.setObjectName("loginCard")
         self._card.setFixedWidth(480)
         self._card.setAttribute(Qt.WA_Hover, True)
-        self._card.installEventFilter(self)
 
         shadow = QGraphicsDropShadowEffect(self._card)
         shadow.setBlurRadius(42)
@@ -148,9 +149,6 @@ class WelcomeLoginPage(QWidget):
         subtitle = QLabel("Войдите, чтобы продолжить работу")
         subtitle.setObjectName("appSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        self.login = LoginWindow()
-        self.login.logged_in.connect(self.logged_in)
 
         hint = QLabel("Совет: используйте корпоративный логин и пароль")
         hint.setObjectName("hint")
@@ -188,11 +186,12 @@ class WelcomeLoginPage(QWidget):
         self._shadow_anim.setDuration(180)
         self._shadow_anim.setEasingCurve(QEasingCurve.OutCubic)
 
-        # Glow чуть усиливаем на hover/focus (очень “дорого” выглядит)
         self._glow_hover_op_anim = QPropertyAnimation(self._glow_op, b"opacity", self)
         self._glow_hover_op_anim.setDuration(180)
         self._glow_hover_op_anim.setEasingCurve(QEasingCurve.OutCubic)
 
+        # Ставим eventFilter ПОСЛЕ того как всё нужное создано
+        self._card.installEventFilter(self)
         self.login.ed_user.installEventFilter(self)
         self.login.ed_pass.installEventFilter(self)
 
@@ -200,17 +199,14 @@ class WelcomeLoginPage(QWidget):
         self._start_premium_background_motion()
 
     def _start_premium_background_motion(self):
-        # Амплитуды маленькие, длительности большие, easing мягкий.
-        # “Дорого” — это когда движение едва заметно.
-        def center_breathe(base: QRect, delta: int) -> tuple[QRect, QRect, QRect]:
+        def center_breathe(base: QRect, delta: int):
             a = QRect(base.x(), base.y(), base.width(), base.height())
             b = QRect(base.x() - delta // 2, base.y() - delta // 2, base.width() + delta, base.height() + delta)
-            c = QRect(base.x() - (delta // 3), base.y() - (delta // 3), base.width() + (2 * delta // 3), base.height() + (2 * delta // 3))
-            return a, b, c
+            return a, b
 
-        # --- Blob A group ---
+        # Blob A
         d_a = 26
-        ga0, ga1, ga2 = center_breathe(self._blob_a_base_geo, d_a)
+        ga0, ga1 = center_breathe(self._blob_a_base_geo, d_a)
 
         self._blob_a_pos_anim = QPropertyAnimation(self._blob_a, b"pos", self)
         self._blob_a_pos_anim.setDuration(16000)
@@ -243,9 +239,9 @@ class WelcomeLoginPage(QWidget):
         self._blob_a_group.addAnimation(self._blob_a_op_anim)
         self._blob_a_group.start()
 
-        # --- Blob B group (противофаза/другие периоды) ---
+        # Blob B
         d_b = 34
-        gb0, gb1, gb2 = center_breathe(self._blob_b_base_geo, d_b)
+        gb0, gb1 = center_breathe(self._blob_b_base_geo, d_b)
 
         self._blob_b_pos_anim = QPropertyAnimation(self._blob_b, b"pos", self)
         self._blob_b_pos_anim.setDuration(22000)
@@ -278,16 +274,12 @@ class WelcomeLoginPage(QWidget):
         self._blob_b_group.addAnimation(self._blob_b_op_anim)
         self._blob_b_group.start()
 
-        # --- Glow breathe (очень мягко) ---
-        self._glow_base_geo = self._glow.geometry()
-
+        # Glow breathe (запускаем в resizeEvent, когда glow центрирован)
         self._glow_geo_anim = QPropertyAnimation(self._glow, b"geometry", self)
         self._glow_geo_anim.setDuration(12000)
         self._glow_geo_anim.setLoopCount(-1)
         self._glow_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
 
-        # геометрию glow мы корректнее зададим после первого resizeEvent (когда он центрирован)
-        # поэтому тут стартуем позже — значения выставим в resizeEvent, а затем start()
         self._glow_op_anim = QPropertyAnimation(self._glow_op, b"opacity", self)
         self._glow_op_anim.setDuration(12000)
         self._glow_op_anim.setLoopCount(-1)
@@ -295,12 +287,6 @@ class WelcomeLoginPage(QWidget):
         self._glow_op_anim.setStartValue(0.72)
         self._glow_op_anim.setKeyValueAt(0.5, 0.86)
         self._glow_op_anim.setEndValue(0.72)
-
-        self._glow_group = QParallelAnimationGroup(self)
-        self._glow_group.addAnimation(self._glow_geo_anim)
-        self._glow_group.addAnimation(self._glow_op_anim)
-        # стартуем в resizeEvent, когда будет известна базовая геометрия glow
-        # (но opacity можно уже сейчас)
         self._glow_op_anim.start()
 
     def _animate_card(self, lifted: bool):
@@ -320,21 +306,25 @@ class WelcomeLoginPage(QWidget):
         self._shadow_anim.setEndValue(56 if lifted else 42)
         self._shadow_anim.start()
 
-        # Чуть усиливаем glow на hover/focus
         base = 0.78
         self._glow_hover_op_anim.setStartValue(self._glow_op.opacity())
         self._glow_hover_op_anim.setEndValue(min(1.0, base + (0.12 if lifted else -0.02)))
         self._glow_hover_op_anim.start()
 
     def eventFilter(self, obj, event):
+        # Защита от ранних событий до полной инициализации
+        login = getattr(self, "login", None)
+        ed_user = getattr(login, "ed_user", None) if login else None
+        ed_pass = getattr(login, "ed_pass", None) if login else None
+
         if obj is self._card:
             if event.type() == QEvent.Enter:
                 self._animate_card(True)
             elif event.type() == QEvent.Leave:
-                if not (self.login.ed_user.hasFocus() or self.login.ed_pass.hasFocus()):
+                if not (ed_user and ed_user.hasFocus()) and not (ed_pass and ed_pass.hasFocus()):
                     self._animate_card(False)
 
-        if obj in (self.login.ed_user, self.login.ed_pass):
+        if obj in (ed_user, ed_pass):
             if event.type() == QEvent.FocusIn:
                 self._animate_card(True)
             elif event.type() == QEvent.FocusOut:
@@ -346,7 +336,6 @@ class WelcomeLoginPage(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
-        # glow под карточкой (центрирование)
         card_geo = self._card.geometry()
         glow_w = self._glow.width()
         glow_h = self._glow.height()
@@ -355,16 +344,14 @@ class WelcomeLoginPage(QWidget):
         self._glow.move(x, y)
         self._glow.lower()
 
-        # база карточки
         self._base_card_pos = self._card.pos()
 
-        # Старт/обновление "дыхания" glow (после того как он центрирован)
+        # Старт дыхания glow после первого корректного позиционирования
         base_geo = self._glow.geometry()
         d = 26
         g0 = QRect(base_geo.x(), base_geo.y(), base_geo.width(), base_geo.height())
         g1 = QRect(base_geo.x() - d // 2, base_geo.y() - d // 2, base_geo.width() + d, base_geo.height() + d)
 
-        # Если анимация уже запускалась — не дёргаем постоянно.
         if not getattr(self, "_glow_geo_started", False):
             self._glow_geo_anim.setStartValue(g0)
             self._glow_geo_anim.setKeyValueAt(0.5, g1)
