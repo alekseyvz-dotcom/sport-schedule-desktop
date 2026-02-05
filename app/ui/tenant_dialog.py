@@ -1,4 +1,3 @@
-# app/ui/tenant_dialog.py
 from __future__ import annotations
 
 from typing import Optional, Dict, List
@@ -21,8 +20,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QScrollArea,
     QSizePolicy,
+    QFrame,
 )
-
 
 from app.ui.tenant_rules_widget import TenantRulesWidget
 
@@ -38,6 +37,7 @@ def _qdate_to_pydate(qd: QDate) -> Optional[date]:
         return None
     return date(qd.year(), qd.month(), qd.day())
 
+
 _OBLIGATION_OPTIONS = [
     "орг группа 60 минут",
     "орг группа 90 минут",
@@ -48,6 +48,7 @@ _DELIVERY_OPTIONS = [
     "ЭДО",
     "физически",
 ]
+
 
 class TenantDialog(QDialog):
     """
@@ -65,6 +66,7 @@ class TenantDialog(QDialog):
         role_code: str,
     ):
         super().__init__(parent)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
         self.setModal(True)
 
@@ -78,9 +80,7 @@ class TenantDialog(QDialog):
         self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
         self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
 
-        # IMPORTANT: smaller default size so buttons are visible on laptop
         self.resize(980, 640)
-        # and do not allow dialog to become taller than screen minus margin
         self.setSizeGripEnabled(True)
 
         # ---- widgets (общие)
@@ -109,7 +109,7 @@ class TenantDialog(QDialog):
         self.ed_contact_name = QLineEdit(self._data_in.get("contact_name", "") or "")
         self.ed_contract_no = QLineEdit(self._data_in.get("contract_no", "") or "")
 
-        # Вид обязательств (multi) — нужен и для физлица тоже
+        # Вид обязательств (multi)
         self.cmb_obligation = QComboBox()
         self._setup_multiselect_combobox(self.cmb_obligation, _OBLIGATION_OPTIONS)
         self._set_multiselect_from_string(self.cmb_obligation, self._data_in.get("obligation_kind", "") or "")
@@ -131,7 +131,6 @@ class TenantDialog(QDialog):
         idx = self.cmb_status.findData(cur_status)
         self.cmb_status.setCurrentIndex(idx if idx >= 0 else 0)
 
-        # Comments: very small, and also cap height explicitly
         self.ed_comment = QTextEdit(self._data_in.get("comment", "") or "")
         self.ed_comment.setObjectName("smallText")
         self.ed_comment.setFixedHeight(48)
@@ -140,7 +139,7 @@ class TenantDialog(QDialog):
         self.ed_notes.setObjectName("smallText")
         self.ed_notes.setFixedHeight(48)
 
-        # ---- group: Основное (общие поля)
+        # ---- group: Основное
         gb_main = QGroupBox("Основное")
         fm_main = QFormLayout(gb_main)
         fm_main.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -156,7 +155,7 @@ class TenantDialog(QDialog):
         fm_main.addRow("ИНН:", self.ed_inn)
         fm_main.addRow("Email:", self.ed_email)
 
-        # ---- group: Реквизиты (юрлицо) — пустой контейнер (оставлен на будущее)
+        # ---- group: Реквизиты (юрлицо)
         self.gb_legal = QGroupBox("Реквизиты (юрлицо)")
         fm_legal = QFormLayout(self.gb_legal)
         fm_legal.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -191,20 +190,21 @@ class TenantDialog(QDialog):
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
 
-        # ---- group: Комментарии / примечания (общие) — компактный
+        # ---- group: Комментарии
         gb_notes = QGroupBox("Комментарии")
         fm_notes = QFormLayout(gb_notes)
-        fm_notes.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        fm_notes.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         fm_notes.setHorizontalSpacing(12)
         fm_notes.setVerticalSpacing(6)
         fm_notes.addRow("Комментарий:", self.ed_comment)
         fm_notes.addRow("Примечания:", self.ed_notes)
         gb_notes.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
-        # ---- group: Правила расписания (общие) + QScrollArea (slightly smaller)
+        # ---- group: Правила расписания
         gb_rules = QGroupBox("Правила расписания")
         rules_layout = QVBoxLayout(gb_rules)
         rules_layout.setContentsMargins(12, 16, 12, 12)
+        rules_layout.setSpacing(10)
 
         contract_from = _qdate_to_pydate(self.dt_valid_from.date())
         contract_to = _qdate_to_pydate(self.dt_valid_to.date())
@@ -220,21 +220,21 @@ class TenantDialog(QDialog):
             role_code=self._role_code,
         )
         self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.rules_widget.setMinimumHeight(260)  # smaller
+        self.rules_widget.setMinimumHeight(260)
 
         scroll = QScrollArea(gb_rules)
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(self.rules_widget)
 
         rules_layout.addWidget(scroll, 1)
-        gb_rules.setMinimumHeight(300)  # smaller
+        gb_rules.setMinimumHeight(300)
 
-        # ---- layout: two columns (left/right)
+        # ---- layout: two columns
         cols = QHBoxLayout()
-        cols.setContentsMargins(12, 12, 12, 6)
+        cols.setContentsMargins(0, 0, 0, 0)  # отступы только на root
         cols.setSpacing(12)
 
         left_col = QVBoxLayout()
@@ -253,14 +253,10 @@ class TenantDialog(QDialog):
         right_col.addWidget(self.gb_contract)
         right_col.addWidget(gb_rules, 1)
 
-        right_col.setStretchFactor(self.gb_legal, 0)
-        right_col.setStretchFactor(self.gb_contract, 0)
-        right_col.setStretchFactor(gb_rules, 1)
-
         cols.addLayout(left_col, 1)
         cols.addLayout(right_col, 1)
 
-        # ---- buttons (always visible because dialog is smaller now)
+        # ---- buttons
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn:
@@ -272,7 +268,7 @@ class TenantDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 10)
-        root.setSpacing(8)
+        root.setSpacing(10)
         root.addLayout(cols, 1)
         root.addWidget(buttons, 0)
 
