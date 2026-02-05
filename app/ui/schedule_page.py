@@ -267,21 +267,21 @@ class SchedulePage(QWidget):
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))
-
+        
         header = self.tbl.horizontalHeader()
         header.setStretchLastSection(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
+        
         self.tbl.setObjectName("scheduleGrid")
-        self.tbl_list.setObjectName("scheduleList")
-
+        
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
-
+        
         # --- LIST + details
         self.tbl_list = QTableWidget()
+        self.tbl_list.setObjectName("scheduleList")
         self._setup_list_table()
 
         self.details = self._make_details_panel()
