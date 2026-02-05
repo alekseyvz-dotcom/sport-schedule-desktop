@@ -18,24 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 
-_DIALOG_QSS = """
-QDialog { background: #fbfbfc; }
-QLineEdit, QTextEdit, QTimeEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 6px 10px;
-    min-height: 22px;
-}
-QLineEdit:focus, QTextEdit:focus, QTimeEdit:focus { border: 1px solid #7fb3ff; }
-QCheckBox { padding: 0 6px; }
-QLabel#hint {
-    color: #334155;
-    padding: 0 6px;
-}
-"""
-
-
 class OrgDialog(QDialog):
     """
     data (optional) supports:
@@ -47,8 +29,8 @@ class OrgDialog(QDialog):
 
     def __init__(self, parent=None, title: str = "Учреждение", data: Optional[Dict] = None):
         super().__init__(parent)
+        self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.setStyleSheet(_DIALOG_QSS)
 
         self._data_in = data or {}
 
@@ -73,6 +55,9 @@ class OrgDialog(QDialog):
         hint.setWordWrap(True)
 
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         form.addRow("Название *:", self.ed_name)
@@ -83,7 +68,7 @@ class OrgDialog(QDialog):
         form.addRow("Окончание:", self.tm_end)
         form.addRow("", hint)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
 
@@ -112,7 +97,7 @@ class OrgDialog(QDialog):
         self.tm_end.setEnabled(enabled)
 
     def _on_accept(self):
-        name = self.ed_name.text().strip()
+        name = (self.ed_name.text() or "").strip()
         if not name:
             QMessageBox.warning(self, "Учреждение", "Название учреждения не может быть пустым.")
             return
@@ -120,9 +105,12 @@ class OrgDialog(QDialog):
         if not self.cb_24h.isChecked():
             s = self.tm_start.time()
             e = self.tm_end.time()
-            # В текущей модели (и в чек-констрейнте БД) не поддерживаем смену через полночь
             if e <= s:
-                QMessageBox.warning(self, "Режим работы", "Окончание должно быть позже начала (смены через полночь не поддерживаются).")
+                QMessageBox.warning(
+                    self,
+                    "Режим работы",
+                    "Окончание должно быть позже начала (смены через полночь не поддерживаются).",
+                )
                 return
 
         self.accept()
@@ -131,10 +119,10 @@ class OrgDialog(QDialog):
         s = self.tm_start.time()
         e = self.tm_end.time()
         return {
-            "name": self.ed_name.text().strip(),
-            "address": self.ed_address.text().strip(),
-            "comment": self.ed_comment.toPlainText().strip(),
-            "is_24h": self.cb_24h.isChecked(),
+            "name": (self.ed_name.text() or "").strip(),
+            "address": (self.ed_address.text() or "").strip(),
+            "comment": (self.ed_comment.toPlainText() or "").strip(),
+            "is_24h": bool(self.cb_24h.isChecked()),
             "work_start": time(s.hour(), s.minute()),
             "work_end": time(e.hour(), e.minute()),
         }
