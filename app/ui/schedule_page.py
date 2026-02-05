@@ -95,115 +95,22 @@ from app.services.bookings_service import (
 )
 from app.ui.booking_dialog import BookingDialog
 
-
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     def paint(self, painter: QPainter, option, index):
         rect = option.rect
         booking = index.data(Qt.ItemDataRole.UserRole)
-        has_booking = bool(booking)
         part = index.data(self.ROLE_PART)
+        has_booking = bool(booking)
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # --- booking background (dark-friendly card) ---
-        bg = index.data(Qt.ItemDataRole.BackgroundRole)
-        if isinstance(bg, QColor) and bg.isValid() and bg.alpha() > 0:
-            accent = QColor(bg)          # semantic color (PD/GZ)
-            fill = QColor(bg)
-            fill.setAlpha(46)            # soft overlay
-
-            r = rect.adjusted(2, 1, -2, -1)
-            radius = 10
-
-            def _fill_top_rounded():
-                path = QPainterPath()
-                path.addRoundedRect(QRectF(r), radius, radius)
-                # cut bottom rounding
-                path.addRect(QRectF(r.left(), r.center().y(), r.width(), r.height()))
-                painter.fillPath(path, fill)
-
-            def _fill_bottom_rounded():
-                path = QPainterPath()
-                path.addRoundedRect(QRectF(r), radius, radius)
-                # cut top rounding
-                path.addRect(QRectF(r.left(), r.top(), r.width(), r.height() / 2))
-                painter.fillPath(path, fill)
-
-            if part == "top":
-                _fill_top_rounded()
-            elif part == "bottom":
-                _fill_bottom_rounded()
-            elif part == "middle":
-                painter.fillRect(r, fill)
-            else:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(fill)
-                painter.drawRoundedRect(QRectF(r), radius, radius)
-
-            # left accent bar
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(accent)
-            painter.drawRect(QRectF(r.left(), r.top(), 4, r.height()))
-
-            # subtle border (only for top/bottom/single)
-            border = QColor(accent)
-            border.setAlpha(120)
-            painter.setPen(QPen(border, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            if part in ("top", "bottom", None):
-                painter.drawRoundedRect(QRectF(r), radius, radius)
-
-            # --- pseudo badge (draw ONLY in top cell so it appears once) ---
-            if part == "top" or part is None:
-                kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
-                status = (getattr(booking, "status", "") or "").lower()
-
-                if status == "cancelled":
-                    badge_text = "ОТМ"
-                else:
-                    badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
-
-                # badge colors
-                badge_bg = QColor(accent)
-                badge_bg.setAlpha(200)
-                badge_fg = QColor(255, 255, 255, 240)
-
-                # geometry
-                pad_x = 8
-                pad_y = 4
-                fm = painter.fontMetrics()
-                text_w = fm.horizontalAdvance(badge_text)
-                text_h = fm.height()
-
-                bw = text_w + pad_x * 2
-                bh = max(18, text_h - 2 + pad_y * 2)
-
-                bx = r.right() - bw - 8
-                by = r.top() + 6
-
-                # draw badge
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(badge_bg)
-                painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
-
-                painter.setPen(QPen(badge_fg))
-                f = painter.font()
-                f.setBold(True)
-                painter.setFont(f)
-                painter.drawText(
-                    QRectF(bx, by, bw, bh),
-                    Qt.AlignmentFlag.AlignCenter,
-                    badge_text,
-                )
-
-        # draw default text etc. (do not fight background: we already painted it)
-        super().paint(painter, option, index)
-
-        # grid only for empty slots
+        # --- EMPTY CELL: default paint + grid ---
         if not has_booking:
+            super().paint(painter, option, index)
+
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             grid_pen = QPen(QColor(255, 255, 255, 22))
             grid_pen.setWidth(1)
@@ -213,7 +120,109 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.drawLine(rect.topLeft(), rect.topRight())
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
 
+            painter.restore()
+            return
+
+        # --- BOOKING CELL: custom paint ---
+        bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        accent = QColor(bg) if isinstance(bg, QColor) and bg.isValid() else QColor(96, 165, 250)
+
+        # fill: more opaque so grid is not visible through it
+        fill = QColor(accent)
+        fill.setAlpha(110)  # было 46 -> слишком прозрачно
+
+        r = rect.adjusted(2, 1, -2, -1)
+        radius = 10
+
+        # shape: rounded only at top/bottom (single block feeling)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+
+        if part == "top":
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(r), radius, radius)
+            path.addRect(QRectF(r.left(), r.center().y(), r.width(), r.height()))
+            painter.drawPath(path)
+        elif part == "bottom":
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(r), radius, radius)
+            path.addRect(QRectF(r.left(), r.top(), r.width(), r.height() / 2))
+            painter.drawPath(path)
+        elif part == "middle":
+            painter.drawRect(QRectF(r))
+        else:
+            painter.drawRoundedRect(QRectF(r), radius, radius)
+
+        # left accent bar
+        painter.setBrush(accent)
+        painter.drawRect(QRectF(r.left(), r.top(), 4, r.height()))
+
+        # subtle border
+        border = QColor(accent)
+        border.setAlpha(190)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if part in ("top", "bottom", None):
+            painter.drawRoundedRect(QRectF(r), radius, radius)
+
+        # --- pseudo badge (top cell only) ---
+        if part == "top" or part is None:
+            kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
+            status = (getattr(booking, "status", "") or "").lower()
+
+            if status == "cancelled":
+                badge_text = "ОТМ"
+                badge_bg = QColor(148, 163, 184, 220)
+            else:
+                badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
+                badge_bg = QColor(accent)
+                badge_bg.setAlpha(230)
+
+            badge_fg = QColor(255, 255, 255, 245)
+
+            pad_x = 8
+            pad_y = 3
+            fm = painter.fontMetrics()
+            bw = fm.horizontalAdvance(badge_text) + pad_x * 2
+            bh = max(18, fm.height() - 2 + pad_y * 2)
+
+            bx = r.right() - bw - 8
+            by = r.top() + 6
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(badge_bg)
+            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
+
+            painter.setPen(QPen(badge_fg))
+            f = painter.font()
+            f.setBold(True)
+            painter.setFont(f)
+            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
+
+        # --- booking text (ONLY in top cell) ---
+        if part == "top" or part is None:
+            text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+            if text:
+                # restore normal font
+                f = painter.font()
+                f.setBold(False)
+                painter.setFont(f)
+                painter.setPen(QPen(QColor(255, 255, 255, 238)))
+
+                # text area: leave space for badge
+                text_rect = QRectF(r.left() + 10, r.top() + 8, r.width() - 10 - 70, r.height() - 12)
+                painter.drawText(
+                    text_rect,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                    text,
+                )
+
         painter.restore()
+
+    def sizeHint(self, option, index):
+        # keep default sizing
+        return super().sizeHint(option, index)
+
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
