@@ -1,7 +1,7 @@
 # app/ui/welcome_login_page.py
 from PySide6.QtCore import (
-    Qt, Signal, QEasingCurve, QPoint, QRect, QEvent,
-    QPropertyAnimation, QParallelAnimationGroup
+    Qt, Signal, QEasingCurve, QPoint, QEvent,
+    QPropertyAnimation, QParallelAnimationGroup, QSequentialAnimationGroup
 )
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -24,16 +24,16 @@ QWidget#welcomeRoot {
 
 QFrame#blobA {
     background: qradialgradient(cx:0.3, cy:0.3, radius:0.9,
-        stop:0 rgba(99, 102, 241, 160),
-        stop:0.35 rgba(99, 102, 241, 70),
+        stop:0 rgba(99, 102, 241, 170),
+        stop:0.35 rgba(99, 102, 241, 75),
         stop:1 rgba(99, 102, 241, 0)
     );
     border-radius: 260px;
 }
 QFrame#blobB {
     background: qradialgradient(cx:0.7, cy:0.6, radius:1.0,
-        stop:0 rgba(34, 211, 238, 140),
-        stop:0.35 rgba(34, 211, 238, 60),
+        stop:0 rgba(34, 211, 238, 160),
+        stop:0.35 rgba(34, 211, 238, 70),
         stop:1 rgba(34, 211, 238, 0)
     );
     border-radius: 300px;
@@ -87,7 +87,7 @@ class WelcomeLoginPage(QWidget):
         self.setStyleSheet(_WELCOME_QSS)
         self.setMouseTracking(True)
 
-        # Создаём login СРАЗУ (важно для eventFilter, чтобы не словить AttributeError)
+        # login — сразу, чтобы eventFilter не падал
         self.login = LoginWindow()
         self.login.logged_in.connect(self.logged_in)
 
@@ -95,27 +95,21 @@ class WelcomeLoginPage(QWidget):
         self._blob_a = QFrame(self)
         self._blob_a.setObjectName("blobA")
         self._blob_a.setFixedSize(520, 520)
-        self._blob_a.move(-140, -160)
         self._blob_a.lower()
 
         self._blob_b = QFrame(self)
         self._blob_b.setObjectName("blobB")
         self._blob_b.setFixedSize(600, 600)
-        self._blob_b.move(420, 140)
         self._blob_b.lower()
 
+        # дыхание (opacity)
         self._blob_a_op = QGraphicsOpacityEffect(self._blob_a)
-        self._blob_a_op.setOpacity(1.0)
+        self._blob_a_op.setOpacity(0.95)
         self._blob_a.setGraphicsEffect(self._blob_a_op)
 
         self._blob_b_op = QGraphicsOpacityEffect(self._blob_b)
-        self._blob_b_op.setOpacity(0.95)
+        self._blob_b_op.setOpacity(0.90)
         self._blob_b.setGraphicsEffect(self._blob_b_op)
-
-        self._blob_a_base_pos = self._blob_a.pos()
-        self._blob_b_base_pos = self._blob_b.pos()
-        self._blob_a_base_geo = self._blob_a.geometry()
-        self._blob_b_base_geo = self._blob_b.geometry()
 
         # --- Glow under card ---
         self._glow = QFrame(self)
@@ -174,7 +168,7 @@ class WelcomeLoginPage(QWidget):
         root.addWidget(self._card, 0, Qt.AlignmentFlag.AlignHCenter)
         root.addStretch(1)
 
-        # --- Card micro animation ---
+        # --- Card hover/focus micro anim ---
         self._base_card_pos = None
         self._shadow = shadow
 
@@ -190,105 +184,117 @@ class WelcomeLoginPage(QWidget):
         self._glow_hover_op_anim.setDuration(180)
         self._glow_hover_op_anim.setEasingCurve(QEasingCurve.OutCubic)
 
-        # Ставим eventFilter ПОСЛЕ того как всё нужное создано
         self._card.installEventFilter(self)
         self.login.ed_user.installEventFilter(self)
         self.login.ed_pass.installEventFilter(self)
 
-        # --- Premium background motion (super soft) ---
-        self._start_premium_background_motion()
+        # bg motion will start after first resize (when we know size)
+        self._bg_started = False
 
-    def _start_premium_background_motion(self):
-        def center_breathe(base: QRect, delta: int):
-            a = QRect(base.x(), base.y(), base.width(), base.height())
-            b = QRect(base.x() - delta // 2, base.y() - delta // 2, base.width() + delta, base.height() + delta)
-            return a, b
+    # ---------- helpers ----------
+    def _p(self, fx: float, fy: float, w: int, h: int, item_w: int, item_h: int) -> QPoint:
+        # fx/fy can be <0 or >1 to go outside screen
+        x = int(fx * w - item_w / 2)
+        y = int(fy * h - item_h / 2)
+        return QPoint(x, y)
 
-        # Blob A
-        d_a = 26
-        ga0, ga1 = center_breathe(self._blob_a_base_geo, d_a)
+    def _make_pingpong_pos_anim(
+        self,
+        widget: QFrame,
+        duration_ms: int,
+        points: list[QPoint],
+        easing: QEasingCurve.Type = QEasingCurve.InOutSine,
+    ) -> QSequentialAnimationGroup:
+        """
+        Smooth infinite loop without teleport:
+        forward(points[0]->...->points[-1]) then backward(points[-1]->...->points[0]).
+        """
+        if len(points) < 2:
+            raise ValueError("Need at least 2 points for animation")
 
-        self._blob_a_pos_anim = QPropertyAnimation(self._blob_a, b"pos", self)
-        self._blob_a_pos_anim.setDuration(16000)
-        self._blob_a_pos_anim.setLoopCount(-1)
-        self._blob_a_pos_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_a_pos_anim.setStartValue(self._blob_a_base_pos + QPoint(0, 0))
-        self._blob_a_pos_anim.setKeyValueAt(0.35, self._blob_a_base_pos + QPoint(18, 10))
-        self._blob_a_pos_anim.setKeyValueAt(0.70, self._blob_a_base_pos + QPoint(8, 22))
-        self._blob_a_pos_anim.setEndValue(self._blob_a_base_pos + QPoint(0, 0))
+        forward = QPropertyAnimation(widget, b"pos", self)
+        forward.setDuration(duration_ms)
+        forward.setEasingCurve(easing)
+        forward.setStartValue(points[0])
+        n = len(points)
+        for i in range(1, n - 1):
+            forward.setKeyValueAt(i / (n - 1), points[i])
+        forward.setEndValue(points[-1])
 
-        self._blob_a_geo_anim = QPropertyAnimation(self._blob_a, b"geometry", self)
-        self._blob_a_geo_anim.setDuration(19000)
-        self._blob_a_geo_anim.setLoopCount(-1)
-        self._blob_a_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_a_geo_anim.setStartValue(ga0)
-        self._blob_a_geo_anim.setKeyValueAt(0.5, ga1)
-        self._blob_a_geo_anim.setEndValue(ga0)
+        backward = QPropertyAnimation(widget, b"pos", self)
+        backward.setDuration(duration_ms)
+        backward.setEasingCurve(easing)
+        backward.setStartValue(points[-1])
+        rev = list(reversed(points))
+        n2 = len(rev)
+        for i in range(1, n2 - 1):
+            backward.setKeyValueAt(i / (n2 - 1), rev[i])
+        backward.setEndValue(rev[-1])
+
+        seq = QSequentialAnimationGroup(self)
+        seq.setLoopCount(-1)
+        seq.addAnimation(forward)
+        seq.addAnimation(backward)
+        return seq
+
+    def _start_background_float(self):
+        w = max(1, self.width())
+        h = max(1, self.height())
+
+        a_w, a_h = self._blob_a.width(), self._blob_a.height()
+        b_w, b_h = self._blob_b.width(), self._blob_b.height()
+
+        # Точки траектории (край-край, с выходом за экран)
+        a_points = [
+            self._p(-0.15, 0.12, w, h, a_w, a_h),
+            self._p(0.18, 0.35, w, h, a_w, a_h),
+            self._p(0.62, 0.10, w, h, a_w, a_h),
+            self._p(1.15, 0.52, w, h, a_w, a_h),
+        ]
+        b_points = [
+            self._p(1.12, 0.78, w, h, b_w, b_h),
+            self._p(0.78, 0.55, w, h, b_w, b_h),
+            self._p(0.30, 0.92, w, h, b_w, b_h),
+            self._p(-0.20, 0.30, w, h, b_w, b_h),
+        ]
+
+        # Ставим начальные позиции
+        self._blob_a.move(a_points[0])
+        self._blob_b.move(b_points[0])
+
+        # Ping-pong pos (без перескока) + дыхание opacity
+        self._blob_a_pos_seq = self._make_pingpong_pos_anim(self._blob_a, 26000, a_points)
+        self._blob_b_pos_seq = self._make_pingpong_pos_anim(self._blob_b, 32000, b_points)
 
         self._blob_a_op_anim = QPropertyAnimation(self._blob_a_op, b"opacity", self)
-        self._blob_a_op_anim.setDuration(21000)
+        self._blob_a_op_anim.setDuration(9000)
         self._blob_a_op_anim.setLoopCount(-1)
         self._blob_a_op_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_a_op_anim.setStartValue(0.92)
-        self._blob_a_op_anim.setKeyValueAt(0.5, 1.0)
-        self._blob_a_op_anim.setEndValue(0.92)
+        self._blob_a_op_anim.setStartValue(0.78)
+        self._blob_a_op_anim.setKeyValueAt(0.5, 0.98)
+        self._blob_a_op_anim.setEndValue(0.78)
+
+        self._blob_b_op_anim = QPropertyAnimation(self._blob_b_op, b"opacity", self)
+        self._blob_b_op_anim.setDuration(11000)
+        self._blob_b_op_anim.setLoopCount(-1)
+        self._blob_b_op_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._blob_b_op_anim.setStartValue(0.70)
+        self._blob_b_op_anim.setKeyValueAt(0.5, 0.92)
+        self._blob_b_op_anim.setEndValue(0.70)
 
         self._blob_a_group = QParallelAnimationGroup(self)
-        self._blob_a_group.addAnimation(self._blob_a_pos_anim)
-        self._blob_a_group.addAnimation(self._blob_a_geo_anim)
+        self._blob_a_group.addAnimation(self._blob_a_pos_seq)
         self._blob_a_group.addAnimation(self._blob_a_op_anim)
         self._blob_a_group.start()
 
-        # Blob B
-        d_b = 34
-        gb0, gb1 = center_breathe(self._blob_b_base_geo, d_b)
-
-        self._blob_b_pos_anim = QPropertyAnimation(self._blob_b, b"pos", self)
-        self._blob_b_pos_anim.setDuration(22000)
-        self._blob_b_pos_anim.setLoopCount(-1)
-        self._blob_b_pos_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_b_pos_anim.setStartValue(self._blob_b_base_pos + QPoint(0, 0))
-        self._blob_b_pos_anim.setKeyValueAt(0.40, self._blob_b_base_pos + QPoint(-22, -12))
-        self._blob_b_pos_anim.setKeyValueAt(0.75, self._blob_b_base_pos + QPoint(-10, -26))
-        self._blob_b_pos_anim.setEndValue(self._blob_b_base_pos + QPoint(0, 0))
-
-        self._blob_b_geo_anim = QPropertyAnimation(self._blob_b, b"geometry", self)
-        self._blob_b_geo_anim.setDuration(24000)
-        self._blob_b_geo_anim.setLoopCount(-1)
-        self._blob_b_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_b_geo_anim.setStartValue(gb0)
-        self._blob_b_geo_anim.setKeyValueAt(0.5, gb1)
-        self._blob_b_geo_anim.setEndValue(gb0)
-
-        self._blob_b_op_anim = QPropertyAnimation(self._blob_b_op, b"opacity", self)
-        self._blob_b_op_anim.setDuration(26000)
-        self._blob_b_op_anim.setLoopCount(-1)
-        self._blob_b_op_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._blob_b_op_anim.setStartValue(0.86)
-        self._blob_b_op_anim.setKeyValueAt(0.5, 0.96)
-        self._blob_b_op_anim.setEndValue(0.86)
-
         self._blob_b_group = QParallelAnimationGroup(self)
-        self._blob_b_group.addAnimation(self._blob_b_pos_anim)
-        self._blob_b_group.addAnimation(self._blob_b_geo_anim)
+        self._blob_b_group.addAnimation(self._blob_b_pos_seq)
         self._blob_b_group.addAnimation(self._blob_b_op_anim)
         self._blob_b_group.start()
 
-        # Glow breathe (запускаем в resizeEvent, когда glow центрирован)
-        self._glow_geo_anim = QPropertyAnimation(self._glow, b"geometry", self)
-        self._glow_geo_anim.setDuration(12000)
-        self._glow_geo_anim.setLoopCount(-1)
-        self._glow_geo_anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._bg_started = True
 
-        self._glow_op_anim = QPropertyAnimation(self._glow_op, b"opacity", self)
-        self._glow_op_anim.setDuration(12000)
-        self._glow_op_anim.setLoopCount(-1)
-        self._glow_op_anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._glow_op_anim.setStartValue(0.72)
-        self._glow_op_anim.setKeyValueAt(0.5, 0.86)
-        self._glow_op_anim.setEndValue(0.72)
-        self._glow_op_anim.start()
-
+    # ---------- card micro animation ----------
     def _animate_card(self, lifted: bool):
         if self._base_card_pos is None:
             self._base_card_pos = self._card.pos()
@@ -312,7 +318,6 @@ class WelcomeLoginPage(QWidget):
         self._glow_hover_op_anim.start()
 
     def eventFilter(self, obj, event):
-        # Защита от ранних событий до полной инициализации
         login = getattr(self, "login", None)
         ed_user = getattr(login, "ed_user", None) if login else None
         ed_pass = getattr(login, "ed_pass", None) if login else None
@@ -336,6 +341,7 @@ class WelcomeLoginPage(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
+        # glow под карточкой
         card_geo = self._card.geometry()
         glow_w = self._glow.width()
         glow_h = self._glow.height()
@@ -346,15 +352,6 @@ class WelcomeLoginPage(QWidget):
 
         self._base_card_pos = self._card.pos()
 
-        # Старт дыхания glow после первого корректного позиционирования
-        base_geo = self._glow.geometry()
-        d = 26
-        g0 = QRect(base_geo.x(), base_geo.y(), base_geo.width(), base_geo.height())
-        g1 = QRect(base_geo.x() - d // 2, base_geo.y() - d // 2, base_geo.width() + d, base_geo.height() + d)
-
-        if not getattr(self, "_glow_geo_started", False):
-            self._glow_geo_anim.setStartValue(g0)
-            self._glow_geo_anim.setKeyValueAt(0.5, g1)
-            self._glow_geo_anim.setEndValue(g0)
-            self._glow_geo_anim.start()
-            self._glow_geo_started = True
+        # стартуем фон, когда известны реальные размеры
+        if not self._bg_started and self.width() > 10 and self.height() > 10:
+            self._start_background_float()
