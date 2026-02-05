@@ -213,10 +213,7 @@ QComboBox::drop-down {
     width: 26px;
     border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
-QComboBox::down-arrow {
-    width: 10px;
-    height: 10px;
-}
+
 QComboBox QAbstractItemView {
     background: rgba(2, 6, 23, 0.98);
     color: rgba(255, 255, 255, 0.90);
