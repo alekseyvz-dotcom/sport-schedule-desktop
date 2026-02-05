@@ -264,7 +264,11 @@ class GzPage(QWidget):
             QMessageBox.critical(self, "Генерация бронирований", f"Ошибка генерации:\n{e}")
             return
 
-        msg = f"Создано бронирований: {rep.created}\nПропущено: {rep.skipped}"
+        msg = (
+            f"Создано бронирований: {rep.created}\n"
+            f"Занято/уже существует: {rep.skipped_busy}\n"
+            f"Ошибок: {rep.skipped_error}"
+        )
         if rep.errors:
             msg += "\n\nПервые ошибки:\n" + "\n".join(rep.errors[:8])
             if len(rep.errors) > 8:
