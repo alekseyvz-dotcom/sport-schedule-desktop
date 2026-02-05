@@ -302,4 +302,7 @@ QTableWidget#scheduleList {
     selection-background-color: transparent;
     selection-color: rgba(255,255,255,0.90);
 }
+
+QLabel#hint { color: rgba(226, 232, 240, 0.60); font-size: 12px; }
+
 """
