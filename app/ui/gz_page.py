@@ -104,45 +104,6 @@ class GzPage(QWidget):
         root.addLayout(top)
         root.addWidget(self.tbl, 1)
 
-        self.setStyleSheet(
-            """
-            QWidget { background: #fbfbfc; }
-            QLineEdit {
-                background: #ffffff;
-                border: 1px solid #e6e6e6;
-                border-radius: 10px;
-                padding: 8px 10px;
-            }
-            QLineEdit:focus { border: 1px solid #7fb3ff; }
-            QPushButton {
-                background: #ffffff;
-                border: 1px solid #e6e6e6;
-                border-radius: 10px;
-                padding: 8px 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover { border: 1px solid #cfd6df; background: #f6f7f9; }
-            QPushButton:pressed { background: #eef1f5; }
-            QCheckBox { padding: 0 6px; }
-            QTableWidget {
-                background: #ffffff;
-                border: 1px solid #e6e6e6;
-                border-radius: 10px;
-                selection-background-color: rgba(127,179,255,60);
-                selection-color: #111111;
-            }
-            QHeaderView::section {
-                background: #f6f7f9;
-                color: #111111;
-                padding: 8px 10px;
-                border: none;
-                border-bottom: 1px solid #e6e6e6;
-                font-weight: 600;
-            }
-            QTableWidget::item { padding: 6px 10px; }
-            """
-        )
-
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
