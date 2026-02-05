@@ -725,7 +725,7 @@ class SchedulePage(QWidget):
                     self.tbl.setItem(r, c, it)
                 it.setText("")
                 it.setData(Qt.ItemDataRole.BackgroundRole, self._EMPTY_SLOT_COLOR)
-                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(0, 0, 0, 0))  # текст скрыт в пустых
+                it.setData(Qt.ItemDataRole.ForegroundRole, None)
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
 
