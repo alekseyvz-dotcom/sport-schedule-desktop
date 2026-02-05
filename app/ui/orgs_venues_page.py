@@ -40,71 +40,6 @@ from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
 
-_TABLE_QSS = """
-QTableWidget {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    gridline-color: transparent;
-    selection-background-color: #d6e9ff;
-    selection-color: #111111;
-}
-QHeaderView::section {
-    background: #f6f7f9;
-    color: #111111;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #e6e6e6;
-    font-weight: 600;
-}
-QTableWidget::item {
-    padding: 6px 10px;
-    border: none;
-}
-QTableWidget::item:selected {
-    background: #d6e9ff;
-}
-"""
-
-
-_PAGE_QSS = """
-QWidget {
-    background: #fbfbfc;
-}
-QLineEdit {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 10px;
-}
-QLineEdit:focus {
-    border: 1px solid #7fb3ff;
-}
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-weight: 600;
-}
-QPushButton:hover {
-    border: 1px solid #cfd6df;
-    background: #f6f7f9;
-}
-QPushButton:pressed {
-    background: #eef1f5;
-}
-QCheckBox {
-    padding: 0 6px;
-}
-QLabel#sectionTitle {
-    color: #111111;
-    font-weight: 700;
-    padding: 0 4px;
-}
-"""
-
-
 class OrgsVenuesPage(QWidget):
     """
     Страница учреждений/площадок с учётом прав (can_view/can_edit на уровне org):
@@ -115,6 +50,7 @@ class OrgsVenuesPage(QWidget):
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
         self.user = user
         self.setStyleSheet(_PAGE_QSS)
 
