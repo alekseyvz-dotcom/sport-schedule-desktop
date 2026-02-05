@@ -366,4 +366,9 @@ QMessageBox {
 QMessageBox QLabel {
     color: rgba(226, 232, 240, 0.82);
 }
+
+QLabel#scheduleMeta { color: rgba(226,232,240,0.65); padding: 0 4px; }
+QLabel#scheduleMetaStrong { color: rgba(255,255,255,0.90); font-weight: 800; padding: 0 4px; }
+QLabel#kpiTitle { color: rgba(226,232,240,0.60); }
+QLabel#kpiValue { color: rgba(255,255,255,0.92); font-weight: 900; }
 """
