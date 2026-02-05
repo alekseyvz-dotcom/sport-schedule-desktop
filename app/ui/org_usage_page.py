@@ -50,7 +50,6 @@ class OrgUsagePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
-        self.setStyleSheet(_PAGE_QSS)
 
         self._period: Optional[Period] = None
         self._rows: List[UsageRow] = []
