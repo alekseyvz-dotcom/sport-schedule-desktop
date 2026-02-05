@@ -21,10 +21,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QAbstractItemView,
     QHeaderView,
-    QSplitter,
     QSizePolicy,
 )
-
 
 from app.services.users_service import AuthUser
 from app.services.ref_service import list_active_orgs
@@ -62,14 +60,12 @@ def _fmt_h(sec: int) -> str:
     return f"{_hours(sec):.1f} ч"
 
 
-# ----------------- small chart widgets (no external deps) -----------------
-
 class DonutChart(QWidget):
-    """Donut chart: PD vs GZ vs Other(0) with center label."""
+    """Donut chart: PD vs GZ with center label. Colors from theme-ish palette (dark-friendly)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("page")
+        self.setObjectName("detailsCard")
         self.setMinimumHeight(210)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -79,9 +75,13 @@ class DonutChart(QWidget):
         self._title = "Структура"
         self._subtitle = ""
 
-        self.col_pd = QColor("#60a5fa")  # blue
-        self.col_gz = QColor("#f59e0b")  # amber
-        self.col_bg = QColor("#e5e7eb")
+        # dark-friendly defaults (можно потом перенести в theme.py через properties)
+        self.col_pd = QColor("#60a5fa")   # blue
+        self.col_gz = QColor("#f59e0b")   # amber
+        self.col_bg = QColor(255, 255, 255, 28)
+
+        self.col_text = QColor(255, 255, 255, 235)
+        self.col_muted = QColor(226, 232, 240, 160)
 
     def set_data(self, *, pd_sec: int, gz_sec: int, title: str = "Структура", subtitle: str = "") -> None:
         self._pd = int(pd_sec or 0)
@@ -100,7 +100,7 @@ class DonutChart(QWidget):
         h = self.height()
 
         # title
-        p.setPen(QColor("#0f172a"))
+        p.setPen(self.col_text)
         f = p.font()
         f.setPointSize(11)
         f.setBold(True)
@@ -109,14 +109,13 @@ class DonutChart(QWidget):
 
         # subtitle
         if self._subtitle:
-            p.setPen(QColor("#64748b"))
+            p.setPen(self.col_muted)
             f2 = p.font()
             f2.setPointSize(9)
             f2.setBold(False)
             p.setFont(f2)
             p.drawText(12, 40, self._subtitle)
 
-        # donut area
         top = 48
         size = min(w - 24, h - top - 12)
         if size < 80:
@@ -124,7 +123,6 @@ class DonutChart(QWidget):
 
         rect = QRectF((w - size) / 2, top, size, size)
 
-        # background ring
         pen_bg = QPen(self.col_bg)
         pen_bg.setWidth(max(10, int(size * 0.12)))
         p.setPen(pen_bg)
@@ -132,8 +130,7 @@ class DonutChart(QWidget):
         p.drawArc(rect, 0, 360 * 16)
 
         if self._total <= 0:
-            # center label
-            p.setPen(QColor("#334155"))
+            p.setPen(self.col_muted)
             f3 = p.font()
             f3.setPointSize(10)
             f3.setBold(False)
@@ -141,8 +138,7 @@ class DonutChart(QWidget):
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, "нет данных")
             return
 
-        # arcs
-        start = 90 * 16  # top
+        start = 90 * 16
         pd_angle = -int(360 * 16 * (self._pd / self._total))
         gz_angle = -int(360 * 16 * (self._gz / self._total))
 
@@ -156,15 +152,14 @@ class DonutChart(QWidget):
         p.setPen(pen_gz)
         p.drawArc(rect, start + pd_angle, gz_angle)
 
-        # center text
-        p.setPen(QColor("#0f172a"))
+        p.setPen(self.col_text)
         fc = p.font()
         fc.setPointSize(12)
         fc.setBold(True)
         p.setFont(fc)
         p.drawText(rect.adjusted(0, -8, 0, -8), Qt.AlignmentFlag.AlignCenter, _fmt_h(self._total))
 
-        p.setPen(QColor("#64748b"))
+        p.setPen(self.col_muted)
         fc2 = p.font()
         fc2.setPointSize(9)
         fc2.setBold(False)
@@ -173,21 +168,24 @@ class DonutChart(QWidget):
 
 
 class BarListChart(QWidget):
-    """Horizontal bars for top tenants with share labels."""
+    """Horizontal bars for top tenants with share labels (dark-friendly)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("detailsCard")
         self.setMinimumHeight(240)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self._title = "Топ контрагентов"
-        self._items: List[Tuple[str, int]] = []  # (name, total_sec)
+        self._items: List[Tuple[str, int]] = []
         self._total = 0
 
         self.col_bar = QColor("#60a5fa")
         self.col_bar2 = QColor("#93c5fd")
-        self.col_text = QColor("#0f172a")
-        self.col_muted = QColor("#64748b")
-        self.col_grid = QColor("#e5e7eb")
+        self.col_text = QColor(255, 255, 255, 235)
+        self.col_muted = QColor(226, 232, 240, 160)
+        self.col_bar_bg1 = QColor(255, 255, 255, 18)
+        self.col_bar_bg2 = QColor(255, 255, 255, 10)
 
     def set_data(self, *, title: str, items: List[Tuple[str, int]], total_sec: int) -> None:
         self._title = title
@@ -203,7 +201,6 @@ class BarListChart(QWidget):
         w = self.width()
         h = self.height()
 
-        # title
         p.setPen(self.col_text)
         ft = p.font()
         ft.setPointSize(11)
@@ -228,22 +225,18 @@ class BarListChart(QWidget):
             p.drawText(left, top + 24, "нет данных")
             return
 
-        # layout
         row_h = max(22, min(34, area_h // max(1, len(self._items))))
         bar_h = int(row_h * 0.55)
         gap = row_h - bar_h
 
-        # max in list for scaling
         max_val = max(v for _, v in self._items) if self._items else 1
 
-        # bar region
         name_w = int(w * 0.42)
         pct_w = 70
         bar_x0 = left + name_w
         bar_x1 = w - right - pct_w
         bar_w = max(80, bar_x1 - bar_x0)
 
-        # fonts
         fn = p.font()
         fn.setPointSize(9)
         fn.setBold(False)
@@ -251,27 +244,24 @@ class BarListChart(QWidget):
         for i, (name, val) in enumerate(self._items):
             y = top + i * row_h + gap // 2
 
-            # name (trim)
             p.setPen(self.col_text)
             p.setFont(fn)
-            shown = name
-            # simple trim by chars to avoid font-metrics complexity
-            if len(shown) > 36:
-                shown = shown[:33] + "…"
-            p.drawText(QRectF(left, y - 2, name_w - 8, row_h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, shown)
+            shown = name[:33] + "…" if len(name) > 36 else name
+            p.drawText(
+                QRectF(left, y - 2, name_w - 8, row_h),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                shown,
+            )
 
-            # bar bg
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(QColor("#eef2ff") if i % 2 == 0 else QColor("#eff6ff")))
+            p.setBrush(QBrush(self.col_bar_bg1 if i % 2 == 0 else self.col_bar_bg2))
             p.drawRoundedRect(QRectF(bar_x0, y + (row_h - bar_h) / 2, bar_w, bar_h), 6, 6)
 
-            # bar value
             frac = 0.0 if max_val <= 0 else (val / max_val)
             fill_w = max(0.0, bar_w * frac)
             p.setBrush(QBrush(self.col_bar if i == 0 else self.col_bar2))
             p.drawRoundedRect(QRectF(bar_x0, y + (row_h - bar_h) / 2, fill_w, bar_h), 6, 6)
 
-            # percent label (of total)
             share = _pct(val, self._total)
             p.setPen(self.col_muted)
             p.drawText(
@@ -281,17 +271,15 @@ class BarListChart(QWidget):
             )
 
 
-# ---------------------------- page ----------------------------
-
-
 class TenantUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
-
     TOP_N = 10
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
+        self.setObjectName("page")
+
         self._user = user
         self._period: Optional[Period] = None
         self._rows: List[TenantUsageRow] = []
@@ -316,11 +304,7 @@ class TenantUsagePage(QWidget):
         self.dt_anchor.setFixedWidth(130)
 
         self.cb_cancelled = QCheckBox("Отменённые")
-        self.cb_cancelled.setChecked(False)
-
         self.cb_only_active = QCheckBox("Только активные контрагенты")
-        self.cb_only_active.setChecked(False)
-
         self.btn_refresh = QPushButton("Обновить")
 
         self.cmb_org.currentIndexChanged.connect(lambda *_: self.reload())
@@ -331,7 +315,7 @@ class TenantUsagePage(QWidget):
         self.btn_refresh.clicked.connect(self.reload)
 
         top = QHBoxLayout()
-        top.setContentsMargins(12, 12, 12, 8)
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(10)
         top.addWidget(self.lbl_title)
         top.addWidget(QLabel("Учреждение:"))
@@ -345,46 +329,34 @@ class TenantUsagePage(QWidget):
         top.addWidget(self.btn_refresh)
 
         self.lbl_period = QLabel("")
-        self.lbl_period.setStyleSheet("color:#334155; padding:0 4px;")
+        self.lbl_period.setObjectName("scheduleMeta")
 
         self.lbl_total = QLabel("")
-        self.lbl_total.setStyleSheet("color:#0f172a; font-weight:600; padding:0 4px;")
+        self.lbl_total.setObjectName("scheduleMetaStrong")
 
         meta = QHBoxLayout()
-        meta.setContentsMargins(12, 0, 12, 0)
+        meta.setContentsMargins(0, 0, 0, 0)
         meta.addWidget(self.lbl_period, 1)
         meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
-        # --- Charts row (cards)
         self.chart_donut = DonutChart(self)
         self.chart_top = BarListChart(self)
 
         charts_row = QHBoxLayout()
-        charts_row.setContentsMargins(12, 0, 12, 0)
+        charts_row.setContentsMargins(0, 0, 0, 0)
         charts_row.setSpacing(12)
         charts_row.addWidget(self.chart_donut, 1)
         charts_row.addWidget(self.chart_top, 2)
 
-        # --- Table (keep it, but improve columns and add share bar)
         self.tbl = QTableWidget(0, 10)
+        self.tbl.setObjectName("tenantUsageTable")
         self.tbl.setHorizontalHeaderLabels(
-            [
-                "Арендатор",
-                "Тип",
-                "Аренда",
-                "ПД, ч",
-                "ГЗ, ч",
-                "Итого, ч",
-                "Доля",
-                "Доля, %",
-                "Брони",
-                "Отмены",
-            ]
+            ["Арендатор", "Тип", "Аренда", "ПД, ч", "ГЗ, ч", "Итого, ч", "Доля", "Доля, %", "Брони", "Отмены"]
         )
         self.tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setAlternatingRowColors(False)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setShowGrid(False)
 
@@ -404,13 +376,21 @@ class TenantUsagePage(QWidget):
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
 
+        # card under table
+        tbl_card = QWidget(self)
+        tbl_card.setObjectName("detailsCard")
+        tbl_card_lay = QVBoxLayout(tbl_card)
+        tbl_card_lay.setContentsMargins(10, 10, 10, 10)
+        tbl_card_lay.setSpacing(0)
+        tbl_card_lay.addWidget(self.tbl)
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 8, 0, 12)
+        root.setContentsMargins(12, 8, 12, 12)
         root.setSpacing(10)
         root.addLayout(top)
         root.addLayout(meta)
         root.addLayout(charts_row)
-        root.addWidget(self.tbl, 1)
+        root.addWidget(tbl_card, 1)
 
         QTimer.singleShot(0, self._load_orgs)
 
@@ -426,7 +406,6 @@ class TenantUsagePage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Загрузка арендаторов", f"Ошибка загрузки учреждений:\n{e}")
             return
-
         self.reload()
 
     def _calc_period(self) -> Period:
@@ -441,18 +420,14 @@ class TenantUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "month":
             start = d.replace(day=1)
-            next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(
-                month=start.month + 1, day=1
-            )
+            next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
             end = next_month - timedelta(days=1)
             return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
         if mode == "quarter":
             q = (d.month - 1) // 3 + 1
             start_month = 3 * (q - 1) + 1
             start = d.replace(month=start_month, day=1)
-            next_q = start.replace(year=start.year + 1, month=1, day=1) if start_month == 10 else start.replace(
-                month=start_month + 3, day=1
-            )
+            next_q = start.replace(year=start.year + 1, month=1, day=1) if start_month == 10 else start.replace(month=start_month + 3, day=1)
             end = next_q - timedelta(days=1)
             return Period(start=start, end=end, title=f"Квартал Q{q}: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "year":
@@ -463,7 +438,6 @@ class TenantUsagePage(QWidget):
 
     @staticmethod
     def _share_bar_text(share_pct: float) -> str:
-        # Simple unicode bar (10 blocks)
         n = max(0, min(10, int(round(share_pct / 10.0))))
         return "█" * n + " " * (10 - n)
 
@@ -498,13 +472,11 @@ class TenantUsagePage(QWidget):
         total_all = total_pd + total_gz
         self.lbl_total.setText(f"ИТОГО: ПД {_hours(total_pd)}ч | ГЗ {_hours(total_gz)}ч | Всего {_hours(total_all)}ч")
 
-        # update charts
         self.chart_donut.set_data(pd_sec=total_pd, gz_sec=total_gz, title="Структура загрузки", subtitle=p.title)
 
         top_items = sorted(((r.tenant_name, r.total_sec) for r in rows), key=lambda x: x[1], reverse=True)[: self.TOP_N]
         self.chart_top.set_data(title=f"Топ-{min(self.TOP_N, len(top_items))} по часам", items=top_items, total_sec=total_all)
 
-        # table
         self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(0)
 
@@ -523,7 +495,7 @@ class TenantUsagePage(QWidget):
             self.tbl.setItem(rr, 5, QTableWidgetItem(f"{_hours(r.total_sec):.1f}"))
 
             it_bar = QTableWidgetItem(self._share_bar_text(share))
-            it_bar.setForeground(QColor("#3b82f6"))
+            it_bar.setForeground(QColor(96, 165, 250, 220))
             self.tbl.setItem(rr, 6, it_bar)
 
             self.tbl.setItem(rr, 7, QTableWidgetItem(f"{share:.1f}%"))
