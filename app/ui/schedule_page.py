@@ -95,12 +95,14 @@ from app.services.bookings_service import (
 )
 from app.ui.booking_dialog import BookingDialog
 
+from PySide6.QtCore import QRectF
+
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
-    PD = QColor(96, 165, 250)        # blue-400
-    GZ = QColor(245, 158, 11)        # amber-500
-    CANC = QColor(148, 163, 184)     # slate-400
+    PD = QColor(96, 165, 250)
+    GZ = QColor(245, 158, 11)
+    CANC = QColor(148, 163, 184)
 
     @staticmethod
     def _accent_for(booking) -> QColor:
@@ -115,119 +117,102 @@ class BookingBlockDelegate(QStyledItemDelegate):
         return QColor(BookingBlockDelegate.PD)
 
     def paint(self, painter: QPainter, option, index):
+        # колонку времени рисуем стандартно
+        if index.column() == 0:
+            super().paint(painter, option, index)
+            return
+
         rect = option.rect
         booking = index.data(Qt.ItemDataRole.UserRole)
         part = index.data(self.ROLE_PART)
-        has_booking = bool(booking)
-    
+
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    
-        # Базовый фон ячейки (прозрачный тёмный)
-        base_bg = QColor(15, 23, 42, 30)
-        painter.fillRect(rect, base_bg)
-    
-        # Если нет брони — только сетка
-        if not has_booking:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            grid_pen = QPen(QColor(255, 255, 255, 22))
-            grid_pen.setWidth(1)
-            painter.setPen(grid_pen)
-            painter.drawLine(rect.topLeft(), rect.bottomLeft())
-            painter.drawLine(rect.topRight(), rect.bottomRight())
-            painter.drawLine(rect.topLeft(), rect.topRight())
-            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+
+        # базовый фон ячейки (НЕ рисуем сетку линиями)
+        painter.fillRect(rect, QColor(15, 23, 42, 40))
+
+        if not booking:
             painter.restore()
             return
-    
-        # Есть бронь
+
         accent = self._accent_for(booking)
-    
-        # Яркая заливка
+
+        # делаем блок НЕпрозрачным, чтобы не просвечивала подложка/полосы
         fill = QColor(accent)
-        fill.setAlpha(170)
-    
-        r = rect.adjusted(2, 1, -2, -1)
-        radius = 10
-    
+        fill.setAlpha(230)
+
+        # рисуем почти на весь rect, без "прозрачных краёв"
+        r = rect.adjusted(1, 1, -1, -1)
+        rf = QRectF(r)
+        radius = 10.0
+
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-    
-        # Рисуем основной блок (убираем лишние rect)
-        if part == "top":
+
+        if part == "middle":
+            painter.drawRect(rf)
+        elif part == "top":
             path = QPainterPath()
-            path.addRoundedRect(r.left(), r.top(), r.width(), r.height() + radius, radius, radius)
-            path.addRect(r.left(), r.center().y(), r.width(), r.height() // 2 + 1)
+            path.addRoundedRect(rf, radius, radius)
+            path.addRect(QRectF(rf.left(), rf.center().y(), rf.width(), rf.height() / 2))
             painter.drawPath(path)
         elif part == "bottom":
             path = QPainterPath()
-            path.addRoundedRect(r.left(), r.top() - radius, r.width(), r.height() + radius, radius, radius)
-            path.addRect(r.left(), r.top(), r.width(), r.height() // 2 + 1)
+            path.addRoundedRect(rf, radius, radius)
+            path.addRect(QRectF(rf.left(), rf.top(), rf.width(), rf.height() / 2))
             painter.drawPath(path)
-        elif part == "middle":
-            painter.drawRect(r)
-        else:  # single slot
-            painter.drawRoundedRect(r, radius, radius)
-    
-        # Левая акцентная полоса
+        else:
+            painter.drawRoundedRect(rf, radius, radius)
+
+        # левая акцентная полоса
         painter.setBrush(accent)
-        painter.drawRect(r.left(), r.top(), 4, r.height())
-    
-        # Обводка (только для top/bottom/single)
-        if part in ("top", "bottom", None):
-            border = QColor(accent)
-            border.setAlpha(220)
-            painter.setPen(QPen(border, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(r, radius, radius)
-    
-        # Бейдж и текст только в верхней ячейке
+        painter.drawRect(QRectF(rf.left(), rf.top(), 4, rf.height()))
+
+        # бейдж+текст только в top/одиночном
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
-    
+
             if status == "cancelled":
                 badge_text = "ОТМ"
                 badge_bg = QColor(self.CANC)
-                badge_bg.setAlpha(230)
+                badge_bg.setAlpha(240)
             else:
                 badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
                 badge_bg = QColor(accent)
-                badge_bg.setAlpha(235)
-    
-            # Рисуем бейдж
+                badge_bg.setAlpha(245)
+
             fm = painter.fontMetrics()
             pad_x, pad_y = 8, 3
             bw = fm.horizontalAdvance(badge_text) + pad_x * 2
             bh = max(18, fm.height() - 2 + pad_y * 2)
-            bx = r.right() - bw - 8
-            by = r.top() + 6
-    
+            bx = rf.right() - bw - 8
+            by = rf.top() + 6
+
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(badge_bg)
-            painter.drawRoundedRect(bx, by, bw, bh, 8, 8)
-    
+            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 8, 8)
+
             painter.setPen(QPen(QColor(255, 255, 255, 245)))
             f = painter.font()
             f.setBold(True)
             painter.setFont(f)
-            painter.drawText(int(bx), int(by), int(bw), int(bh),
-                           Qt.AlignmentFlag.AlignCenter, badge_text)
-    
-            # Текст брони
+            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
+
             text = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
             if text:
                 f2 = painter.font()
                 f2.setBold(False)
                 painter.setFont(f2)
                 painter.setPen(QPen(QColor(255, 255, 255, 238)))
-                text_rect = r.adjusted(10, 8, -70, -8)
+                text_rect = QRectF(rf.left() + 10, rf.top() + 8, rf.width() - 10 - 70, rf.height() - 12)
                 painter.drawText(
                     text_rect,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                     text,
                 )
-    
+
         painter.restore()
 
     def sizeHint(self, option, index):
@@ -371,6 +356,10 @@ class SchedulePage(QWidget):
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         self.tbl.setObjectName("scheduleGrid")
+
+        self.tbl.setItemDelegateForColumn(0, QStyledItemDelegate(self.tbl))  # стандартная отрисовка времени
+        self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))             # бронь для остальных
+
         
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
