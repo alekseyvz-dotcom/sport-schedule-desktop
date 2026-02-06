@@ -304,13 +304,18 @@ QLabel#kpiValue { color: rgba(255,255,255,0.92); font-weight: 900; }
 
 /* ---- Schedule tables: allow BackgroundRole (booking colors) ---- */
 /* НЕ задаём background/color тут, чтобы работали BackgroundRole/ForegroundRole из кода */
-QTableWidget#scheduleGrid::item { padding: 0px; border: none; }
+QTableWidget#scheduleGrid::item {
+    padding: 0px;
+    border: none;
+    background: transparent;
+}
+QTableWidget#scheduleGrid::item:selected {
+    background: transparent;
+}
 QTableWidget#scheduleList::item { padding: 6px 10px; border: none; }
-QTableWidget#scheduleGrid::item:selected,
 QTableWidget#scheduleList::item:selected {
     outline: 1px solid rgba(99, 102, 241, 0.65);
 }
-
 /* ---- Usage progress bars ---- */
 QProgressBar {
     border: 1px solid rgba(255, 255, 255, 0.14);
