@@ -301,50 +301,6 @@ class OrgUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Год: {d.year}")
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
-    def _make_progress(self, pct: float, *, is_total: bool = False) -> QProgressBar:
-        pb = QProgressBar()
-        pb.setRange(0, 100)
-        pb.setValue(max(0, min(100, int(round(pct)))))
-        pb.setTextVisible(True)
-        pb.setFormat(f"{pct:.1f}%")
-    
-        if pct >= 100:
-            chunk = "#22c55e"
-        elif pct >= 71:
-            chunk = "#facc15"
-        elif pct >= 51:
-            chunk = "#f59e0b"
-        elif pct >= 1:
-            chunk = "#ef4444"
-        else:
-            chunk = "rgba(255,255,255,0.18)"
-    
-        if is_total:
-            pb.setObjectName("usageTotalBar")  # <-- ВАЖНО, чтобы сработал QSS из темы
-    
-        pb.setStyleSheet(f"""
-            QProgressBar {{
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 8px;
-                background: transparent;              /* <-- ключевое */
-                text-align: center;
-                padding: 2px;
-                min-width: 120px;
-                color: rgba(255,255,255,0.90);
-            }}
-            QProgressBar::chunk {{
-                background: {chunk};
-                border-radius: 8px;
-            }}
-        """)
-    
-        # заставляем Qt применить и objectName-правила темы, и наш локальный stylesheet
-        pb.style().unpolish(pb)
-        pb.style().polish(pb)
-        pb.update()
-    
-        return pb
-
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
         m = "Утро (в пределах режима)" if m_cap > 0 else "Утро (нет)"
         d = "День (в пределах режима)" if d_cap > 0 else "День (нет)"
@@ -423,7 +379,10 @@ class OrgUsagePage(QWidget):
 
             self.tbl.setItem(r0, 0, it_org)
             self.tbl.setItem(r0, 1, it_venue)
-            self.tbl.setCellWidget(r0, 2, self._make_progress(org_pct, is_total=True))
+            it_bar = QTableWidgetItem("")          # пустой display, делегат нарисует всё сам
+            it_bar.setData(ROLE_PCT, float(org_pct))
+            it_bar.setData(ROLE_IS_TOTAL, True)
+            self.tbl.setItem(r0, 2, it_bar)
 
             for ci, txt in ((3, f"{org_pct:.1f}%"),
                             (4, f"{_hours(org_pd):.1f}"),
@@ -451,7 +410,9 @@ class OrgUsagePage(QWidget):
 
                 self.tbl.setItem(rr, 0, it0)
                 self.tbl.setItem(rr, 1, it1)
-                self.tbl.setCellWidget(rr, 2, self._make_progress(pct_v))
+                it_bar = QTableWidgetItem("")
+                it_bar.setData(ROLE_PCT, float(pct_v))
+                self.tbl.setItem(rr, 2, it_bar)
                 self.tbl.setItem(rr, 3, QTableWidgetItem(f"{pct_v:.1f}%"))
                 self.tbl.setItem(rr, 4, QTableWidgetItem(f"{_hours(v.pd_sec):.1f}"))
                 self.tbl.setItem(rr, 5, QTableWidgetItem(f"{_hours(v.gz_sec):.1f}"))
