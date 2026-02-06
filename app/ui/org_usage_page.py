@@ -49,39 +49,61 @@ def _pct(sec: int, cap: int) -> float:
 def _hours(sec: int) -> float:
     return round(sec / 3600.0, 1)
 
-
 class UsageRowDelegate(QStyledItemDelegate):
-    """Делегат, который рисует фон итоговых строк."""
+    """
+    Делегат для usageTable.
+    Итоговые строки (ROLE_IS_TOTAL=True) — рисуем ВСЁ сами,
+    чтобы QSS не перебил фон.
+    Обычные строки — стандартный paint.
+    """
 
-    TOTAL_BG      = QColor(99, 102, 241, 40)
-    TOTAL_BG_SEL  = QColor(99, 102, 241, 65)
-    TOTAL_BORDER  = QColor(99, 102, 241, 50)
+    TOTAL_BG     = QColor(40, 42, 80)       # непрозрачный тёмно-индиго
+    TOTAL_BG_SEL = QColor(55, 58, 110)      # чуть светлее при selection
+    TOTAL_BORDER = QColor(99, 102, 241, 60) # линия-разделитель снизу
+    TOTAL_FG     = QColor(255, 255, 255, 235)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
         is_total = index.data(ROLE_IS_TOTAL)
 
-        if is_total:
-            painter.save()
-            r = option.rect
-
-            # фон
-            if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(r, self.TOTAL_BG_SEL)
-            else:
-                painter.fillRect(r, self.TOTAL_BG)
-
-            # тонкая линия снизу — разделитель
-            painter.setPen(QPen(self.TOTAL_BORDER, 1))
-            painter.drawLine(r.bottomLeft(), r.bottomRight())
-
-            painter.restore()
-
-            # рисуем текст стандартным способом, но без фона
-            opt2 = QStyleOptionViewItem(option)
-            opt2.state &= ~QStyle.StateFlag.State_Selected  # убираем стандартный sel-bg
-            super().paint(painter, opt2, index)
-        else:
+        if not is_total:
             super().paint(painter, option, index)
+            return
+
+        # ── Итоговая строка: рисуем всё сами ──
+        painter.save()
+        r = option.rect
+
+        # 1. Фон — непрозрачный, QSS не перебьёт
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(r, self.TOTAL_BG_SEL)
+        else:
+            painter.fillRect(r, self.TOTAL_BG)
+
+        # 2. Линия-разделитель снизу
+        painter.setPen(QPen(self.TOTAL_BORDER, 1))
+        painter.drawLine(r.bottomLeft(), r.bottomRight())
+
+        # 3. Текст
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        if text:
+            font = index.data(Qt.ItemDataRole.FontRole)
+            if isinstance(font, QFont):
+                painter.setFont(font)
+            else:
+                painter.setFont(option.font)
+
+            painter.setPen(self.TOTAL_FG)
+
+            # Определяем alignment
+            align = index.data(Qt.ItemDataRole.TextAlignmentRole)
+            if align is None:
+                align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+            # Отступы как в QSS: padding 6px 10px
+            text_rect = r.adjusted(10, 0, -10, 0)
+            painter.drawText(text_rect, int(align), text)
+
+        painter.restore()
 
 class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
