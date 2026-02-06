@@ -219,10 +219,13 @@ QComboBox::drop-down {
     border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
 QComboBox::down-arrow {
-    width: 12px;
-    height: 12px;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='rgb(226,232,240)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    width: 0px;
+    height: 0px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid rgba(226, 232, 240, 0.90);
 }
+
 QComboBox QAbstractItemView {
     background: rgba(11, 18, 32, 0.98);
     color: rgba(255, 255, 255, 0.90);
