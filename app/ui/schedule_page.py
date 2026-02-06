@@ -969,43 +969,38 @@ class SchedulePage(QWidget):
     def _setup_table(self):
         times = self._time_slots()
         resource_count = len(self._resources)
-    
+
         self.tbl.clear()
         self.tbl.setRowCount(len(times))
         self.tbl.setColumnCount(1 + resource_count)
-    
+
         headers = ["Время"] + [r.resource_name for r in self._resources]
         self.tbl.setHorizontalHeaderLabels(headers)
-    
+
         header = self.tbl.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for c in range(1, 1 + resource_count):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
-    
-        # Заполняем колонку времени
+
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            
-            # ДОБАВИТЬ: явно задать цвет текста и фона
-            it.setForeground(QColor(226, 232, 240, 210))  # светлый текст
-            it.setBackground(QColor(15, 23, 42, 90))      # полупрозрачный тёмный фон
-            
+            it.setForeground(QColor(226, 232, 240, 210))
+            it.setBackground(QColor(15, 23, 42, 90))
             self.tbl.setItem(r, 0, it)
-    
-        # Остальные ячейки (зоны бронирования)
+
         for r in range(len(times)):
             for c in range(1, 1 + resource_count):
                 it = QTableWidgetItem("")
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
                 self.tbl.setItem(r, c, it)
-    
+
         self.tbl.setColumnWidth(0, 70)
         self.tbl.resizeRowsToContents()
-    
-     def _reload_grid(self):
+
+    def _reload_grid(self):
         self.meta_row.setVisible(False)
 
         # Очистка
@@ -1070,7 +1065,7 @@ class SchedulePage(QWidget):
             r0 = max(0, r0)
             r1 = min(self.tbl.rowCount() - 1, r1)
 
-            span = r1 - r0  # 0 = single, 1+ = multi
+            span = r1 - r0
 
             for rr in range(r0, r1 + 1):
                 it = self.tbl.item(rr, col)
@@ -1082,7 +1077,7 @@ class SchedulePage(QWidget):
                 it.setData(BookingBlockDelegate.ROLE_ROWS, (r0, r1))
 
                 if span == 0:
-                    it.setData(BookingBlockDelegate.ROLE_PART, None)  # single
+                    it.setData(BookingBlockDelegate.ROLE_PART, None)
                 elif rr == r0:
                     it.setData(BookingBlockDelegate.ROLE_PART, "top")
                 elif rr == r1:
@@ -1090,7 +1085,6 @@ class SchedulePage(QWidget):
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
 
-            # Текст — в top-ячейку
             it0 = self.tbl.item(r0, col)
             if it0:
                 kind = (getattr(b, "kind", "") or "").upper()
