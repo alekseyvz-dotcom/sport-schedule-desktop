@@ -83,30 +83,6 @@ class UsageRowDelegate(QStyledItemDelegate):
         else:
             super().paint(painter, option, index)
 
-
-class _PulsingProgressBar(QProgressBar):
-    """QProgressBar с мягкой пульсацией прозрачности."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._opacity = 1.0
-
-        self._anim = QPropertyAnimation(self, b"windowOpacity", self)
-        self._anim.setDuration(1800)
-        self._anim.setStartValue(1.0)
-        self._anim.setKeyValueAt(0.5, 0.45)
-        self._anim.setEndValue(1.0)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self._anim.setLoopCount(-1)
-
-    def start_pulse(self):
-        self._anim.start()
-
-    def stop_pulse(self):
-        self._anim.stop()
-        self.setWindowOpacity(1.0)
-
-
 class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
@@ -117,7 +93,6 @@ class OrgUsagePage(QWidget):
 
         self._period: Optional[Period] = None
         self._rows: List[UsageRow] = []
-        self._total_bars: List[_PulsingProgressBar] = []
 
         self.lbl_title = QLabel("Загрузка учреждений")
         self.lbl_title.setObjectName("sectionTitle")
@@ -266,12 +241,12 @@ class OrgUsagePage(QWidget):
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
     def _make_progress(self, pct: float, *, is_total: bool = False) -> QProgressBar:
-        pb = _PulsingProgressBar() if is_total else QProgressBar()
+        pb = QProgressBar()
         pb.setRange(0, 100)
         pb.setValue(max(0, min(100, int(round(pct)))))
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
-
+    
         if pct >= 100:
             chunk = "#22c55e"
         elif pct >= 71:
@@ -282,10 +257,14 @@ class OrgUsagePage(QWidget):
             chunk = "#ef4444"
         else:
             chunk = "rgba(255,255,255,0.18)"
-
-        bg = "rgba(99,102,241,0.12)" if is_total else "rgba(11,18,32,0.65)"
-        br = "rgba(99,102,241,0.30)" if is_total else "rgba(255,255,255,0.14)"
-
+    
+        if is_total:
+            bg = "transparent"
+            br = "rgba(255,255,255,0.10)"
+        else:
+            bg = "rgba(11,18,32,0.65)"
+            br = "rgba(255,255,255,0.14)"
+    
         pb.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid {br};
@@ -301,11 +280,7 @@ class OrgUsagePage(QWidget):
                 border-radius: 8px;
             }}
         """)
-
-        if is_total and isinstance(pb, _PulsingProgressBar):
-            pb.start_pulse()
-            self._total_bars.append(pb)
-
+    
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
@@ -315,11 +290,6 @@ class OrgUsagePage(QWidget):
         self.details.set_shift_titles(m, d, e)
 
     def reload(self):
-        # останавливаем старые пульсации
-        for pb in self._total_bars:
-            pb.stop_pulse()
-        self._total_bars.clear()
-
         p = self._calc_period()
         self._period = p
         self.lbl_period.setText(f"Период: {p.title}")
