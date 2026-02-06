@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta, timezone
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
@@ -48,17 +48,13 @@ class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
-    # ---- styling constants for total rows ----
-    TOTAL_BG = QColor(99, 102, 241, 55)          # indigo tint
-    TOTAL_FG = QColor(255, 255, 255, 235)
-    TOTAL_BAR_BG = QColor(255, 255, 255, 18)     # subtle bar bg
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
 
         self._period: Optional[Period] = None
         self._rows: List[UsageRow] = []
+        self._total_rows: Set[int] = set()  # индексы итоговых строк (0-based)
 
         self.lbl_title = QLabel("Загрузка учреждений")
         self.lbl_title.setObjectName("sectionTitle")
@@ -210,7 +206,6 @@ class OrgUsagePage(QWidget):
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
 
-        # only objectName -> colors in theme.py
         if pct >= 100:
             pb.setObjectName("usagePctGreen")
         elif pct >= 71:
@@ -223,11 +218,12 @@ class OrgUsagePage(QWidget):
             pb.setObjectName("usagePctNeutral")
 
         if is_total:
-            # make it visually match total row
-            pal = pb.palette()
-            pal.setColor(pal.ColorRole.Base, self.TOTAL_BAR_BG)
-            pb.setPalette(pal)
-            pb.setStyleSheet("QProgressBar{background: rgba(99,102,241,0.10);}")
+            pb.setProperty("is_total", True)   # подхватим в QSS (см. ниже)
+            pb.setObjectName("usageTotalBar")  # отдельный стиль
+
+        # принудительно переполировать, т.к. objectName/properties меняются после создания
+        pb.style().unpolish(pb)
+        pb.style().polish(pb)
 
         return pb
 
@@ -237,16 +233,37 @@ class OrgUsagePage(QWidget):
         e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
         self.details.set_shift_titles(m, d, e)
 
-    def _apply_total_row_style(self, row: int) -> None:
-        """Apply noticeable background/foreground/bold to all QTableWidgetItem in row."""
-        for c in range(self.tbl.columnCount()):
-            it = self.tbl.item(row, c)
-            if it:
-                it.setData(Qt.ItemDataRole.BackgroundRole, QColor(self.TOTAL_BG))
-                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(self.TOTAL_FG))
-                it.setFont(self._bold_font())
-                if c >= 3:
-                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    def _apply_usage_table_total_rows_qss(self) -> None:
+        """
+        Qt QSS не умеет “раскрасить произвольные строки” напрямую.
+        Но можно через nth-child, если мы знаем индексы строк.
+        """
+        if not self._total_rows:
+            self.tbl.setStyleSheet("")  # сброс локального
+            return
+
+        # QSS nth-child индексируется с 1
+        selectors = [f"QTableWidget#usageTable::item:nth-child({r+1})" for r in sorted(self._total_rows)]
+
+        # чуть сильнее, чем было: чтобы реально отличалось
+        total_bg = "rgba(99, 102, 241, 0.20)"
+        total_fg = "rgba(255, 255, 255, 0.92)"
+
+        qss = f"""
+        /* total rows highlight */
+        {", ".join(selectors)} {{
+            background: {total_bg};
+            color: {total_fg};
+            font-weight: 800;
+        }}
+        """
+
+        self.tbl.setStyleSheet(qss)
+
+        # переполировать таблицу
+        self.tbl.style().unpolish(self.tbl)
+        self.tbl.style().polish(self.tbl)
+        self.tbl.viewport().update()
 
     def reload(self):
         p = self._calc_period()
@@ -293,6 +310,7 @@ class OrgUsagePage(QWidget):
         org_keys = sorted(by_org.keys(), key=org_total_ratio, reverse=True)
 
         self.tbl.setRowCount(0)
+        self._total_rows = set()
 
         for (oid, oname) in org_keys:
             org_rows = by_org[(oid, oname)]
@@ -306,6 +324,7 @@ class OrgUsagePage(QWidget):
             # --- total row for org ---
             r0 = self.tbl.rowCount()
             self.tbl.insertRow(r0)
+            self._total_rows.add(r0)
 
             it_org = QTableWidgetItem(oname)
             it_venue = QTableWidgetItem("ИТОГО по учреждению")
@@ -324,7 +343,11 @@ class OrgUsagePage(QWidget):
             self.tbl.setItem(r0, 5, QTableWidgetItem(f"{_hours(org_gz):.1f}"))
             self.tbl.setItem(r0, 6, QTableWidgetItem(f"{_hours(org_busy):.1f}"))
 
-            self._apply_total_row_style(r0)
+            # align numeric
+            for c in (3, 4, 5, 6):
+                it = self.tbl.item(r0, c)
+                if it:
+                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             # --- venue rows ---
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
@@ -353,6 +376,9 @@ class OrgUsagePage(QWidget):
                     if it:
                         it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
+        # применяем локальный QSS для итоговых строк
+        self._apply_usage_table_total_rows_qss()
+
         if self.tbl.rowCount() > 0:
             self.tbl.setCurrentCell(0, 0)
             self._on_selection_changed()
@@ -360,7 +386,6 @@ class OrgUsagePage(QWidget):
             self.details.set_data(None)
 
     def _on_selection_changed(self):
-        # твой код без изменений
         if not self._period:
             self.details.set_data(None)
             return
