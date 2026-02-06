@@ -133,73 +133,137 @@ class BookingBlockDelegate(QStyledItemDelegate):
         part = index.data(self.ROLE_PART)
 
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setClipRect(rect)  # не выходим за пределы ячейки
 
-        # 1) Всегда красим фон ячейки
-        painter.fillRect(rect, self.CELL_BG)
-
-        # 2) Рисуем общую сетку (всегда, чтобы была "общая сетка")
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setPen(self.GRID_PEN)
-        painter.drawLine(rect.topLeft(), rect.topRight())
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-        painter.drawLine(rect.topLeft(), rect.bottomLeft())
-        painter.drawLine(rect.topRight(), rect.bottomRight())
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # Нет брони — на этом всё
+        # ── Пустая ячейка (нет брони) ──
         if not booking:
+            painter.fillRect(rect, self.CELL_BG)
+
+            # тонкая сетка
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            painter.setPen(self.GRID_PEN)
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+
             painter.restore()
             return
 
-        # 3) Есть бронь: рисуем ПОЛНОСТЬЮ непрозрачный блок,
-        # чтобы сетка/подложка/selection не "просвечивали" полосами
+        # ── Есть бронь ──
         accent = self._accent_for(booking)
 
         fill = QColor(accent)
-        fill.setAlpha(255)  # ВАЖНО: непрозрачный
+        fill.setAlpha(255)
 
-        r = rect.adjusted(1, 1, -1, -1)
-        rf = QRectF(r)
+        # Для middle — заливаем ВЕСЬ rect без зазоров
+        # Для top/bottom — оставляем боковые отступы, но НЕ вертикальные зазоры между частями
         radius = 10.0
+        margin_h = 1  # горизонтальный отступ от краёв колонки
 
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
 
-        # форма блока по частям
         if part == "middle":
+            # Полная заливка без зазоров сверху/снизу
+            rf = QRectF(rect.left() + margin_h, rect.top(),
+                        rect.width() - margin_h * 2, rect.height())
             painter.drawRect(rf)
+
         elif part == "top":
+            # Скругление сверху, снизу — ровно до края ячейки (без зазора)
+            rf = QRectF(rect.left() + margin_h, rect.top() + 1,
+                        rect.width() - margin_h * 2, rect.height() - 1)
             path = QPainterPath()
-            path.addRoundedRect(rf, radius, radius)
-            path.addRect(QRectF(rf.left(), rf.center().y(), rf.width(), rf.height() / 2))
+            path.moveTo(rf.bottomLeft())
+            path.lineTo(rf.left(), rf.top() + radius)
+            path.arcTo(QRectF(rf.left(), rf.top(), radius * 2, radius * 2), 180, -90)
+            path.lineTo(rf.right() - radius, rf.top())
+            path.arcTo(QRectF(rf.right() - radius * 2, rf.top(), radius * 2, radius * 2), 90, -90)
+            path.lineTo(rf.right(), rf.bottom())
+            path.lineTo(rf.left(), rf.bottom())
+            path.closeSubpath()
             painter.drawPath(path)
+
         elif part == "bottom":
+            # Скругление снизу, сверху — ровно от края ячейки
+            rf = QRectF(rect.left() + margin_h, rect.top(),
+                        rect.width() - margin_h * 2, rect.height() - 1)
             path = QPainterPath()
-            path.addRoundedRect(rf, radius, radius)
-            path.addRect(QRectF(rf.left(), rf.top(), rf.width(), rf.height() / 2))
+            path.moveTo(rf.topLeft())
+            path.lineTo(rf.left(), rf.bottom() - radius)
+            path.arcTo(QRectF(rf.left(), rf.bottom() - radius * 2, radius * 2, radius * 2), 180, 90)
+            path.lineTo(rf.right() - radius, rf.bottom())
+            path.arcTo(QRectF(rf.right() - radius * 2, rf.bottom() - radius * 2, radius * 2, radius * 2), 270, 90)
+            path.lineTo(rf.right(), rf.top())
+            path.lineTo(rf.left(), rf.top())
+            path.closeSubpath()
             painter.drawPath(path)
+
         else:
+            # Одиночная ячейка (одна строка = вся бронь)
+            rf = QRectF(rect.left() + margin_h, rect.top() + 1,
+                        rect.width() - margin_h * 2, rect.height() - 2)
             painter.drawRoundedRect(rf, radius, radius)
 
-        # левая акцентная полоска
-        painter.setBrush(accent.darker(115))
-        painter.drawRect(QRectF(rf.left(), rf.top(), 4, rf.height()))
+        # Определяем rf для дальнейших элементов (акцентная полоска, бейдж, текст)
+        if part == "middle":
+            rf = QRectF(rect.left() + margin_h, rect.top(),
+                        rect.width() - margin_h * 2, rect.height())
+        elif part == "top":
+            rf = QRectF(rect.left() + margin_h, rect.top() + 1,
+                        rect.width() - margin_h * 2, rect.height() - 1)
+        elif part == "bottom":
+            rf = QRectF(rect.left() + margin_h, rect.top(),
+                        rect.width() - margin_h * 2, rect.height() - 1)
+        else:
+            rf = QRectF(rect.left() + margin_h, rect.top() + 1,
+                        rect.width() - margin_h * 2, rect.height() - 2)
 
-        # 4) Если ячейка выделена — вместо штатной подложки просто рисуем тонкую обводку
+        # Левая акцентная полоска
+        stripe_color = accent.darker(130)
+        stripe_color.setAlpha(255)
+        painter.setBrush(stripe_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        stripe_width = 4.0
+        if part == "top":
+            # Скругление вверху-слева
+            sp = QPainterPath()
+            sp.moveTo(rf.left(), rf.top() + radius)
+            sp.arcTo(QRectF(rf.left(), rf.top(), radius * 2, radius * 2), 180, -90)
+            sp.lineTo(rf.left() + stripe_width, rf.top())
+            sp.lineTo(rf.left() + stripe_width, rf.bottom())
+            sp.lineTo(rf.left(), rf.bottom())
+            sp.closeSubpath()
+            painter.drawPath(sp)
+        elif part == "bottom":
+            sp = QPainterPath()
+            sp.moveTo(rf.left(), rf.top())
+            sp.lineTo(rf.left() + stripe_width, rf.top())
+            sp.lineTo(rf.left() + stripe_width, rf.bottom())
+            sp.lineTo(rf.left() + radius, rf.bottom())
+            sp.arcTo(QRectF(rf.left(), rf.bottom() - radius * 2, radius * 2, radius * 2), 270, -90)
+            sp.closeSubpath()
+            painter.drawPath(sp)
+        else:
+            painter.drawRect(QRectF(rf.left(), rf.top(), stripe_width, rf.height()))
+
+        # Если ячейка выделена — тонкая обводка
         if option.state & QStyle.StateFlag.State_Selected:
-            pen = QPen(QColor(255, 255, 255, 120), 1)
+            pen = QPen(QColor(255, 255, 255, 120), 1.5)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rf, radius, radius)
+            painter.drawRoundedRect(rf.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
-        # 5) Текст/бейдж только в top/одиночной
+        # Текст/бейдж только в top/одиночной
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
 
-            badge_text = "ОТМ" if status == "cancelled" else ("ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
+            badge_text = "ОТМ" if status == "cancelled" else (
+                "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
             badge_bg = QColor(self.CANC if status == "cancelled" else accent)
+            badge_bg = badge_bg.darker(120)
             badge_bg.setAlpha(255)
 
             fm = painter.fontMetrics()
@@ -225,7 +289,8 @@ class BookingBlockDelegate(QStyledItemDelegate):
                 f2.setBold(False)
                 painter.setFont(f2)
                 painter.setPen(QPen(QColor(255, 255, 255, 245)))
-                text_rect = QRectF(rf.left() + 10, rf.top() + 8, rf.width() - 10 - 70, rf.height() - 12)
+                text_rect = QRectF(rf.left() + 10, rf.top() + 8,
+                                   rf.width() - 10 - bw - 20, rf.height() - 12)
                 painter.drawText(
                     text_rect,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
