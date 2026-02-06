@@ -100,117 +100,199 @@ from PySide6.QtCore import QRectF
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
-    def _reload_grid(self):
-        self.meta_row.setVisible(False)
+class BookingBlockDelegate(QStyledItemDelegate):
+    """v9 — без скруглений, текст второй строки в первой middle-ячейке."""
 
-        for r in range(self.tbl.rowCount()):
-            for c in range(1, self.tbl.columnCount()):
-                it = self.tbl.item(r, c)
-                if it is None:
-                    it = QTableWidgetItem("")
-                    self.tbl.setItem(r, c, it)
-                it.setText("")
-                it.setData(Qt.ItemDataRole.UserRole, None)
-                it.setData(BookingBlockDelegate.ROLE_PART, None)
-                it.setData(BookingBlockDelegate.ROLE_ROWS, None)
-                it.setData(BookingBlockDelegate.ROLE_LINE2, None)
+    ROLE_PART  = Qt.ItemDataRole.UserRole + 1
+    ROLE_ROWS  = Qt.ItemDataRole.UserRole + 2
+    ROLE_LINE2 = Qt.ItemDataRole.UserRole + 3  # текст второй строки
 
-        if not self._resources:
+    PD_FILL    = QColor(30, 58, 95)
+    PD_BORDER  = QColor(50, 90, 145)
+    PD_BADGE   = QColor(59, 130, 246)
+
+    GZ_FILL    = QColor(80, 56, 20)
+    GZ_BORDER  = QColor(130, 95, 25)
+    GZ_BADGE   = QColor(217, 119, 6)
+
+    GZF_FILL   = QColor(95, 78, 30)
+    GZF_BORDER = QColor(160, 135, 45)
+    GZF_BADGE  = QColor(251, 191, 36)
+
+    CAN_FILL   = QColor(40, 45, 55)
+    CAN_BORDER = QColor(75, 85, 100)
+    CAN_BADGE  = QColor(100, 116, 139)
+
+    BG         = QColor(11, 18, 32)
+    EMPTY      = QColor(15, 20, 32)
+    GRID       = QColor(255, 255, 255, 12)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._bf = QFont()
+        self._bf.setPointSizeF(max(self._bf.pointSizeF(), 9.5))
+
+    def _page(self):
+        w = self.parent()
+        while w is not None:
+            if isinstance(w, SchedulePage):
+                return w
+            w = getattr(w, 'parent', lambda: None)()
+        return None
+
+    def _pal(self, bk):
+        if not bk:
+            return self.BG, self.BG, self.BG
+        s = (getattr(bk, "status", "") or "").lower()
+        if s == "cancelled":
+            return self.CAN_FILL, self.CAN_BORDER, self.CAN_BADGE
+        k = (getattr(bk, "kind", "") or getattr(bk, "activity", "") or "").upper()
+        if k == "GZ":
+            gid = getattr(bk, "gz_group_id", None)
+            pg = self._page()
+            if pg and gid is not None and pg._gz_group_is_free.get(int(gid), False):
+                return self.GZF_FILL, self.GZF_BORDER, self.GZF_BADGE
+            return self.GZ_FILL, self.GZ_BORDER, self.GZ_BADGE
+        return self.PD_FILL, self.PD_BORDER, self.PD_BADGE
+
+    def paint(self, painter: QPainter, option, index):
+        if index.column() == 0:
+            super().paint(painter, option, index)
             return
 
-        day = self.dt_day.date().toPython()
-        include_cancelled = self.cb_cancelled.isChecked()
-        venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
+        r    = option.rect
+        bk   = index.data(Qt.ItemDataRole.UserRole)
+        part = index.data(self.ROLE_PART)
 
-        try:
-            bookings = list_bookings_for_day(venue_ids, day,
-                                              include_cancelled=include_cancelled)
-        except Exception as e:
-            _uilog("ERROR list_bookings_for_day: " + repr(e))
-            _uilog(traceback.format_exc())
-            QMessageBox.critical(self, "Расписание",
-                                 f"Ошибка загрузки бронирований:\n{e}")
+        painter.save()
+        painter.setClipRect(r)
+        painter.fillRect(r, self.BG)
+
+        # ── Пустая ячейка ──
+        if not bk:
+            painter.fillRect(r, self.EMPTY)
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(r, QColor(99, 102, 241, 45))
+                painter.setPen(QPen(QColor(99, 102, 241, 120), 1))
+                painter.drawRect(r.adjusted(0, 0, -1, -1))
+            elif option.state & QStyle.StateFlag.State_MouseOver:
+                painter.fillRect(r, QColor(255, 255, 255, 12))
+            painter.setPen(QPen(self.GRID, 1))
+            painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+            painter.drawLine(r.right(), r.top(), r.right(), r.bottom())
+            painter.restore()
             return
 
-        unit_col: Dict[int, int] = {}
-        venue_fallback_col: Dict[int, int] = {}
-        for i, rsrc in enumerate(self._resources):
-            col_idx = i + 1
-            if rsrc.venue_unit_id is not None:
-                unit_col[int(rsrc.venue_unit_id)] = col_idx
-            else:
-                venue_fallback_col[int(rsrc.venue_id)] = col_idx
+        fill, bdr, badge = self._pal(bk)
+        mx = 2
 
-        day_start = datetime.combine(day, self._work_start, tzinfo=self.TZ)
-        day_end   = datetime.combine(day, self._work_end,   tzinfo=self.TZ)
+        # ── Заливка: весь rect ──
+        painter.fillRect(r, fill)
 
-        for b in bookings:
-            col = None
-            if getattr(b, "venue_unit_id", None) is not None:
-                col = unit_col.get(int(b.venue_unit_id))
-            if col is None:
-                col = venue_fallback_col.get(int(b.venue_id))
-            if not col:
-                continue
+        # ── Рамки ──
+        painter.setPen(QPen(bdr, 1))
+        # Вертикальные — всегда
+        painter.drawLine(r.left() + mx, r.top(), r.left() + mx, r.bottom())
+        painter.drawLine(r.right() - mx, r.top(), r.right() - mx, r.bottom())
+        # Горизонтальные — только на границах блока
+        if part in ("top", None):
+            painter.drawLine(r.left() + mx, r.top(), r.right() - mx, r.top())
+        if part in ("bottom", None):
+            painter.drawLine(r.left() + mx, r.bottom(), r.right() - mx, r.bottom())
 
-            start = max(b.starts_at, day_start)
-            end   = min(b.ends_at, day_end)
-            if end <= start:
-                continue
+        # ── Selection ──
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(r, QColor(255, 255, 255, 18))
 
-            r0 = int((start - day_start).total_seconds() //
-                     (self.SLOT_MINUTES * 60))
-            r1 = int(((end - day_start).total_seconds() - 1) //
-                     (self.SLOT_MINUTES * 60))
-            r0 = max(0, r0)
-            r1 = min(self.tbl.rowCount() - 1, r1)
+        # ── Контент ──
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-            span = r1 - r0
+        if part in ("top", None):
+            self._draw_top(painter, bk, index, r, badge)
 
-            for rr in range(r0, r1 + 1):
-                it = self.tbl.item(rr, col)
-                if it is None:
-                    it = QTableWidgetItem("")
-                    self.tbl.setItem(rr, col, it)
+        # Вторая строка — рисуется в ПЕРВОЙ middle-ячейке (или bottom если span=1)
+        line2 = index.data(self.ROLE_LINE2)
+        if line2 and part in ("middle", "bottom"):
+            # Проверяем что это ПЕРВАЯ ячейка после top
+            rows_data = index.data(self.ROLE_ROWS)
+            if rows_data:
+                r0, _ = rows_data
+                if index.row() == r0 + 1:
+                    self._draw_line2(painter, line2, r)
 
-                it.setData(Qt.ItemDataRole.UserRole, b)
-                it.setData(BookingBlockDelegate.ROLE_ROWS, (r0, r1))
+        painter.restore()
 
-                if span == 0:
-                    it.setData(BookingBlockDelegate.ROLE_PART, None)
-                elif rr == r0:
-                    it.setData(BookingBlockDelegate.ROLE_PART, "top")
-                elif rr == r1:
-                    it.setData(BookingBlockDelegate.ROLE_PART, "bottom")
-                else:
-                    it.setData(BookingBlockDelegate.ROLE_PART, "middle")
+    def _draw_top(self, painter, bk, index, r, badge):
+        """Рисует бейдж типа + имя арендатора в top-ячейке."""
+        kind   = (getattr(bk, "kind", "") or
+                  getattr(bk, "activity", "") or "").upper()
+        status = (getattr(bk, "status", "") or "").lower()
 
-            # Имя арендатора — в top
-            kind = (getattr(b, "kind", "") or "").upper()
-            tenant_name = (getattr(b, "tenant_name", "") or "").strip()
-            if kind == "GZ":
-                tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
-            title = (getattr(b, "title", "") or "").strip()
+        raw = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        lines = [l.strip() for l in raw.split("\n") if l.strip()]
+        name = lines[0] if lines else ""
 
-            it0 = self.tbl.item(r0, col)
-            if it0:
-                it0.setText(tenant_name)
+        # ── Бейдж типа ──
+        tag = ("ОТМ" if status == "cancelled"
+               else "ПД" if kind == "PD"
+               else "ГЗ" if kind == "GZ"
+               else kind or "—")
 
-            # Вторая строка — в ячейку r0+1 (если блок > 1 слота)
-            line2 = title if title else ""
-            if not line2:
-                line2 = f"{b.starts_at:%H:%M} – {b.ends_at:%H:%M}"
+        fb = QFont(self._bf)
+        fb.setBold(True)
+        painter.setFont(fb)
+        fm = painter.fontMetrics()
 
-            if span >= 1:
-                # Записываем в первую ячейку после top
-                it1 = self.tbl.item(r0 + 1, col)
-                if it1:
-                    it1.setData(BookingBlockDelegate.ROLE_LINE2, line2)
-            elif span == 0 and it0:
-                # Однослотовая бронь — пишем обе строки в top
-                it0.setText(f"{tenant_name}\n{line2}" if line2 else tenant_name)
+        px = 7
+        bw = fm.horizontalAdvance(tag) + px * 2
+        bh = fm.height() + 4
+        bx = r.right() - 2 - bw - 6
+        by = r.top() + 6
 
-        self.tbl.viewport().update()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(badge)
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 5, 5)
+
+        painter.setPen(QColor(255, 255, 255, 245))
+        painter.drawText(QRectF(bx, by, bw, bh),
+                         Qt.AlignmentFlag.AlignCenter, tag)
+
+        # ── Имя ──
+        nl = r.left() + 10
+        nw = bx - 8 - nl
+        if nw < 20:
+            return
+
+        fn = QFont(self._bf)
+        fn.setBold(True)
+        painter.setFont(fn)
+        fmn = painter.fontMetrics()
+
+        painter.setPen(QColor(255, 255, 255, 235))
+        el = fmn.elidedText(name, Qt.TextElideMode.ElideRight, int(nw))
+        painter.drawText(
+            QRectF(nl, by, nw, bh),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            el)
+
+    def _draw_line2(self, painter, text, r):
+        """Рисует вторую строку (событие/время) в ячейке."""
+        fs = QFont(self._bf)
+        fs.setBold(False)
+        fs.setPointSizeF(max(self._bf.pointSizeF() - 0.5, 8.5))
+        painter.setFont(fs)
+
+        painter.setPen(QColor(255, 255, 255, 160))
+        fms = painter.fontMetrics()
+        ew = r.width() - 20
+        el = fms.elidedText(text, Qt.TextElideMode.ElideRight, int(ew))
+        painter.drawText(
+            QRectF(r.left() + 10, r.top() + 2, ew, r.height() - 4),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            el)
+
+    def sizeHint(self, option, index):
+        return super().sizeHint(option, index)
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
@@ -803,7 +885,6 @@ class SchedulePage(QWidget):
     def _reload_grid(self):
         self.meta_row.setVisible(False)
 
-        # Очистка
         for r in range(self.tbl.rowCount()):
             for c in range(1, self.tbl.columnCount()):
                 it = self.tbl.item(r, c)
@@ -814,6 +895,7 @@ class SchedulePage(QWidget):
                 it.setData(Qt.ItemDataRole.UserRole, None)
                 it.setData(BookingBlockDelegate.ROLE_PART, None)
                 it.setData(BookingBlockDelegate.ROLE_ROWS, None)
+                it.setData(BookingBlockDelegate.ROLE_LINE2, None)
 
         if not self._resources:
             return
@@ -835,11 +917,11 @@ class SchedulePage(QWidget):
         unit_col: Dict[int, int] = {}
         venue_fallback_col: Dict[int, int] = {}
         for i, rsrc in enumerate(self._resources):
-            col = i + 1
+            col_idx = i + 1
             if rsrc.venue_unit_id is not None:
-                unit_col[int(rsrc.venue_unit_id)] = col
+                unit_col[int(rsrc.venue_unit_id)] = col_idx
             else:
-                venue_fallback_col[int(rsrc.venue_id)] = col
+                venue_fallback_col[int(rsrc.venue_id)] = col_idx
 
         day_start = datetime.combine(day, self._work_start, tzinfo=self.TZ)
         day_end   = datetime.combine(day, self._work_end,   tzinfo=self.TZ)
@@ -885,14 +967,30 @@ class SchedulePage(QWidget):
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
 
+            # Имя арендатора — в top
+            kind = (getattr(b, "kind", "") or "").upper()
+            tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+            if kind == "GZ":
+                tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
+            title = (getattr(b, "title", "") or "").strip()
+
             it0 = self.tbl.item(r0, col)
             if it0:
-                kind = (getattr(b, "kind", "") or "").upper()
-                tenant_name = (getattr(b, "tenant_name", "") or "").strip()
-                if kind == "GZ":
-                    tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
-                title = (getattr(b, "title", "") or "").strip()
-                it0.setText(f"{tenant_name}\n{title}" if title else tenant_name)
+                it0.setText(tenant_name)
+
+            # Вторая строка — в ячейку r0+1 (если блок > 1 слота)
+            line2 = title if title else ""
+            if not line2:
+                line2 = f"{b.starts_at:%H:%M} – {b.ends_at:%H:%M}"
+
+            if span >= 1:
+                # Записываем в первую ячейку после top
+                it1 = self.tbl.item(r0 + 1, col)
+                if it1:
+                    it1.setData(BookingBlockDelegate.ROLE_LINE2, line2)
+            elif span == 0 and it0:
+                # Однослотовая бронь — пишем обе строки в top
+                it0.setText(f"{tenant_name}\n{line2}" if line2 else tenant_name)
 
         self.tbl.viewport().update()
 
