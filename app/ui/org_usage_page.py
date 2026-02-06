@@ -57,9 +57,9 @@ class UsageRowDelegate(QStyledItemDelegate):
     - Колонка "Загрузка" (index.column()==2): рисуем pill progress сами (без QProgressBar).
     """
 
-    TOTAL_BG     = QColor(40, 42, 80)
-    TOTAL_BG_SEL = QColor(55, 58, 110)
-    TOTAL_BORDER = QColor(99, 102, 241, 60)
+    TOTAL_BG     = QColor(26, 30, 58)        # темнее индиго
+    TOTAL_BG_SEL = QColor(34, 40, 78)        # чуть светлее при selection
+    TOTAL_BORDER = QColor(99, 102, 241, 35)  # менее заметная линия
     TOTAL_FG     = QColor(255, 255, 255, 235)
 
     BAR_BG   = QColor(255, 255, 255, 18)
