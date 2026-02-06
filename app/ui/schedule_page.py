@@ -105,27 +105,17 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
     ROLE_PART  = Qt.ItemDataRole.UserRole + 1
     ROLE_ROWS  = Qt.ItemDataRole.UserRole + 2
-    ROLE_LINE2 = Qt.ItemDataRole.UserRole + 3  # текст второй строки
+    ROLE_LINE2 = Qt.ItemDataRole.UserRole + 3
 
-    PD_FILL    = QColor(30, 58, 95)
-    PD_BORDER  = QColor(50, 90, 145)
-    PD_BADGE   = QColor(59, 130, 246)
+    # --- палитра как в аналитике ---
+    _PD_BASE = QColor(96, 165, 250)     # blue-400
+    _GZ_BASE = QColor(245, 158, 11)     # amber-500
+    _CANC_BASE = QColor(148, 163, 184)  # slate-400
 
-    GZ_FILL    = QColor(80, 56, 20)
-    GZ_BORDER  = QColor(130, 95, 25)
-    GZ_BADGE   = QColor(217, 119, 6)
-
-    GZF_FILL   = QColor(95, 78, 30)
-    GZF_BORDER = QColor(160, 135, 45)
-    GZF_BADGE  = QColor(251, 191, 36)
-
-    CAN_FILL   = QColor(40, 45, 55)
-    CAN_BORDER = QColor(75, 85, 100)
-    CAN_BADGE  = QColor(100, 116, 139)
-
-    BG         = QColor(11, 18, 32)
-    EMPTY      = QColor(15, 20, 32)
-    GRID       = QColor(255, 255, 255, 12)
+    # фон/пустые слоты/сетка — оставляем как есть
+    BG    = QColor(11, 18, 32)
+    EMPTY = QColor(15, 20, 32)
+    GRID  = QColor(255, 255, 255, 12)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -137,23 +127,72 @@ class BookingBlockDelegate(QStyledItemDelegate):
         while w is not None:
             if isinstance(w, SchedulePage):
                 return w
-            w = getattr(w, 'parent', lambda: None)()
+            w = getattr(w, "parent", lambda: None)()
         return None
 
-    def _pal(self, bk):
+    @staticmethod
+    def _lighten(color: QColor, steps: int = 2, amount: int = 120) -> QColor:
+        c = QColor(color)
+        for _ in range(max(0, int(steps))):
+            c = c.lighter(int(amount))
+        return c
+
+    @staticmethod
+    def _fill_from_base(base: QColor) -> QColor:
+        # чтобы было «дороже» на тёмном фоне: делаем базовый цвет темнее и непрозрачным
+        # (иначе будет нечитабельно и начнутся “полосы” при наложениях)
+        c = QColor(base)
+        c = c.darker(180)   # сильнее в тёмную сторону
+        c.setAlpha(255)
+        return c
+
+    @staticmethod
+    def _border_from_base(base: QColor) -> QColor:
+        c = QColor(base)
+        c = c.darker(120)
+        c.setAlpha(255)
+        return c
+
+    def _pal(self, bk) -> tuple[QColor, QColor, QColor]:
+        """
+        -> (fill, border, badge)
+        fill  — заливка блока (тёмная, непрозрачная)
+        border— контур/разделители
+        badge — маленький бейдж типа справа (яркий, как в аналитике)
+        """
         if not bk:
             return self.BG, self.BG, self.BG
-        s = (getattr(bk, "status", "") or "").lower()
-        if s == "cancelled":
-            return self.CAN_FILL, self.CAN_BORDER, self.CAN_BADGE
-        k = (getattr(bk, "kind", "") or getattr(bk, "activity", "") or "").upper()
-        if k == "GZ":
+
+        status = (getattr(bk, "status", "") or "").lower()
+        if status == "cancelled":
+            base = QColor(self._CANC_BASE)
+            return (self._fill_from_base(base),
+                    self._border_from_base(base),
+                    base)
+
+        kind = (getattr(bk, "kind", "") or getattr(bk, "activity", "") or "").upper()
+
+        if kind == "PD":
+            base = QColor(self._PD_BASE)
+            return (self._fill_from_base(base),
+                    self._border_from_base(base),
+                    base)
+
+        if kind == "GZ":
+            base = QColor(self._GZ_BASE)
             gid = getattr(bk, "gz_group_id", None)
             pg = self._page()
             if pg and gid is not None and pg._gz_group_is_free.get(int(gid), False):
-                return self.GZF_FILL, self.GZF_BORDER, self.GZF_BADGE
-            return self.GZ_FILL, self.GZ_BORDER, self.GZ_BADGE
-        return self.PD_FILL, self.PD_BORDER, self.PD_BADGE
+                base = self._lighten(base, steps=2, amount=120)  # как в аналитике
+            return (self._fill_from_base(base),
+                    self._border_from_base(base),
+                    base)
+
+        # fallback
+        base = QColor("#e5e7eb")
+        return (self._fill_from_base(base),
+                self._border_from_base(base),
+                base)
 
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
