@@ -101,37 +101,43 @@ from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
 class BookingBlockDelegate(QStyledItemDelegate):
+    """
+    v7 — максимально простой подход.
+    Каждая ячейка блока просто заливается непрозрачным цветом на ВЕСЬ rect.
+    Никаких зазоров, никаких adjusted, никаких overlap.
+    Скругление ТОЛЬКО у top (сверху) и bottom (снизу) через clip mask.
+    """
 
     ROLE_PART = Qt.ItemDataRole.UserRole + 1
     ROLE_ROWS = Qt.ItemDataRole.UserRole + 2
 
-    # ── Непрозрачные цвета заливки ──
-    PD_FILL       = QColor(30, 58, 95)       # тёмно-синий
-    PD_BORDER     = QColor(55, 100, 160)
-    PD_BADGE      = QColor(59, 130, 246)
+    # Непрозрачная палитра
+    PD_FILL    = QColor(30, 58, 95)
+    PD_BORDER  = QColor(50, 90, 145)
+    PD_BADGE   = QColor(59, 130, 246)
 
-    GZ_FILL       = QColor(80, 56, 20)       # тёмно-янтарный
-    GZ_BORDER     = QColor(140, 100, 30)
-    GZ_BADGE      = QColor(217, 119, 6)
+    GZ_FILL    = QColor(80, 56, 20)
+    GZ_BORDER  = QColor(130, 95, 25)
+    GZ_BADGE   = QColor(217, 119, 6)
 
-    GZ_FREE_FILL  = QColor(95, 75, 30)       # светлее обычного GZ
-    GZ_FREE_BORDER= QColor(170, 140, 50)
-    GZ_FREE_BADGE = QColor(251, 191, 36)
+    GZF_FILL   = QColor(95, 78, 30)
+    GZF_BORDER = QColor(160, 135, 45)
+    GZF_BADGE  = QColor(251, 191, 36)
 
-    CANC_FILL     = QColor(40, 45, 55)       # серый
-    CANC_BORDER   = QColor(80, 90, 105)
-    CANC_BADGE    = QColor(100, 116, 139)
+    CAN_FILL   = QColor(40, 45, 55)
+    CAN_BORDER = QColor(75, 85, 100)
+    CAN_BADGE  = QColor(100, 116, 139)
 
-    BG_OPAQUE  = QColor(11, 18, 32)
-    CELL_EMPTY = QColor(15, 20, 32)
-    GRID_COLOR = QColor(255, 255, 255, 12)
+    BG         = QColor(11, 18, 32)
+    EMPTY      = QColor(15, 20, 32)
+    GRID       = QColor(255, 255, 255, 12)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._base_font = QFont()
-        self._base_font.setPointSizeF(max(self._base_font.pointSizeF(), 9.5))
+        self._bf = QFont()
+        self._bf.setPointSizeF(max(self._bf.pointSizeF(), 9.5))
 
-    def _find_page(self):
+    def _page(self):
         w = self.parent()
         while w is not None:
             if isinstance(w, SchedulePage):
@@ -139,272 +145,178 @@ class BookingBlockDelegate(QStyledItemDelegate):
             w = getattr(w, 'parent', lambda: None)()
         return None
 
-    def _palette(self, booking):
-        """-> (fill, border, badge)"""
-        if not booking:
-            return self.BG_OPAQUE, self.BG_OPAQUE, self.BG_OPAQUE
-        st = (getattr(booking, "status", "") or "").lower()
-        if st == "cancelled":
-            return QColor(self.CANC_FILL), QColor(self.CANC_BORDER), QColor(self.CANC_BADGE)
-        k = (getattr(booking, "kind", "") or
-             getattr(booking, "activity", "") or "").upper()
+    def _pal(self, bk):
+        if not bk:
+            return self.BG, self.BG, self.BG
+        s = (getattr(bk, "status", "") or "").lower()
+        if s == "cancelled":
+            return self.CAN_FILL, self.CAN_BORDER, self.CAN_BADGE
+        k = (getattr(bk, "kind", "") or getattr(bk, "activity", "") or "").upper()
         if k == "GZ":
-            gid = getattr(booking, "gz_group_id", None)
-            page = self._find_page()
-            if page and gid is not None and page._gz_group_is_free.get(int(gid), False):
-                return QColor(self.GZ_FREE_FILL), QColor(self.GZ_FREE_BORDER), QColor(self.GZ_FREE_BADGE)
-            return QColor(self.GZ_FILL), QColor(self.GZ_BORDER), QColor(self.GZ_BADGE)
-        return QColor(self.PD_FILL), QColor(self.PD_BORDER), QColor(self.PD_BADGE)
+            gid = getattr(bk, "gz_group_id", None)
+            pg = self._page()
+            if pg and gid is not None and pg._gz_group_is_free.get(int(gid), False):
+                return self.GZF_FILL, self.GZF_BORDER, self.GZF_BADGE
+            return self.GZ_FILL, self.GZ_BORDER, self.GZ_BADGE
+        return self.PD_FILL, self.PD_BORDER, self.PD_BADGE
 
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
             super().paint(painter, option, index)
             return
 
-        rect = option.rect
+        r    = option.rect
         bk   = index.data(Qt.ItemDataRole.UserRole)
         part = index.data(self.ROLE_PART)
 
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(r)
+        painter.fillRect(r, self.BG)
 
-        # Непрозрачная подложка
-        painter.fillRect(rect, self.BG_OPAQUE)
-
+        # ── Пустая ячейка ──
         if not bk:
-            painter.fillRect(rect, self.CELL_EMPTY)
+            painter.fillRect(r, self.EMPTY)
             if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(rect, QColor(99, 102, 241, 45))
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                painter.fillRect(r, QColor(99, 102, 241, 45))
                 painter.setPen(QPen(QColor(99, 102, 241, 120), 1))
-                painter.drawRect(rect.adjusted(0, 0, -1, -1))
+                painter.drawRect(r.adjusted(0, 0, -1, -1))
             elif option.state & QStyle.StateFlag.State_MouseOver:
-                painter.fillRect(rect, QColor(255, 255, 255, 12))
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            painter.setPen(QPen(self.GRID_COLOR, 1))
-            painter.drawLine(rect.left(), rect.bottom(),
-                             rect.right(), rect.bottom())
-            painter.drawLine(rect.right(), rect.top(),
-                             rect.right(), rect.bottom())
+                painter.fillRect(r, QColor(255, 255, 255, 12))
+            painter.setPen(QPen(self.GRID, 1))
+            painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+            painter.drawLine(r.right(), r.top(), r.right(), r.bottom())
             painter.restore()
             return
 
-        fill, border_clr, badge_clr = self._palette(bk)
-        R  = 8.0
-        MX = 2
+        fill, bdr, badge = self._pal(bk)
 
-        # Вычисляем rf — rect заливки.
-        # Ключ: middle занимает ВЕСЬ rect без зазоров.
-        # top/bottom — крошечный отступ только с внешней стороны.
-        x = rect.left() + MX
-        w = rect.width() - MX * 2
+        # ── Заливка: весь rect, без зазоров ──
+        # Рисуем просто fillRect на весь rect — это ГАРАНТИРУЕТ отсутствие полос
+        painter.fillRect(r, fill)
 
-        if part == "top":
-            rf = QRectF(x, rect.top() + 1, w, rect.height() - 1)
-        elif part == "bottom":
-            rf = QRectF(x, rect.top(), w, rect.height() - 1)
-        elif part == "middle":
-            rf = QRectF(x, rect.top(), w, rect.height())
-        else:
-            rf = QRectF(x, rect.top() + 1, w, rect.height() - 2)
+        # ── Боковые рамки (всегда) ──
+        painter.setPen(QPen(bdr, 1))
+        mx = 1
+        painter.drawLine(r.left() + mx, r.top(), r.left() + mx, r.bottom())
+        painter.drawLine(r.right() - mx, r.top(), r.right() - mx, r.bottom())
 
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # Заливка — непрозрачная, рисуем прямоугольник для middle
-        # чтобы не было зазоров
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-
-        if part == "middle":
-            # Просто прямоугольник — никаких скруглений, никаких зазоров
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            painter.drawRect(rf.toRect())
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        else:
-            painter.drawPath(self._shape(rf, part, R))
-
-        # Рамка — только top/bottom/single (не middle, чтобы не было полос)
-        if part != "middle":
-            painter.setPen(QPen(border_clr, 1.0))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(self._shape(
-                rf.adjusted(.5, .5, -.5, -.5), part, R))
-        else:
-            # Для middle — только вертикальные линии рамки
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            painter.setPen(QPen(border_clr, 1))
-            painter.drawLine(int(rf.left()), int(rf.top()),
-                             int(rf.left()), int(rf.bottom()))
-            painter.drawLine(int(rf.right()), int(rf.top()),
-                             int(rf.right()), int(rf.bottom()))
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        # Selection
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.setBrush(QColor(255, 255, 255, 20))
-            painter.setPen(QPen(QColor(255, 255, 255, 80), 1.5))
-            if part == "middle":
-                painter.drawRect(rf)
-            else:
-                painter.drawPath(self._shape(
-                    rf.adjusted(.5, .5, -.5, -.5), part, R))
-
-        # Контент
+        # ── Горизонтальные рамки (только top сверху, bottom снизу) ──
         if part in ("top", None):
-            full_h = self._full_block_height(index, rect)
-            content_rf = QRectF(rf.left(), rf.top(), rf.width(),
-                                max(full_h - 2, rf.height()))
-            self._draw_content(painter, bk, index, content_rf, badge_clr, fill)
+            painter.drawLine(r.left() + mx, r.top(), r.right() - mx, r.top())
+        if part in ("bottom", None):
+            painter.drawLine(r.left() + mx, r.bottom(), r.right() - mx, r.bottom())
+
+        # ── Selection ──
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(r, QColor(255, 255, 255, 18))
+
+        # ── Контент — только top / single ──
+        if part in ("top", None):
+            fh = self._block_h(index, r)
+            self._labels(painter, bk, index,
+                         QRectF(r.left() + 2, r.top(), r.width() - 4, fh),
+                         badge)
 
         painter.restore()
 
-    def _full_block_height(self, index, top_rect) -> float:
-        rows_data = index.data(self.ROLE_ROWS)
-        if not rows_data:
+    def _block_h(self, index, top_rect) -> float:
+        rd = index.data(self.ROLE_ROWS)
+        if not rd:
             return float(top_rect.height())
-        r0, r1 = rows_data
-        table = self.parent()
-        if table is None:
+        r0, r1 = rd
+        t = self.parent()
+        if t is None:
             return float(top_rect.height())
-        total = sum(table.rowHeight(r) for r in range(r0, r1 + 1))
-        return float(total)
+        return float(sum(t.rowHeight(i) for i in range(r0, r1 + 1)))
 
-    @staticmethod
-    def _shape(rf: QRectF, part: str, R: float) -> QPainterPath:
-        p = QPainterPath()
-        if part == "middle":
-            p.addRect(rf)
-        elif part == "top":
-            p.moveTo(rf.left(), rf.bottom())
-            p.lineTo(rf.left(), rf.top() + R)
-            p.arcTo(rf.left(), rf.top(), R * 2, R * 2, 180, -90)
-            p.lineTo(rf.right() - R, rf.top())
-            p.arcTo(rf.right() - R * 2, rf.top(), R * 2, R * 2, 90, -90)
-            p.lineTo(rf.right(), rf.bottom())
-            p.closeSubpath()
-        elif part == "bottom":
-            p.moveTo(rf.left(), rf.top())
-            p.lineTo(rf.left(), rf.bottom() - R)
-            p.arcTo(rf.left(), rf.bottom() - R * 2, R * 2, R * 2, 180, 90)
-            p.lineTo(rf.right() - R, rf.bottom())
-            p.arcTo(rf.right() - R * 2, rf.bottom() - R * 2, R * 2, R * 2, 270, 90)
-            p.lineTo(rf.right(), rf.top())
-            p.closeSubpath()
-        else:
-            p.addRoundedRect(rf, R, R)
-        return p
-
-    def _draw_content(self, painter: QPainter, bk, index,
-                      rf: QRectF, badge_clr: QColor, fill_clr: QColor):
+    def _labels(self, painter: QPainter, bk, index,
+                rf: QRectF, badge: QColor):
         kind   = (getattr(bk, "kind", "") or
                   getattr(bk, "activity", "") or "").upper()
         status = (getattr(bk, "status", "") or "").lower()
 
         raw = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        lines = [l.strip() for l in raw.split("\n") if l.strip()]
-        tenant_text = lines[0] if lines else ""
-        event_text  = lines[1] if len(lines) > 1 else ""
+        parts = [l.strip() for l in raw.split("\n") if l.strip()]
+        name  = parts[0] if parts else ""
+        event = parts[1] if len(parts) > 1 else ""
 
-        # Если нет event_text, показываем время как fallback
-        if not event_text:
+        # fallback: показываем время
+        if not event:
             sa = getattr(bk, "starts_at", None)
             ea = getattr(bk, "ends_at", None)
             if sa and ea:
-                event_text = f"{sa:%H:%M} – {ea:%H:%M}"
+                event = f"{sa:%H:%M} – {ea:%H:%M}"
 
-        # ── Верхний бейдж-бар ──
-        # Полоска-бар сверху блока: чуть темнее/светлее основного цвета
-        bar_h = 28
-        bar_rect = QRectF(rf.left(), rf.top(), rf.width(), bar_h)
-
-        bar_bg = QColor(fill_clr)
-        # Делаем бар чуть светлее
-        bar_bg = QColor(
-            min(255, bar_bg.red() + 15),
-            min(255, bar_bg.green() + 15),
-            min(255, bar_bg.blue() + 15),
-        )
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(bar_bg)
-        # Скруглённые углы сверху
-        bar_path = QPainterPath()
-        R = 7.0
-        bar_path.moveTo(bar_rect.left(), bar_rect.bottom())
-        bar_path.lineTo(bar_rect.left(), bar_rect.top() + R)
-        bar_path.arcTo(bar_rect.left(), bar_rect.top(), R * 2, R * 2, 180, -90)
-        bar_path.lineTo(bar_rect.right() - R, bar_rect.top())
-        bar_path.arcTo(bar_rect.right() - R * 2, bar_rect.top(), R * 2, R * 2, 90, -90)
-        bar_path.lineTo(bar_rect.right(), bar_rect.bottom())
-        bar_path.closeSubpath()
-        painter.drawPath(bar_path)
-
-        # ── Бейдж типа (в баре, справа) ──
+        # ── Бейдж типа (справа, вверху) ──
         tag = ("ОТМ" if status == "cancelled"
                else "ПД" if kind == "PD"
                else "ГЗ" if kind == "GZ"
                else kind or "—")
 
-        fb = QFont(self._base_font)
+        fb = QFont(self._bf)
         fb.setBold(True)
-        fb.setPointSizeF(self._base_font.pointSizeF() - 0.5)
         painter.setFont(fb)
         fm = painter.fontMetrics()
 
         px = 7
-        tbw = fm.horizontalAdvance(tag) + px * 2
-        tbh = fm.height() + 4
-        tbx = bar_rect.right() - tbw - 6
-        tby = bar_rect.top() + (bar_h - tbh) / 2.0
+        bw = fm.horizontalAdvance(tag) + px * 2
+        bh = fm.height() + 4
+        bx = rf.right() - bw - 6
+        by = rf.top() + 6
 
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(badge_clr)
-        painter.drawRoundedRect(QRectF(tbx, tby, tbw, tbh), 5, 5)
+        painter.setBrush(badge)
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 5, 5)
+
         painter.setPen(QColor(255, 255, 255, 245))
-        painter.drawText(QRectF(tbx, tby, tbw, tbh),
+        painter.drawText(QRectF(bx, by, bw, bh),
                          Qt.AlignmentFlag.AlignCenter, tag)
 
-        # ── Имя арендатора (в баре, слева) ──
-        name_left = bar_rect.left() + 10
-        name_w = tbx - 8 - name_left
-        if name_w > 20:
-            fn = QFont(self._base_font)
-            fn.setBold(True)
-            painter.setFont(fn)
-            fmn = painter.fontMetrics()
-            painter.setPen(QColor(255, 255, 255, 240))
-            el = fmn.elidedText(tenant_text,
-                                Qt.TextElideMode.ElideRight, int(name_w))
-            painter.drawText(
-                QRectF(name_left, bar_rect.top(), name_w, bar_h),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                el)
+        # ── Имя (слева, вверху) ──
+        nl = rf.left() + 8
+        nw = bx - 8 - nl
+        if nw < 20:
+            return
 
-        # ── Текст события / время (под баром) ──
-        if event_text:
-            txt_y = bar_rect.bottom() + 4
-            txt_w = rf.width() - 20
+        fn = QFont(self._bf)
+        fn.setBold(True)
+        painter.setFont(fn)
+        fmn = painter.fontMetrics()
 
-            if txt_y + 20 > rf.bottom() - 2 or txt_w < 30:
-                return
+        painter.setPen(QColor(255, 255, 255, 235))
+        el = fmn.elidedText(name, Qt.TextElideMode.ElideRight, int(nw))
+        painter.drawText(
+            QRectF(nl, by, nw, bh),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            el)
 
-            fs = QFont(self._base_font)
-            fs.setBold(False)
-            fs.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 8.0))
-            painter.setFont(fs)
-            fms = painter.fontMetrics()
+        # ── Событие / время (вторая строка) ──
+        if not event:
+            return
 
-            painter.setPen(QColor(255, 255, 255, 160))
-            el_ev = fms.elidedText(event_text,
-                                   Qt.TextElideMode.ElideRight, int(txt_w))
-            painter.drawText(
-                QRectF(rf.left() + 10, txt_y, txt_w, fms.height() + 4),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                el_ev)
+        ey = by + bh + 4
+        ew = rf.width() - 16
+
+        fs = QFont(self._bf)
+        fs.setBold(False)
+        fs.setPointSizeF(max(self._bf.pointSizeF() - 1.0, 8.0))
+        painter.setFont(fs)
+        fms = painter.fontMetrics()
+
+        # проверяем по ПОЛНОЙ высоте блока
+        if ey + fms.height() + 4 > rf.bottom() - 2 or ew < 30:
+            return
+
+        painter.setPen(QColor(255, 255, 255, 150))
+        el_ev = fms.elidedText(event, Qt.TextElideMode.ElideRight, int(ew))
+        painter.drawText(
+            QRectF(rf.left() + 8, ey, ew, fms.height() + 4),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            el_ev)
 
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
-
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
