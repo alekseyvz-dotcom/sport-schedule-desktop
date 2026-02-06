@@ -101,30 +101,47 @@ from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
 class BookingBlockDelegate(QStyledItemDelegate):
+    """
+    Делегат для отрисовки блоков бронирований в сетке расписания.
+    v3 — без полос, без артефактов, с суб-бейджем события.
+    """
     ROLE_PART = Qt.ItemDataRole.UserRole + 1
 
-    # Базовые цвета — мягкие, приглушённые
-    PD_BASE   = QColor(96, 165, 250, 140)
-    GZ_BASE   = QColor(245, 158, 11, 140)
-    GZ_FREE   = QColor(253, 210, 110, 110)
-    CANC_BASE = QColor(148, 163, 184, 100)
+    # ── Цвета заливки блока (полупрозрачные, мягкие) ──
+    PD_BASE    = QColor(96, 165, 250, 140)
+    GZ_BASE    = QColor(245, 158, 11, 140)
+    GZ_FREE_BG = QColor(253, 210, 110, 110)
+    CANC_BASE  = QColor(148, 163, 184, 100)
 
-    PD_BADGE   = QColor(59, 130, 246, 220)
-    GZ_BADGE   = QColor(217, 119, 6, 220)
+    # ── Цвета бейджей (чуть ярче) ──
+    PD_BADGE      = QColor(59, 130, 246, 220)
+    GZ_BADGE      = QColor(217, 119, 6, 220)
     GZ_FREE_BADGE = QColor(251, 191, 36, 200)
-    CANC_BADGE = QColor(100, 116, 139, 200)
+    CANC_BADGE    = QColor(100, 116, 139, 200)
 
-    # Фон пустой ячейки (тёмный, под общий фон)
-    CELL_BG   = QColor(11, 18, 32, 60)
-    GRID_PEN  = QPen(QColor(255, 255, 255, 14), 1)
+    # ── Общие ──
+    BG_OPAQUE = QColor(11, 18, 32, 255)   # непрозрачная подложка
+    CELL_BG   = QColor(11, 18, 32, 60)    # фон пустой ячейки
+    GRID_CLR  = QColor(255, 255, 255, 14)  # сетка
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Запоминаем базовый шрифт при создании
         self._base_font = QFont()
         self._base_font.setPointSizeF(max(self._base_font.pointSizeF(), 9.5))
 
-    def _colors_for(self, booking) -> tuple[QColor, QColor]:
+    # ── Выбор цветов ──────────────────────────────────────
+
+    def _find_schedule_page(self):
+        """Поднимаемся по дереву виджетов до SchedulePage."""
+        w = self.parent()
+        while w is not None:
+            if isinstance(w, SchedulePage):
+                return w
+            w = w.parent() if hasattr(w, 'parent') and callable(w.parent) else None
+        return None
+
+    def _colors_for(self, booking) -> tuple:
+        """Возвращает (fill_color, badge_color)."""
         if not booking:
             return QColor(0, 0, 0, 0), QColor(0, 0, 0, 0)
 
@@ -132,235 +149,227 @@ class BookingBlockDelegate(QStyledItemDelegate):
         if status == "cancelled":
             return QColor(self.CANC_BASE), QColor(self.CANC_BADGE)
 
-        kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
+        kind = (getattr(booking, "kind", "") or
+                getattr(booking, "activity", "") or "").upper()
 
         if kind == "GZ":
             gz_group_id = getattr(booking, "gz_group_id", None)
             is_free = False
-            parent = self.parent()
-            if parent is not None:
-                page = parent.parent()
-                while page is not None and not isinstance(page, SchedulePage):
-                    page = page.parent()
-                if page is not None and hasattr(page, '_gz_group_is_free'):
-                    if gz_group_id is not None:
-                        is_free = page._gz_group_is_free.get(int(gz_group_id), False)
+            page = self._find_schedule_page()
+            if page and gz_group_id is not None:
+                is_free = page._gz_group_is_free.get(int(gz_group_id), False)
             if is_free:
-                return QColor(self.GZ_FREE), QColor(self.GZ_FREE_BADGE)
+                return QColor(self.GZ_FREE_BG), QColor(self.GZ_FREE_BADGE)
             return QColor(self.GZ_BASE), QColor(self.GZ_BADGE)
 
         return QColor(self.PD_BASE), QColor(self.PD_BADGE)
 
-    def _build_block_path(self, rf: QRectF, part: str, radius: float) -> QPainterPath:
-        path = QPainterPath()
-        if part == "middle":
-            path.addRect(rf)
-        elif part == "top":
-            path.moveTo(rf.bottomLeft())
-            path.lineTo(rf.left(), rf.top() + radius)
-            path.arcTo(QRectF(rf.left(), rf.top(), radius * 2, radius * 2), 180, -90)
-            path.lineTo(rf.right() - radius, rf.top())
-            path.arcTo(QRectF(rf.right() - radius * 2, rf.top(), radius * 2, radius * 2), 90, -90)
-            path.lineTo(rf.right(), rf.bottom())
-            path.closeSubpath()
-        elif part == "bottom":
-            path.moveTo(rf.topLeft())
-            path.lineTo(rf.left(), rf.bottom() - radius)
-            path.arcTo(QRectF(rf.left(), rf.bottom() - radius * 2, radius * 2, radius * 2), 180, 90)
-            path.lineTo(rf.right() - radius, rf.bottom())
-            path.arcTo(QRectF(rf.right() - radius * 2, rf.bottom() - radius * 2, radius * 2, radius * 2), 270, 90)
-            path.lineTo(rf.right(), rf.top())
-            path.closeSubpath()
-        else:
-            path.addRoundedRect(rf, radius, radius)
-        return path
+    # ── Геометрия блока ───────────────────────────────────
 
-    def _calc_rf(self, rect, part: str, margin_h: int) -> QRectF:
+    @staticmethod
+    def _block_path(rf: QRectF, part: str, radius: float) -> QPainterPath:
+        p = QPainterPath()
         if part == "middle":
-            return QRectF(rect.left() + margin_h, rect.top(),
-                          rect.width() - margin_h * 2, rect.height())
+            p.addRect(rf)
         elif part == "top":
-            return QRectF(rect.left() + margin_h, rect.top() + 1,
-                          rect.width() - margin_h * 2, rect.height() - 1)
+            p.moveTo(rf.bottomLeft())
+            p.lineTo(rf.left(), rf.top() + radius)
+            p.arcTo(rf.left(), rf.top(), radius * 2, radius * 2, 180, -90)
+            p.lineTo(rf.right() - radius, rf.top())
+            p.arcTo(rf.right() - radius * 2, rf.top(), radius * 2, radius * 2, 90, -90)
+            p.lineTo(rf.right(), rf.bottom())
+            p.closeSubpath()
         elif part == "bottom":
-            return QRectF(rect.left() + margin_h, rect.top(),
-                          rect.width() - margin_h * 2, rect.height() - 1)
+            p.moveTo(rf.topLeft())
+            p.lineTo(rf.left(), rf.bottom() - radius)
+            p.arcTo(rf.left(), rf.bottom() - radius * 2, radius * 2, radius * 2, 180, 90)
+            p.lineTo(rf.right() - radius, rf.bottom())
+            p.arcTo(rf.right() - radius * 2, rf.bottom() - radius * 2, radius * 2, radius * 2, 270, 90)
+            p.lineTo(rf.right(), rf.top())
+            p.closeSubpath()
         else:
-            return QRectF(rect.left() + margin_h, rect.top() + 1,
-                          rect.width() - margin_h * 2, rect.height() - 2)
+            p.addRoundedRect(rf, radius, radius)
+        return p
+
+    @staticmethod
+    def _content_rect(rect, part: str, mx: int) -> QRectF:
+        """Прямоугольник заливки внутри ячейки (без зазоров между middle-ами)."""
+        x = rect.left() + mx
+        w = rect.width() - mx * 2
+        if part == "top":
+            return QRectF(x, rect.top() + 1, w, rect.height() - 1)
+        if part == "bottom":
+            return QRectF(x, rect.top(), w, rect.height() - 1)
+        if part == "middle":
+            return QRectF(x, rect.top(), w, rect.height())
+        # single
+        return QRectF(x, rect.top() + 1, w, rect.height() - 2)
+
+    # ── Главный paint ─────────────────────────────────────
 
     def paint(self, painter: QPainter, option, index):
+        # Колонка «Время» — стандартная отрисовка
         if index.column() == 0:
             super().paint(painter, option, index)
             return
 
         rect = option.rect
         booking = index.data(Qt.ItemDataRole.UserRole)
-        part = index.data(self.ROLE_PART)
+        part = index.data(self.ROLE_PART) or None
 
         painter.save()
         painter.setClipRect(rect)
 
-        # ═══════════════════════════════════════════
-        # ВАЖНО: сначала закрашиваем ВЕСЬ rect непрозрачным фоном,
-        # чтобы ничего из-под QSS/selection не просвечивало
-        # ═══════════════════════════════════════════
-        painter.fillRect(rect, QColor(11, 18, 32, 255))
+        # 1) Непрозрачная подложка — убиваем ВСЁ из QSS
+        painter.fillRect(rect, self.BG_OPAQUE)
 
-        # ── Пустая ячейка ──
+        # 2) Пустая ячейка
         if not booking:
             painter.fillRect(rect, self.CELL_BG)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            painter.setPen(self.GRID_PEN)
+            pen = QPen(self.GRID_CLR, 1)
+            painter.setPen(pen)
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
             painter.drawLine(rect.topRight(), rect.bottomRight())
             painter.restore()
             return
 
-        # ── Бронь ──
-        fill_color, badge_color = self._colors_for(booking)
+        # 3) Бронь — заливка
+        fill, badge_clr = self._colors_for(booking)
         radius = 10.0
-        margin_h = 2
+        mx = 2
 
-        rf = self._calc_rf(rect, part, margin_h)
+        rf = self._content_rect(rect, part, mx)
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill_color)
+        painter.setBrush(fill)
+        painter.drawPath(self._block_path(rf, part, radius))
 
-        block_path = self._build_block_path(rf, part, radius)
-        painter.drawPath(block_path)
-
-        # ── Тонкая рамка ──
-        border_color = QColor(fill_color)
-        border_color.setAlpha(min(255, fill_color.alpha() + 60))
-        painter.setPen(QPen(border_color, 1.0))
+        # 4) Рамка
+        bc = QColor(fill)
+        bc.setAlpha(min(255, fill.alpha() + 60))
+        painter.setPen(QPen(bc, 1.0))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-
         if part == "middle":
             painter.drawLine(rf.topLeft(), rf.bottomLeft())
             painter.drawLine(rf.topRight(), rf.bottomRight())
         else:
-            border_path = self._build_block_path(
-                rf.adjusted(0.5, 0.5, -0.5, -0.5), part, radius)
-            painter.drawPath(border_path)
+            painter.drawPath(self._block_path(
+                rf.adjusted(0.5, 0.5, -0.5, -0.5), part, radius))
 
-        # ── Selection ──
+        # 5) Selection
         if option.state & QStyle.StateFlag.State_Selected:
             painter.setPen(QPen(QColor(255, 255, 255, 90), 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            sel_path = self._build_block_path(
-                rf.adjusted(0.5, 0.5, -0.5, -0.5), part, radius)
-            painter.drawPath(sel_path)
+            painter.drawPath(self._block_path(
+                rf.adjusted(0.5, 0.5, -0.5, -0.5), part, radius))
 
-        # ── Контент: только top / одиночная ──
+        # 6) Контент — только в верхней ячейке блока
         if part in ("top", None):
-            self._paint_content(painter, booking, index, rf, badge_color)
+            self._draw_content(painter, booking, index, rf, badge_clr)
 
         painter.restore()
 
-    def _paint_content(self, painter: QPainter, booking, index, rf: QRectF, badge_color: QColor):
+    # ── Контент (бейджи + текст) ──────────────────────────
+
+    def _draw_content(self, painter: QPainter, booking, index,
+                      rf: QRectF, badge_clr: QColor):
+
         kind = (getattr(booking, "kind", "") or
                 getattr(booking, "activity", "") or "").upper()
         status = (getattr(booking, "status", "") or "").lower()
 
-        text_full = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        lines = [l.strip() for l in text_full.split("\n") if l.strip()]
-        tenant_text = lines[0] if lines else ""
-        event_text = lines[1] if len(lines) > 1 else ""
+        raw = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        lines = [l.strip() for l in raw.split("\n") if l.strip()]
+        tenant = lines[0] if lines else ""
+        event = lines[1] if len(lines) > 1 else ""
 
-        # ── Бейдж типа (ПД / ГЗ / ОТМ) — правый верхний угол ──
-        kind_text = "ОТМ" if status == "cancelled" else (
-            "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
+        # ── 1. Бейдж типа (правый верхний угол) ──
+        kind_label = ("ОТМ" if status == "cancelled"
+                      else "ПД" if kind == "PD"
+                      else "ГЗ" if kind == "GZ"
+                      else kind or "—")
 
-        f_badge = QFont(self._base_font)
-        f_badge.setBold(True)
-        painter.setFont(f_badge)
+        fb = QFont(self._base_font)
+        fb.setBold(True)
+        painter.setFont(fb)
         fm = painter.fontMetrics()
 
-        pad_x = 7
-        type_bw = fm.horizontalAdvance(kind_text) + pad_x * 2
-        type_bh = fm.height() + 4
-        type_bx = rf.right() - type_bw - 6
-        type_by = rf.top() + 5
+        px = 7
+        bw = fm.horizontalAdvance(kind_label) + px * 2
+        bh = fm.height() + 4
+        bx = rf.right() - bw - 6
+        by = rf.top() + 5
 
-        # Рисуем бейдж типа
-        type_rect = QRectF(type_bx, type_by, type_bw, type_bh)
+        # фон бейджа
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(badge_color)
-        painter.drawRoundedRect(type_rect, 6, 6)
+        painter.setBrush(badge_clr)
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 6, 6)
+        # текст бейджа
+        painter.setPen(QColor(255, 255, 255, 240))
+        painter.drawText(QRectF(bx, by, bw, bh),
+                         Qt.AlignmentFlag.AlignCenter, kind_label)
 
-        painter.setPen(QPen(QColor(255, 255, 255, 240)))
-        painter.drawText(type_rect, Qt.AlignmentFlag.AlignCenter, kind_text)
-
-        # ── Арендатор — белый жирный текст ──
-        content_left = rf.left() + 8
-        content_top = rf.top() + 5
-        content_max_right = type_bx - 6
-        content_width = content_max_right - content_left
-
-        if content_width < 20:
+        # ── 2. Имя арендатора ──
+        left = rf.left() + 8
+        max_right = bx - 6
+        avail_w = max_right - left
+        if avail_w < 20:
             return
 
-        f_tenant = QFont(self._base_font)
-        f_tenant.setBold(True)
-        painter.setFont(f_tenant)
-        fm_t = painter.fontMetrics()
+        ft = QFont(self._base_font)
+        ft.setBold(True)
+        painter.setFont(ft)
+        fmt = painter.fontMetrics()
 
-        painter.setPen(QPen(QColor(255, 255, 255, 230)))
-        elided_tenant = fm_t.elidedText(
-            tenant_text, Qt.TextElideMode.ElideRight, int(content_width))
-        tenant_rect = QRectF(content_left, content_top, content_width, type_bh)
+        painter.setPen(QColor(255, 255, 255, 230))
+        elided = fmt.elidedText(tenant, Qt.TextElideMode.ElideRight, int(avail_w))
         painter.drawText(
-            tenant_rect,
+            QRectF(left, by, avail_w, bh),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            elided_tenant)
+            elided)
 
-        # ── Событие — суб-бейдж под арендатором ──
-        if not event_text:
+        # ── 3. Суб-бейдж события ──
+        if not event:
             return
 
-        sub_y = content_top + type_bh + 3
-        # Ширина суб-бейджа: на всю ширину блока
-        sub_max_w = rf.right() - 6 - content_left
+        sy = by + bh + 3
+        sw_max = rf.right() - 6 - left
 
-        f_sub = QFont(self._base_font)
-        f_sub.setBold(False)
-        f_sub.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 7.5))
-        painter.setFont(f_sub)
-        fm_sub = painter.fontMetrics()
+        fs = QFont(self._base_font)
+        fs.setBold(False)
+        fs.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 7.5))
+        painter.setFont(fs)
+        fms = painter.fontMetrics()
 
-        sub_pad_x = 6
-        sub_pad_y = 2
-        sub_text_w = fm_sub.horizontalAdvance(event_text)
-        sub_bw = min(sub_text_w + sub_pad_x * 2, sub_max_w)
-        sub_bh = fm_sub.height() + sub_pad_y * 2
+        spx = 6
+        spy = 2
+        tw = fms.horizontalAdvance(event)
+        sbw = min(tw + spx * 2, sw_max)
+        sbh = fms.height() + spy * 2
 
-        # Проверяем что суб-бейдж влезает по высоте
-        if sub_y + sub_bh > rf.bottom() - 1:
-            return
-        if sub_max_w < 30:
+        # проверка: влезает ли по высоте
+        if sy + sbh > rf.bottom() - 1 or sw_max < 30:
             return
 
-        # Фон суб-бейджа
-        sub_rect = QRectF(content_left, sub_y, sub_bw, sub_bh)
+        # фон суб-бейджа
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 0, 0, 55))
-        painter.drawRoundedRect(sub_rect, 4, 4)
+        painter.drawRoundedRect(QRectF(left, sy, sbw, sbh), 4, 4)
 
-        # Текст суб-бейджа
-        elided_event = fm_sub.elidedText(
-            event_text, Qt.TextElideMode.ElideRight, int(sub_bw - sub_pad_x * 2))
-        painter.setPen(QPen(QColor(255, 255, 255, 200)))
-        text_rect = QRectF(content_left + sub_pad_x, sub_y,
-                           sub_bw - sub_pad_x * 2, sub_bh)
+        # текст суб-бейджа
+        elided_ev = fms.elidedText(event, Qt.TextElideMode.ElideRight,
+                                   int(sbw - spx * 2))
+        painter.setPen(QColor(255, 255, 255, 200))
         painter.drawText(
-            text_rect,
+            QRectF(left + spx, sy, sbw - spx * 2, sbh),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            elided_event)
+            elided_ev)
 
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
+
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
@@ -492,23 +501,24 @@ class SchedulePage(QWidget):
         self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
-        self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))
-        
+
         header = self.tbl.horizontalHeader()
         header.setStretchLastSection(True)
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        
+
         self.tbl.setObjectName("scheduleGrid")
 
-        self.tbl.setItemDelegateForColumn(0, QStyledItemDelegate(self.tbl))  # стандартная отрисовка времени
-        self.tbl.setItemDelegate(BookingBlockDelegate(self.tbl))             # бронь для остальных
+        self._booking_delegate = BookingBlockDelegate(self.tbl)
+        self.tbl.setItemDelegate(self._booking_delegate)
+        # Колонка 0 (время) — стандартный делегат
+        self._time_delegate = QStyledItemDelegate(self.tbl)
+        self.tbl.setItemDelegateForColumn(0, self._time_delegate)
 
-        
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl.setFont(f)
-        
+
         # --- LIST + details
         self.tbl_list = QTableWidget()
         self.tbl_list.setObjectName("scheduleList")
