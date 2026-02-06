@@ -318,13 +318,13 @@ QTableWidget#scheduleList::item:selected {
 }
 /* ---- Usage progress bars ---- */
 QProgressBar#usageTotalBar {
-    background: rgba(99, 102, 241, 0.10);
-    border: 1px solid rgba(99, 102, 241, 0.25);
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.10);
 }
 QProgressBar {
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
-    background: rgba(11, 18, 32, 0.65);
+    background: transparent;
     text-align: center;
     padding: 2px;
     min-width: 120px;
