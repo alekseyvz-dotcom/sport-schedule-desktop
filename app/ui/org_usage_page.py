@@ -48,6 +48,11 @@ class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
 
+    # ---- styling constants for total rows ----
+    TOTAL_BG = QColor(99, 102, 241, 55)          # indigo tint
+    TOTAL_FG = QColor(255, 255, 255, 235)
+    TOTAL_BAR_BG = QColor(255, 255, 255, 18)     # subtle bar bg
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
@@ -198,14 +203,14 @@ class OrgUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Год: {d.year}")
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
-    def _make_progress(self, pct: float) -> QProgressBar:
+    def _make_progress(self, pct: float, *, is_total: bool = False) -> QProgressBar:
         pb = QProgressBar()
         pb.setRange(0, 100)
         pb.setValue(max(0, min(100, int(round(pct)))))
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
 
-        # только objectName -> цвет задаём в theme.py
+        # only objectName -> colors in theme.py
         if pct >= 100:
             pb.setObjectName("usagePctGreen")
         elif pct >= 71:
@@ -217,6 +222,13 @@ class OrgUsagePage(QWidget):
         else:
             pb.setObjectName("usagePctNeutral")
 
+        if is_total:
+            # make it visually match total row
+            pal = pb.palette()
+            pal.setColor(pal.ColorRole.Base, self.TOTAL_BAR_BG)
+            pb.setPalette(pal)
+            pb.setStyleSheet("QProgressBar{background: rgba(99,102,241,0.10);}")
+
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
@@ -224,6 +236,17 @@ class OrgUsagePage(QWidget):
         d = "День (в пределах режима)" if d_cap > 0 else "День (нет)"
         e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
         self.details.set_shift_titles(m, d, e)
+
+    def _apply_total_row_style(self, row: int) -> None:
+        """Apply noticeable background/foreground/bold to all QTableWidgetItem in row."""
+        for c in range(self.tbl.columnCount()):
+            it = self.tbl.item(row, c)
+            if it:
+                it.setData(Qt.ItemDataRole.BackgroundRole, QColor(self.TOTAL_BG))
+                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(self.TOTAL_FG))
+                it.setFont(self._bold_font())
+                if c >= 3:
+                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def reload(self):
         p = self._calc_period()
@@ -280,12 +303,14 @@ class OrgUsagePage(QWidget):
             org_busy = org_pd + org_gz
             org_pct = _pct(org_busy, org_cap)
 
+            # --- total row for org ---
             r0 = self.tbl.rowCount()
             self.tbl.insertRow(r0)
 
             it_org = QTableWidgetItem(oname)
-            it_org.setFont(self._bold_font())
             it_venue = QTableWidgetItem("ИТОГО по учреждению")
+
+            it_org.setFont(self._bold_font())
             it_venue.setFont(self._bold_font())
 
             it_org.setData(Qt.ItemDataRole.UserRole, ("org", oid))
@@ -293,20 +318,15 @@ class OrgUsagePage(QWidget):
 
             self.tbl.setItem(r0, 0, it_org)
             self.tbl.setItem(r0, 1, it_venue)
-            self.tbl.setCellWidget(r0, 2, self._make_progress(org_pct))
+            self.tbl.setCellWidget(r0, 2, self._make_progress(org_pct, is_total=True))
             self.tbl.setItem(r0, 3, QTableWidgetItem(f"{org_pct:.1f}%"))
             self.tbl.setItem(r0, 4, QTableWidgetItem(f"{_hours(org_pd):.1f}"))
             self.tbl.setItem(r0, 5, QTableWidgetItem(f"{_hours(org_gz):.1f}"))
             self.tbl.setItem(r0, 6, QTableWidgetItem(f"{_hours(org_busy):.1f}"))
 
-            # тёмный “итоговый” тон вместо белого
-            for c in range(7):
-                it = self.tbl.item(r0, c)
-                if it:
-                    it.setBackground(QColor(255, 255, 255, 18))
-                    if c >= 3:
-                        it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._apply_total_row_style(r0)
 
+            # --- venue rows ---
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
             for v in org_rows:
                 rr = self.tbl.rowCount()
