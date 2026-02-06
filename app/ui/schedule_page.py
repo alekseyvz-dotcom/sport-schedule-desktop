@@ -114,8 +114,15 @@ class BookingBlockDelegate(QStyledItemDelegate):
     GZ_FREE_BADGE = QColor(251, 191, 36, 200)
     CANC_BADGE = QColor(100, 116, 139, 200)
 
-    CELL_BG = QColor(15, 23, 42, 35)
-    GRID_PEN = QPen(QColor(255, 255, 255, 18), 1)
+    # Фон пустой ячейки (тёмный, под общий фон)
+    CELL_BG   = QColor(11, 18, 32, 60)
+    GRID_PEN  = QPen(QColor(255, 255, 255, 14), 1)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Запоминаем базовый шрифт при создании
+        self._base_font = QFont()
+        self._base_font.setPointSizeF(max(self._base_font.pointSizeF(), 9.5))
 
     def _colors_for(self, booking) -> tuple[QColor, QColor]:
         if not booking:
@@ -145,12 +152,9 @@ class BookingBlockDelegate(QStyledItemDelegate):
         return QColor(self.PD_BASE), QColor(self.PD_BADGE)
 
     def _build_block_path(self, rf: QRectF, part: str, radius: float) -> QPainterPath:
-        """Строит контур блока для заданной части."""
         path = QPainterPath()
-
         if part == "middle":
             path.addRect(rf)
-
         elif part == "top":
             path.moveTo(rf.bottomLeft())
             path.lineTo(rf.left(), rf.top() + radius)
@@ -159,7 +163,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
             path.arcTo(QRectF(rf.right() - radius * 2, rf.top(), radius * 2, radius * 2), 90, -90)
             path.lineTo(rf.right(), rf.bottom())
             path.closeSubpath()
-
         elif part == "bottom":
             path.moveTo(rf.topLeft())
             path.lineTo(rf.left(), rf.bottom() - radius)
@@ -168,10 +171,8 @@ class BookingBlockDelegate(QStyledItemDelegate):
             path.arcTo(QRectF(rf.right() - radius * 2, rf.bottom() - radius * 2, radius * 2, radius * 2), 270, 90)
             path.lineTo(rf.right(), rf.top())
             path.closeSubpath()
-
         else:
             path.addRoundedRect(rf, radius, radius)
-
         return path
 
     def _calc_rf(self, rect, part: str, margin_h: int) -> QRectF:
@@ -188,38 +189,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
             return QRectF(rect.left() + margin_h, rect.top() + 1,
                           rect.width() - margin_h * 2, rect.height() - 2)
 
-    def _draw_badge(self, painter: QPainter, text: str, bg: QColor,
-                    x: float, y: float, max_w: float,
-                    fg: QColor = QColor(255, 255, 255, 240),
-                    bold: bool = True, font_delta: float = 0) -> QRectF:
-        """Рисует бейдж и возвращает его QRectF."""
-        f = painter.font()
-        f.setBold(bold)
-        if font_delta:
-            f.setPointSizeF(max(f.pointSizeF() + font_delta, 7.5))
-        painter.setFont(f)
-        fm = painter.fontMetrics()
-
-        pad_x = 7
-        pad_y = 2
-        text_w = fm.horizontalAdvance(text)
-        bw = min(text_w + pad_x * 2, max_w)
-        bh = fm.height() + pad_y * 2
-
-        # Если текст не влезает — обрезаем
-        elided = fm.elidedText(text, Qt.TextElideMode.ElideRight, int(bw - pad_x * 2))
-
-        badge_rect = QRectF(x, y, bw, bh)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(bg)
-        painter.drawRoundedRect(badge_rect, 5, 5)
-
-        painter.setPen(QPen(fg))
-        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, elided)
-
-        return badge_rect
-
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
             super().paint(painter, option, index)
@@ -232,6 +201,12 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setClipRect(rect)
 
+        # ═══════════════════════════════════════════
+        # ВАЖНО: сначала закрашиваем ВЕСЬ rect непрозрачным фоном,
+        # чтобы ничего из-под QSS/selection не просвечивало
+        # ═══════════════════════════════════════════
+        painter.fillRect(rect, QColor(11, 18, 32, 255))
+
         # ── Пустая ячейка ──
         if not booking:
             painter.fillRect(rect, self.CELL_BG)
@@ -242,7 +217,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # ── Бронь: заливка блока ──
+        # ── Бронь ──
         fill_color, badge_color = self._colors_for(booking)
         radius = 10.0
         margin_h = 2
@@ -256,7 +231,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         block_path = self._build_block_path(rf, part, radius)
         painter.drawPath(block_path)
 
-        # ── Рамка ──
+        # ── Тонкая рамка ──
         border_color = QColor(fill_color)
         border_color.setAlpha(min(255, fill_color.alpha() + 60))
         painter.setPen(QPen(border_color, 1.0))
@@ -279,82 +254,110 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.drawPath(sel_path)
 
         # ── Контент: только top / одиночная ──
-        if part == "top" or part is None:
-            kind = (getattr(booking, "kind", "") or
-                    getattr(booking, "activity", "") or "").upper()
-            status = (getattr(booking, "status", "") or "").lower()
-
-            text_full = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-            lines = [l.strip() for l in text_full.split("\n") if l.strip()]
-            tenant_text = lines[0] if lines else ""
-            event_text = lines[1] if len(lines) > 1 else ""
-
-            # --- Правый верхний угол: бейдж типа ---
-            kind_text = "ОТМ" if status == "cancelled" else (
-                "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
-
-            # Сначала измеряем бейдж типа, чтобы знать сколько места остаётся
-            f_badge = painter.font()
-            f_badge.setBold(True)
-            f_badge.setPointSizeF(max(f_badge.pointSizeF(), 9))
-            painter.setFont(f_badge)
-            fm_badge = painter.fontMetrics()
-
-            pad_x = 7
-            type_bw = fm_badge.horizontalAdvance(kind_text) + pad_x * 2
-            type_bh = fm_badge.height() + 4
-            type_bx = rf.right() - type_bw - 6
-            type_by = rf.top() + 5
-
-            # Рисуем бейдж типа
-            type_badge = self._draw_badge(
-                painter, kind_text, badge_color,
-                type_bx, type_by, type_bw + 4)
-
-            # --- Арендатор: белый жирный текст ---
-            content_left = rf.left() + 8
-            content_top = rf.top() + 5
-            content_max_right = type_bx - 6
-            content_width = content_max_right - content_left
-
-            if content_width > 20:
-                f_tenant = painter.font()
-                f_tenant.setBold(True)
-                f_tenant.setPointSizeF(max(f_tenant.pointSizeF(), 9))
-                painter.setFont(f_tenant)
-                fm_t = painter.fontMetrics()
-
-                painter.setPen(QPen(QColor(255, 255, 255, 230)))
-                elided = fm_t.elidedText(
-                    tenant_text, Qt.TextElideMode.ElideRight, int(content_width))
-                tenant_rect = QRectF(content_left, content_top, content_width, type_bh)
-                painter.drawText(
-                    tenant_rect,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    elided)
-
-                # --- Событие: суб-бейдж под арендатором ---
-                if event_text:
-                    sub_y = content_top + type_bh + 4
-                    sub_max_w = rf.right() - 6 - content_left
-
-                    # Проверяем что влезает
-                    f_sub = painter.font()
-                    f_sub.setBold(False)
-                    f_sub.setPointSizeF(max(f_sub.pointSizeF() - 1, 7.5))
-                    painter.setFont(f_sub)
-                    fm_sub = painter.fontMetrics()
-                    sub_h = fm_sub.height() + 4
-
-                    if sub_y + sub_h <= rf.bottom() - 2 and sub_max_w > 30:
-                        sub_bg = QColor(0, 0, 0, 50)
-                        self._draw_badge(
-                            painter, event_text, sub_bg,
-                            content_left, sub_y, sub_max_w,
-                            fg=QColor(255, 255, 255, 200),
-                            bold=False, font_delta=-1)
+        if part in ("top", None):
+            self._paint_content(painter, booking, index, rf, badge_color)
 
         painter.restore()
+
+    def _paint_content(self, painter: QPainter, booking, index, rf: QRectF, badge_color: QColor):
+        kind = (getattr(booking, "kind", "") or
+                getattr(booking, "activity", "") or "").upper()
+        status = (getattr(booking, "status", "") or "").lower()
+
+        text_full = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        lines = [l.strip() for l in text_full.split("\n") if l.strip()]
+        tenant_text = lines[0] if lines else ""
+        event_text = lines[1] if len(lines) > 1 else ""
+
+        # ── Бейдж типа (ПД / ГЗ / ОТМ) — правый верхний угол ──
+        kind_text = "ОТМ" if status == "cancelled" else (
+            "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
+
+        f_badge = QFont(self._base_font)
+        f_badge.setBold(True)
+        painter.setFont(f_badge)
+        fm = painter.fontMetrics()
+
+        pad_x = 7
+        type_bw = fm.horizontalAdvance(kind_text) + pad_x * 2
+        type_bh = fm.height() + 4
+        type_bx = rf.right() - type_bw - 6
+        type_by = rf.top() + 5
+
+        # Рисуем бейдж типа
+        type_rect = QRectF(type_bx, type_by, type_bw, type_bh)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(badge_color)
+        painter.drawRoundedRect(type_rect, 6, 6)
+
+        painter.setPen(QPen(QColor(255, 255, 255, 240)))
+        painter.drawText(type_rect, Qt.AlignmentFlag.AlignCenter, kind_text)
+
+        # ── Арендатор — белый жирный текст ──
+        content_left = rf.left() + 8
+        content_top = rf.top() + 5
+        content_max_right = type_bx - 6
+        content_width = content_max_right - content_left
+
+        if content_width < 20:
+            return
+
+        f_tenant = QFont(self._base_font)
+        f_tenant.setBold(True)
+        painter.setFont(f_tenant)
+        fm_t = painter.fontMetrics()
+
+        painter.setPen(QPen(QColor(255, 255, 255, 230)))
+        elided_tenant = fm_t.elidedText(
+            tenant_text, Qt.TextElideMode.ElideRight, int(content_width))
+        tenant_rect = QRectF(content_left, content_top, content_width, type_bh)
+        painter.drawText(
+            tenant_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            elided_tenant)
+
+        # ── Событие — суб-бейдж под арендатором ──
+        if not event_text:
+            return
+
+        sub_y = content_top + type_bh + 3
+        # Ширина суб-бейджа: на всю ширину блока
+        sub_max_w = rf.right() - 6 - content_left
+
+        f_sub = QFont(self._base_font)
+        f_sub.setBold(False)
+        f_sub.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 7.5))
+        painter.setFont(f_sub)
+        fm_sub = painter.fontMetrics()
+
+        sub_pad_x = 6
+        sub_pad_y = 2
+        sub_text_w = fm_sub.horizontalAdvance(event_text)
+        sub_bw = min(sub_text_w + sub_pad_x * 2, sub_max_w)
+        sub_bh = fm_sub.height() + sub_pad_y * 2
+
+        # Проверяем что суб-бейдж влезает по высоте
+        if sub_y + sub_bh > rf.bottom() - 1:
+            return
+        if sub_max_w < 30:
+            return
+
+        # Фон суб-бейджа
+        sub_rect = QRectF(content_left, sub_y, sub_bw, sub_bh)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 55))
+        painter.drawRoundedRect(sub_rect, 4, 4)
+
+        # Текст суб-бейджа
+        elided_event = fm_sub.elidedText(
+            event_text, Qt.TextElideMode.ElideRight, int(sub_bw - sub_pad_x * 2))
+        painter.setPen(QPen(QColor(255, 255, 255, 200)))
+        text_rect = QRectF(content_left + sub_pad_x, sub_y,
+                           sub_bw - sub_pad_x * 2, sub_bh)
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            elided_event)
 
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
