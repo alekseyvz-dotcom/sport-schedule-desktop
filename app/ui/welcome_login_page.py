@@ -50,14 +50,14 @@ QFrame#glowLayer {
 }
 
 QFrame#loginCard {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.10);   
     border-radius: 22px;
 }
 
 QFrame#cardInner {
     background: rgba(15, 23, 42, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    border: none;                              
     border-radius: 18px;
 }
 
@@ -169,10 +169,7 @@ class WelcomeLoginPage(QWidget):
         root.addStretch(1)
 
         # --- Card hover/focus micro anim ---
-        self._base_card_pos = None
         self._shadow = shadow
-
-        self._hover_anim = QPropertyAnimation(self._card, b"pos", self)
         self._hover_anim.setDuration(180)
         self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
 
@@ -296,26 +293,18 @@ class WelcomeLoginPage(QWidget):
 
     # ---------- card micro animation ----------
     def _animate_card(self, lifted: bool):
-        if self._base_card_pos is None:
-            self._base_card_pos = self._card.pos()
-
-        self._hover_anim.stop()
         self._shadow_anim.stop()
         self._glow_hover_op_anim.stop()
-
-        end_pos = self._base_card_pos + QPoint(0, -6) if lifted else self._base_card_pos
-        self._hover_anim.setStartValue(self._card.pos())
-        self._hover_anim.setEndValue(end_pos)
-        self._hover_anim.start()
-
+    
         self._shadow_anim.setStartValue(self._shadow.blurRadius())
         self._shadow_anim.setEndValue(56 if lifted else 42)
         self._shadow_anim.start()
-
+    
         base = 0.78
         self._glow_hover_op_anim.setStartValue(self._glow_op.opacity())
         self._glow_hover_op_anim.setEndValue(min(1.0, base + (0.12 if lifted else -0.02)))
         self._glow_hover_op_anim.start()
+
 
     def eventFilter(self, obj, event):
         login = getattr(self, "login", None)
@@ -340,8 +329,13 @@ class WelcomeLoginPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+    
+        self._reposition_glow()
+    
+        if not self._bg_started and self.width() > 10 and self.height() > 10:
+            self._start_background_float()
 
-        # glow под карточкой
+    def _reposition_glow(self):
         card_geo = self._card.geometry()
         glow_w = self._glow.width()
         glow_h = self._glow.height()
@@ -350,8 +344,3 @@ class WelcomeLoginPage(QWidget):
         self._glow.move(x, y)
         self._glow.lower()
 
-        self._base_card_pos = self._card.pos()
-
-        # стартуем фон, когда известны реальные размеры
-        if not self._bg_started and self.width() > 10 and self.height() > 10:
-            self._start_background_float()
