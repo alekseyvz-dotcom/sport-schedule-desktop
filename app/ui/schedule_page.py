@@ -178,42 +178,49 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setClipRect(rect)
 
-        # 1. Непрозрачная подложка (убивает все QSS-артефакты)
+        # 1. Непрозрачная подложка
         painter.fillRect(rect, self.BG_OPAQUE)
 
         if not bk:
             # пустая ячейка
             painter.fillRect(rect, self.CELL_EMPTY)
+
+            # ── SELECTION для пустой ячейки ──
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(rect, QColor(99, 102, 241, 45))
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                pen = QPen(QColor(99, 102, 241, 120), 1)
+                painter.setPen(pen)
+                painter.drawRect(rect.adjusted(0, 0, -1, -1))
+            # ── HOVER для пустой ячейки ──
+            elif option.state & QStyle.StateFlag.State_MouseOver:
+                painter.fillRect(rect, QColor(255, 255, 255, 12))
+
+            # Сетка
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             p = QPen(self.GRID_COLOR)
             p.setWidth(1)
             painter.setPen(p)
-            # горизонтальная линия снизу
             painter.drawLine(rect.left(), rect.bottom(),
                              rect.right(), rect.bottom())
-            # вертикальная линия справа
             painter.drawLine(rect.right(), rect.top(),
                              rect.right(), rect.bottom())
             painter.restore()
             return
 
+        # --- далее бронь (без изменений) ---
         fill, badge_clr = self._palette(bk)
         R = 8.0
-        MX = 2          # горизонтальный margin
+        MX = 2
 
-        # Полный rect заливки — БЕЗ вертикальных зазоров для middle!
-        # top:    отступ сверху 1px
-        # bottom: отступ снизу 1px
-        # middle: ровно весь rect
-        # single: отступы сверху и снизу
         x  = rect.left() + MX
         w  = rect.width() - MX * 2
 
         if part == "top":
             y = rect.top() + 1
-            h = rect.height() - 1      # снизу впритык
+            h = rect.height() - 1
         elif part == "bottom":
-            y = rect.top()              # сверху впритык
+            y = rect.top()
             h = rect.height() - 1
         elif part == "middle":
             y = rect.top()
@@ -243,16 +250,16 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.drawPath(self._shape(
                 rf.adjusted(.5, .5, -.5, -.5), part, R))
 
-        # Selection
+        # Selection на брони
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.setPen(QPen(QColor(255, 255, 255, 70), 1.5))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
+            # Подсветка поверх блока
+            painter.setBrush(QColor(255, 255, 255, 25))
+            painter.setPen(QPen(QColor(255, 255, 255, 100), 1.5))
             painter.drawPath(self._shape(
                 rf.adjusted(.5, .5, -.5, -.5), part, R))
 
-        # Контент — только top / single
+        # Контент
         if part in ("top", None):
-            # Вычисляем полную высоту блока (через ROLE_ROWS и таблицу)
             full_h = self._full_block_height(index, rect)
             content_rf = QRectF(rf.left(), rf.top(), rf.width(), full_h)
             self._draw_labels(painter, bk, index, content_rf, badge_clr)
