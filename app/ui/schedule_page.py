@@ -101,23 +101,29 @@ from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
 class BookingBlockDelegate(QStyledItemDelegate):
-    """v5 — радикально убираем полосы + гарантируем суб-бейдж."""
 
     ROLE_PART = Qt.ItemDataRole.UserRole + 1
     ROLE_ROWS = Qt.ItemDataRole.UserRole + 2
 
-    # Палитра
-    PD_FILL       = QColor(71, 132, 210, 120)
-    PD_BADGE      = QColor(59, 130, 246, 230)
-    GZ_FILL       = QColor(210, 140, 30, 120)
-    GZ_BADGE      = QColor(217, 119, 6, 230)
-    GZ_FREE_FILL  = QColor(240, 195, 80, 90)
-    GZ_FREE_BADGE = QColor(251, 191, 36, 210)
-    CANC_FILL     = QColor(120, 130, 150, 80)
-    CANC_BADGE    = QColor(100, 116, 139, 210)
+    # ── Непрозрачные цвета заливки ──
+    PD_FILL       = QColor(30, 58, 95)       # тёмно-синий
+    PD_BORDER     = QColor(55, 100, 160)
+    PD_BADGE      = QColor(59, 130, 246)
+
+    GZ_FILL       = QColor(80, 56, 20)       # тёмно-янтарный
+    GZ_BORDER     = QColor(140, 100, 30)
+    GZ_BADGE      = QColor(217, 119, 6)
+
+    GZ_FREE_FILL  = QColor(95, 75, 30)       # светлее обычного GZ
+    GZ_FREE_BORDER= QColor(170, 140, 50)
+    GZ_FREE_BADGE = QColor(251, 191, 36)
+
+    CANC_FILL     = QColor(40, 45, 55)       # серый
+    CANC_BORDER   = QColor(80, 90, 105)
+    CANC_BADGE    = QColor(100, 116, 139)
 
     BG_OPAQUE  = QColor(11, 18, 32)
-    CELL_EMPTY = QColor(255, 255, 255, 8)
+    CELL_EMPTY = QColor(15, 20, 32)
     GRID_COLOR = QColor(255, 255, 255, 12)
 
     def __init__(self, parent=None):
@@ -134,20 +140,21 @@ class BookingBlockDelegate(QStyledItemDelegate):
         return None
 
     def _palette(self, booking):
+        """-> (fill, border, badge)"""
         if not booking:
-            return QColor(0, 0, 0, 0), QColor(0, 0, 0, 0)
+            return self.BG_OPAQUE, self.BG_OPAQUE, self.BG_OPAQUE
         st = (getattr(booking, "status", "") or "").lower()
         if st == "cancelled":
-            return QColor(self.CANC_FILL), QColor(self.CANC_BADGE)
+            return QColor(self.CANC_FILL), QColor(self.CANC_BORDER), QColor(self.CANC_BADGE)
         k = (getattr(booking, "kind", "") or
              getattr(booking, "activity", "") or "").upper()
         if k == "GZ":
             gid = getattr(booking, "gz_group_id", None)
             page = self._find_page()
             if page and gid is not None and page._gz_group_is_free.get(int(gid), False):
-                return QColor(self.GZ_FREE_FILL), QColor(self.GZ_FREE_BADGE)
-            return QColor(self.GZ_FILL), QColor(self.GZ_BADGE)
-        return QColor(self.PD_FILL), QColor(self.PD_BADGE)
+                return QColor(self.GZ_FREE_FILL), QColor(self.GZ_FREE_BORDER), QColor(self.GZ_FREE_BADGE)
+            return QColor(self.GZ_FILL), QColor(self.GZ_BORDER), QColor(self.GZ_BADGE)
+        return QColor(self.PD_FILL), QColor(self.PD_BORDER), QColor(self.PD_BADGE)
 
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
@@ -159,11 +166,9 @@ class BookingBlockDelegate(QStyledItemDelegate):
         part = index.data(self.ROLE_PART)
 
         painter.save()
-        # Расширяем clip на 2px вверх чтобы перехлёст не обрезался
-        clip = rect.adjusted(0, -2, 0, 0)
-        painter.setClipRect(clip)
+        painter.setClipRect(rect)
 
-        # 1. Непрозрачная подложка — весь rect
+        # Непрозрачная подложка
         painter.fillRect(rect, self.BG_OPAQUE)
 
         if not bk:
@@ -184,62 +189,72 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        fill, badge_clr = self._palette(bk)
+        fill, border_clr, badge_clr = self._palette(bk)
         R  = 8.0
         MX = 2
-        # Перехлёст: middle и bottom начинаются на 2px выше своего rect,
-        # чтобы гарантированно перекрыть зазор между строками таблицы.
-        OVERLAP = 2
 
+        # Вычисляем rf — rect заливки.
+        # Ключ: middle занимает ВЕСЬ rect без зазоров.
+        # top/bottom — крошечный отступ только с внешней стороны.
         x = rect.left() + MX
         w = rect.width() - MX * 2
 
         if part == "top":
-            y = rect.top() + 1
-            h = rect.height() - 1 + OVERLAP  # внизу залезаем на следующую строку
+            rf = QRectF(x, rect.top() + 1, w, rect.height() - 1)
         elif part == "bottom":
-            y = rect.top() - OVERLAP          # вверху залезаем на предыдущую
-            h = rect.height() - 1 + OVERLAP
+            rf = QRectF(x, rect.top(), w, rect.height() - 1)
         elif part == "middle":
-            y = rect.top() - OVERLAP
-            h = rect.height() + OVERLAP * 2   # оба направления
-        else:  # single
-            y = rect.top() + 1
-            h = rect.height() - 2
-
-        rf = QRectF(x, y, w, h)
+            rf = QRectF(x, rect.top(), w, rect.height())
+        else:
+            rf = QRectF(x, rect.top() + 1, w, rect.height() - 2)
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Заливка — непрозрачная, рисуем прямоугольник для middle
+        # чтобы не было зазоров
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-        painter.drawPath(self._shape(rf, part, R))
 
-        # Рамка
-        bc = QColor(fill)
-        bc.setAlpha(min(255, fill.alpha() + 50))
-        painter.setPen(QPen(bc, 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
         if part == "middle":
-            painter.drawLine(rf.topLeft(), rf.bottomLeft())
-            painter.drawLine(rf.topRight(), rf.bottomRight())
+            # Просто прямоугольник — никаких скруглений, никаких зазоров
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            painter.drawRect(rf.toRect())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         else:
+            painter.drawPath(self._shape(rf, part, R))
+
+        # Рамка — только top/bottom/single (не middle, чтобы не было полос)
+        if part != "middle":
+            painter.setPen(QPen(border_clr, 1.0))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(self._shape(
                 rf.adjusted(.5, .5, -.5, -.5), part, R))
+        else:
+            # Для middle — только вертикальные линии рамки
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            painter.setPen(QPen(border_clr, 1))
+            painter.drawLine(int(rf.left()), int(rf.top()),
+                             int(rf.left()), int(rf.bottom()))
+            painter.drawLine(int(rf.right()), int(rf.top()),
+                             int(rf.right()), int(rf.bottom()))
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         # Selection
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.setBrush(QColor(255, 255, 255, 25))
-            painter.setPen(QPen(QColor(255, 255, 255, 100), 1.5))
-            painter.drawPath(self._shape(
-                rf.adjusted(.5, .5, -.5, -.5), part, R))
+            painter.setBrush(QColor(255, 255, 255, 20))
+            painter.setPen(QPen(QColor(255, 255, 255, 80), 1.5))
+            if part == "middle":
+                painter.drawRect(rf)
+            else:
+                painter.drawPath(self._shape(
+                    rf.adjusted(.5, .5, -.5, -.5), part, R))
 
         # Контент
         if part in ("top", None):
             full_h = self._full_block_height(index, rect)
-            # content_rf начинается от top rf, высота = полный блок
-            content_rf = QRectF(rf.left(), rect.top() + 1, rf.width(),
+            content_rf = QRectF(rf.left(), rf.top(), rf.width(),
                                 max(full_h - 2, rf.height()))
-            self._draw_labels(painter, bk, index, content_rf, badge_clr)
+            self._draw_content(painter, bk, index, content_rf, badge_clr, fill)
 
         painter.restore()
 
@@ -251,9 +266,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         table = self.parent()
         if table is None:
             return float(top_rect.height())
-        total = 0
-        for r in range(r0, r1 + 1):
-            total += table.rowHeight(r)
+        total = sum(table.rowHeight(r) for r in range(r0, r1 + 1))
         return float(total)
 
     @staticmethod
@@ -281,8 +294,8 @@ class BookingBlockDelegate(QStyledItemDelegate):
             p.addRoundedRect(rf, R, R)
         return p
 
-    def _draw_labels(self, painter: QPainter, bk, index,
-                     rf: QRectF, badge_clr: QColor):
+    def _draw_content(self, painter: QPainter, bk, index,
+                      rf: QRectF, badge_clr: QColor, fill_clr: QColor):
         kind   = (getattr(bk, "kind", "") or
                   getattr(bk, "activity", "") or "").upper()
         status = (getattr(bk, "status", "") or "").lower()
@@ -292,7 +305,41 @@ class BookingBlockDelegate(QStyledItemDelegate):
         tenant_text = lines[0] if lines else ""
         event_text  = lines[1] if len(lines) > 1 else ""
 
-        # ── Бейдж типа ──
+        # Если нет event_text, показываем время как fallback
+        if not event_text:
+            sa = getattr(bk, "starts_at", None)
+            ea = getattr(bk, "ends_at", None)
+            if sa and ea:
+                event_text = f"{sa:%H:%M} – {ea:%H:%M}"
+
+        # ── Верхний бейдж-бар ──
+        # Полоска-бар сверху блока: чуть темнее/светлее основного цвета
+        bar_h = 28
+        bar_rect = QRectF(rf.left(), rf.top(), rf.width(), bar_h)
+
+        bar_bg = QColor(fill_clr)
+        # Делаем бар чуть светлее
+        bar_bg = QColor(
+            min(255, bar_bg.red() + 15),
+            min(255, bar_bg.green() + 15),
+            min(255, bar_bg.blue() + 15),
+        )
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bar_bg)
+        # Скруглённые углы сверху
+        bar_path = QPainterPath()
+        R = 7.0
+        bar_path.moveTo(bar_rect.left(), bar_rect.bottom())
+        bar_path.lineTo(bar_rect.left(), bar_rect.top() + R)
+        bar_path.arcTo(bar_rect.left(), bar_rect.top(), R * 2, R * 2, 180, -90)
+        bar_path.lineTo(bar_rect.right() - R, bar_rect.top())
+        bar_path.arcTo(bar_rect.right() - R * 2, bar_rect.top(), R * 2, R * 2, 90, -90)
+        bar_path.lineTo(bar_rect.right(), bar_rect.bottom())
+        bar_path.closeSubpath()
+        painter.drawPath(bar_path)
+
+        # ── Бейдж типа (в баре, справа) ──
         tag = ("ОТМ" if status == "cancelled"
                else "ПД" if kind == "PD"
                else "ГЗ" if kind == "GZ"
@@ -300,71 +347,60 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
         fb = QFont(self._base_font)
         fb.setBold(True)
+        fb.setPointSizeF(self._base_font.pointSizeF() - 0.5)
         painter.setFont(fb)
         fm = painter.fontMetrics()
 
-        px = 8
-        bw = fm.horizontalAdvance(tag) + px * 2
-        bh = fm.height() + 6
-        bx = rf.right() - bw - 8
-        by = rf.top() + 6
+        px = 7
+        tbw = fm.horizontalAdvance(tag) + px * 2
+        tbh = fm.height() + 4
+        tbx = bar_rect.right() - tbw - 6
+        tby = bar_rect.top() + (bar_h - tbh) / 2.0
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(badge_clr)
-        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 6, 6)
+        painter.drawRoundedRect(QRectF(tbx, tby, tbw, tbh), 5, 5)
         painter.setPen(QColor(255, 255, 255, 245))
-        painter.drawText(QRectF(bx, by, bw, bh),
+        painter.drawText(QRectF(tbx, tby, tbw, tbh),
                          Qt.AlignmentFlag.AlignCenter, tag)
 
-        # ── Имя арендатора ──
-        cl = rf.left() + 10
-        cw = bx - 8 - cl
-        if cw < 30:
-            return
+        # ── Имя арендатора (в баре, слева) ──
+        name_left = bar_rect.left() + 10
+        name_w = tbx - 8 - name_left
+        if name_w > 20:
+            fn = QFont(self._base_font)
+            fn.setBold(True)
+            painter.setFont(fn)
+            fmn = painter.fontMetrics()
+            painter.setPen(QColor(255, 255, 255, 240))
+            el = fmn.elidedText(tenant_text,
+                                Qt.TextElideMode.ElideRight, int(name_w))
+            painter.drawText(
+                QRectF(name_left, bar_rect.top(), name_w, bar_h),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                el)
 
-        ft = QFont(self._base_font)
-        ft.setBold(True)
-        painter.setFont(ft)
-        fmn = painter.fontMetrics()
-        painter.setPen(QColor(255, 255, 255, 235))
-        elided = fmn.elidedText(tenant_text,
-                                Qt.TextElideMode.ElideRight, int(cw))
-        painter.drawText(QRectF(cl, by, cw, bh),
-                         Qt.AlignmentFlag.AlignLeft |
-                         Qt.AlignmentFlag.AlignVCenter, elided)
+        # ── Текст события / время (под баром) ──
+        if event_text:
+            txt_y = bar_rect.bottom() + 4
+            txt_w = rf.width() - 20
 
-        # ── Суб-бейдж события ──
-        if not event_text:
-            return
+            if txt_y + 20 > rf.bottom() - 2 or txt_w < 30:
+                return
 
-        fs = QFont(self._base_font)
-        fs.setBold(False)
-        fs.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 8.0))
-        painter.setFont(fs)
-        fms = painter.fontMetrics()
+            fs = QFont(self._base_font)
+            fs.setBold(False)
+            fs.setPointSizeF(max(self._base_font.pointSizeF() - 1.0, 8.0))
+            painter.setFont(fs)
+            fms = painter.fontMetrics()
 
-        spx = 7
-        spy = 2
-        stw = fms.horizontalAdvance(event_text)
-        sbw = min(stw + spx * 2, rf.width() - 16)
-        sbh = fms.height() + spy * 2
-        sy  = by + bh + 5
-
-        if sy + sbh > rf.bottom() - 4 or sbw < 30:
-            return
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 60))
-        painter.drawRoundedRect(QRectF(cl, sy, sbw, sbh), 5, 5)
-
-        elided_ev = fms.elidedText(event_text,
-                                   Qt.TextElideMode.ElideRight,
-                                   int(sbw - spx * 2))
-        painter.setPen(QColor(255, 255, 255, 210))
-        painter.drawText(
-            QRectF(cl + spx, sy, sbw - spx * 2, sbh),
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            elided_ev)
+            painter.setPen(QColor(255, 255, 255, 160))
+            el_ev = fms.elidedText(event_text,
+                                   Qt.TextElideMode.ElideRight, int(txt_w))
+            painter.drawText(
+                QRectF(rf.left() + 10, txt_y, txt_w, fms.height() + 4),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                el_ev)
 
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
