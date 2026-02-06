@@ -281,17 +281,13 @@ class OrgUsagePage(QWidget):
             chunk = "rgba(255,255,255,0.18)"
     
         if is_total:
-            bg = "transparent"
-            br = "rgba(255,255,255,0.10)"
-        else:
-            bg = "rgba(11,18,32,0.65)"
-            br = "rgba(255,255,255,0.14)"
+            pb.setObjectName("usageTotalBar")  # <-- ВАЖНО, чтобы сработал QSS из темы
     
         pb.setStyleSheet(f"""
             QProgressBar {{
-                border: 1px solid {br};
+                border: 1px solid rgba(255, 255, 255, 0.14);
                 border-radius: 8px;
-                background: {bg};
+                background: transparent;              /* <-- ключевое */
                 text-align: center;
                 padding: 2px;
                 min-width: 120px;
@@ -302,6 +298,11 @@ class OrgUsagePage(QWidget):
                 border-radius: 8px;
             }}
         """)
+    
+        # заставляем Qt применить и objectName-правила темы, и наш локальный stylesheet
+        pb.style().unpolish(pb)
+        pb.style().polish(pb)
+        pb.update()
     
         return pb
 
