@@ -369,14 +369,16 @@ class TenantRuleDialog(QDialog):
 
     def _repaint_tiles(self) -> None:
         for uid, btn in self._zone_btns.items():
-            conf = self._conf_count.get(uid, -1)  # -1 unknown
-            btn.setProperty("conflicts", int(conf))
-            btn.setProperty("selected", bool(btn.isChecked()))
+            conf = int(self._conf_count.get(uid, -1))  # -1 unknown
     
-            # форсим применение QSS по новым property
+            btn.setProperty("conflicts", conf)
+            btn.setProperty("conflicts_bad", "1" if conf > 0 else "0")  # <-- важно
+            # selected property больше не нужен
+    
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             btn.update()
+
 
     # ---------------- Availability ----------------
     def _schedule_avail_check(self) -> None:
