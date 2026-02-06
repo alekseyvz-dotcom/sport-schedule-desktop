@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta, timezone
 from typing import List, Dict, Tuple, Optional, Set
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -22,11 +22,17 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QProgressBar,
     QSplitter,
+    QStyledItemDelegate,
+    QStyle,
+    QStyleOptionViewItem,
 )
 
 from app.services.ref_service import list_active_orgs
 from app.services.usage_service import calc_usage_by_venues, UsageRow
 from app.ui.usage_details_widget import UsageDetailsWidget, UsageTotals
+
+
+ROLE_IS_TOTAL = Qt.ItemDataRole.UserRole + 50
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,63 @@ def _hours(sec: int) -> float:
     return round(sec / 3600.0, 1)
 
 
+class UsageRowDelegate(QStyledItemDelegate):
+    """Делегат, который рисует фон итоговых строк."""
+
+    TOTAL_BG      = QColor(99, 102, 241, 40)
+    TOTAL_BG_SEL  = QColor(99, 102, 241, 65)
+    TOTAL_BORDER  = QColor(99, 102, 241, 50)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        is_total = index.data(ROLE_IS_TOTAL)
+
+        if is_total:
+            painter.save()
+            r = option.rect
+
+            # фон
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(r, self.TOTAL_BG_SEL)
+            else:
+                painter.fillRect(r, self.TOTAL_BG)
+
+            # тонкая линия снизу — разделитель
+            painter.setPen(QPen(self.TOTAL_BORDER, 1))
+            painter.drawLine(r.bottomLeft(), r.bottomRight())
+
+            painter.restore()
+
+            # рисуем текст стандартным способом, но без фона
+            opt2 = QStyleOptionViewItem(option)
+            opt2.state &= ~QStyle.StateFlag.State_Selected  # убираем стандартный sel-bg
+            super().paint(painter, opt2, index)
+        else:
+            super().paint(painter, option, index)
+
+
+class _PulsingProgressBar(QProgressBar):
+    """QProgressBar с мягкой пульсацией прозрачности."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._opacity = 1.0
+
+        self._anim = QPropertyAnimation(self, b"windowOpacity", self)
+        self._anim.setDuration(1800)
+        self._anim.setStartValue(1.0)
+        self._anim.setKeyValueAt(0.5, 0.45)
+        self._anim.setEndValue(1.0)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._anim.setLoopCount(-1)
+
+    def start_pulse(self):
+        self._anim.start()
+
+    def stop_pulse(self):
+        self._anim.stop()
+        self.setWindowOpacity(1.0)
+
+
 class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
     TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
@@ -54,7 +117,7 @@ class OrgUsagePage(QWidget):
 
         self._period: Optional[Period] = None
         self._rows: List[UsageRow] = []
-        self._total_rows: Set[int] = set()  # индексы итоговых строк (0-based)
+        self._total_bars: List[_PulsingProgressBar] = []
 
         self.lbl_title = QLabel("Загрузка учреждений")
         self.lbl_title.setObjectName("sectionTitle")
@@ -123,6 +186,10 @@ class OrgUsagePage(QWidget):
         self.tbl.setAlternatingRowColors(False)
         self.tbl.itemSelectionChanged.connect(self._on_selection_changed)
 
+        # делегат для подсветки итоговых строк
+        self._row_delegate = UsageRowDelegate(self.tbl)
+        self.tbl.setItemDelegate(self._row_delegate)
+
         header = self.tbl.horizontalHeader()
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -168,7 +235,6 @@ class OrgUsagePage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Загрузка учреждений", f"Ошибка загрузки учреждений:\n{e}")
             return
-
         self.reload()
 
     def _calc_period(self) -> Period:
@@ -183,15 +249,15 @@ class OrgUsagePage(QWidget):
             return Period(start=start, end=end, title=f"Неделя: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "month":
             start = d.replace(day=1)
-            next_month = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
-            end = next_month - timedelta(days=1)
+            nm = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
+            end = nm - timedelta(days=1)
             return Period(start=start, end=end, title=f"Месяц: {start:%m.%Y} ({start:%d.%m.%Y} – {end:%d.%m.%Y})")
         if mode == "quarter":
             q = (d.month - 1) // 3 + 1
-            start_month = 3 * (q - 1) + 1
-            start = d.replace(month=start_month, day=1)
-            next_q = start.replace(year=start.year + 1, month=1, day=1) if start_month == 10 else start.replace(month=start_month + 3, day=1)
-            end = next_q - timedelta(days=1)
+            sm = 3 * (q - 1) + 1
+            start = d.replace(month=sm, day=1)
+            nq = start.replace(year=start.year + 1, month=1, day=1) if sm == 10 else start.replace(month=sm + 3, day=1)
+            end = nq - timedelta(days=1)
             return Period(start=start, end=end, title=f"Квартал Q{q}: {start:%d.%m.%Y} – {end:%d.%m.%Y}")
         if mode == "year":
             start = d.replace(month=1, day=1)
@@ -200,28 +266,26 @@ class OrgUsagePage(QWidget):
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
     def _make_progress(self, pct: float, *, is_total: bool = False) -> QProgressBar:
-        pb = QProgressBar()
+        pb = _PulsingProgressBar() if is_total else QProgressBar()
         pb.setRange(0, 100)
         pb.setValue(max(0, min(100, int(round(pct)))))
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
-    
-        # --- ВАШИ пороги (поставьте как нужно) ---
-        # пример: 0=neutral, 1..50 red, 51..70 orange, 71..99 yellow, 100 green
+
         if pct >= 100:
-            chunk = "#22c55e"     # green
+            chunk = "#22c55e"
         elif pct >= 71:
-            chunk = "#facc15"     # yellow
+            chunk = "#facc15"
         elif pct >= 51:
-            chunk = "#f59e0b"     # orange
+            chunk = "#f59e0b"
         elif pct >= 1:
-            chunk = "#ef4444"     # red
+            chunk = "#ef4444"
         else:
-            chunk = "rgba(255,255,255,0.18)"  # neutral
-    
-        bg = "rgba(99,102,241,0.10)" if is_total else "rgba(11,18,32,0.65)"
-        br = "rgba(99,102,241,0.25)" if is_total else "rgba(255,255,255,0.14)"
-    
+            chunk = "rgba(255,255,255,0.18)"
+
+        bg = "rgba(99,102,241,0.12)" if is_total else "rgba(11,18,32,0.65)"
+        br = "rgba(99,102,241,0.30)" if is_total else "rgba(255,255,255,0.14)"
+
         pb.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid {br};
@@ -237,7 +301,11 @@ class OrgUsagePage(QWidget):
                 border-radius: 8px;
             }}
         """)
-    
+
+        if is_total and isinstance(pb, _PulsingProgressBar):
+            pb.start_pulse()
+            self._total_bars.append(pb)
+
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
@@ -246,39 +314,12 @@ class OrgUsagePage(QWidget):
         e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
         self.details.set_shift_titles(m, d, e)
 
-    def _apply_usage_table_total_rows_qss(self) -> None:
-        """
-        Qt QSS не умеет “раскрасить произвольные строки” напрямую.
-        Но можно через nth-child, если мы знаем индексы строк.
-        """
-        if not self._total_rows:
-            self.tbl.setStyleSheet("")  # сброс локального
-            return
-
-        # QSS nth-child индексируется с 1
-        selectors = [f"QTableWidget#usageTable::item:nth-child({r+1})" for r in sorted(self._total_rows)]
-
-        # чуть сильнее, чем было: чтобы реально отличалось
-        total_bg = "rgba(99, 102, 241, 0.20)"
-        total_fg = "rgba(255, 255, 255, 0.92)"
-
-        qss = f"""
-        /* total rows highlight */
-        {", ".join(selectors)} {{
-            background: {total_bg};
-            color: {total_fg};
-            font-weight: 800;
-        }}
-        """
-
-        self.tbl.setStyleSheet(qss)
-
-        # переполировать таблицу
-        self.tbl.style().unpolish(self.tbl)
-        self.tbl.style().polish(self.tbl)
-        self.tbl.viewport().update()
-
     def reload(self):
+        # останавливаем старые пульсации
+        for pb in self._total_bars:
+            pb.stop_pulse()
+        self._total_bars.clear()
+
         p = self._calc_period()
         self._period = p
         self.lbl_period.setText(f"Период: {p.title}")
@@ -316,14 +357,13 @@ class OrgUsagePage(QWidget):
 
         def org_total_ratio(k):
             rr = by_org[k]
-            cap0 = sum(x.capacity_sec for x in rr)
-            busy0 = sum(x.pd_sec + x.gz_sec for x in rr)
-            return (busy0 / cap0) if cap0 else 0.0
+            c0 = sum(x.capacity_sec for x in rr)
+            b0 = sum(x.pd_sec + x.gz_sec for x in rr)
+            return (b0 / c0) if c0 else 0.0
 
         org_keys = sorted(by_org.keys(), key=org_total_ratio, reverse=True)
 
         self.tbl.setRowCount(0)
-        self._total_rows = set()
 
         for (oid, oname) in org_keys:
             org_rows = by_org[(oid, oname)]
@@ -334,35 +374,36 @@ class OrgUsagePage(QWidget):
             org_busy = org_pd + org_gz
             org_pct = _pct(org_busy, org_cap)
 
-            # --- total row for org ---
             r0 = self.tbl.rowCount()
             self.tbl.insertRow(r0)
-            self._total_rows.add(r0)
 
             it_org = QTableWidgetItem(oname)
             it_venue = QTableWidgetItem("ИТОГО по учреждению")
-
-            it_org.setFont(self._bold_font())
-            it_venue.setFont(self._bold_font())
-
+            bf = self._bold_font()
+            it_org.setFont(bf)
+            it_venue.setFont(bf)
             it_org.setData(Qt.ItemDataRole.UserRole, ("org", oid))
             it_venue.setData(Qt.ItemDataRole.UserRole, ("org", oid))
+
+            # пометка "итого" для делегата
+            it_org.setData(ROLE_IS_TOTAL, True)
+            it_venue.setData(ROLE_IS_TOTAL, True)
 
             self.tbl.setItem(r0, 0, it_org)
             self.tbl.setItem(r0, 1, it_venue)
             self.tbl.setCellWidget(r0, 2, self._make_progress(org_pct, is_total=True))
-            self.tbl.setItem(r0, 3, QTableWidgetItem(f"{org_pct:.1f}%"))
-            self.tbl.setItem(r0, 4, QTableWidgetItem(f"{_hours(org_pd):.1f}"))
-            self.tbl.setItem(r0, 5, QTableWidgetItem(f"{_hours(org_gz):.1f}"))
-            self.tbl.setItem(r0, 6, QTableWidgetItem(f"{_hours(org_busy):.1f}"))
 
-            # align numeric
-            for c in (3, 4, 5, 6):
-                it = self.tbl.item(r0, c)
-                if it:
-                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            for ci, txt in ((3, f"{org_pct:.1f}%"),
+                            (4, f"{_hours(org_pd):.1f}"),
+                            (5, f"{_hours(org_gz):.1f}"),
+                            (6, f"{_hours(org_busy):.1f}")):
+                it = QTableWidgetItem(txt)
+                it.setFont(bf)
+                it.setData(ROLE_IS_TOTAL, True)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tbl.setItem(r0, ci, it)
 
-            # --- venue rows ---
+            # venue rows
             org_rows.sort(key=lambda x: (x.total_sec / x.capacity_sec) if x.capacity_sec else 0.0, reverse=True)
             for v in org_rows:
                 rr = self.tbl.rowCount()
@@ -388,9 +429,6 @@ class OrgUsagePage(QWidget):
                     it = self.tbl.item(rr, c)
                     if it:
                         it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        # применяем локальный QSS для итоговых строк
-        self._apply_usage_table_total_rows_qss()
 
         if self.tbl.rowCount() > 0:
             self.tbl.setCurrentCell(0, 0)
@@ -425,31 +463,14 @@ class OrgUsagePage(QWidget):
             if not v:
                 self.details.set_data(None)
                 return
-
-            self._apply_shift_titles(
-                m_cap=v.morning_capacity_sec,
-                d_cap=v.day_capacity_sec,
-                e_cap=v.evening_capacity_sec,
-            )
-
-            self.details.set_data(
-                UsageTotals(
-                    title=f"Площадка: {v.venue_name}",
-                    period_title=self._period.title,
-                    cap_sec=v.capacity_sec,
-                    pd_sec=v.pd_sec,
-                    gz_sec=v.gz_sec,
-                    m_cap=v.morning_capacity_sec,
-                    m_pd=v.morning_pd_sec,
-                    m_gz=v.morning_gz_sec,
-                    d_cap=v.day_capacity_sec,
-                    d_pd=v.day_pd_sec,
-                    d_gz=v.day_gz_sec,
-                    e_cap=v.evening_capacity_sec,
-                    e_pd=v.evening_pd_sec,
-                    e_gz=v.evening_gz_sec,
-                )
-            )
+            self._apply_shift_titles(m_cap=v.morning_capacity_sec, d_cap=v.day_capacity_sec, e_cap=v.evening_capacity_sec)
+            self.details.set_data(UsageTotals(
+                title=f"Площадка: {v.venue_name}", period_title=self._period.title,
+                cap_sec=v.capacity_sec, pd_sec=v.pd_sec, gz_sec=v.gz_sec,
+                m_cap=v.morning_capacity_sec, m_pd=v.morning_pd_sec, m_gz=v.morning_gz_sec,
+                d_cap=v.day_capacity_sec, d_pd=v.day_pd_sec, d_gz=v.day_gz_sec,
+                e_cap=v.evening_capacity_sec, e_pd=v.evening_pd_sec, e_gz=v.evening_gz_sec,
+            ))
             return
 
         if kind == "org":
@@ -457,35 +478,20 @@ class OrgUsagePage(QWidget):
             if not org_rows:
                 self.details.set_data(None)
                 return
-
             m_cap = sum(x.morning_capacity_sec for x in org_rows)
             d_cap = sum(x.day_capacity_sec for x in org_rows)
             e_cap = sum(x.evening_capacity_sec for x in org_rows)
-
             self._apply_shift_titles(m_cap=m_cap, d_cap=d_cap, e_cap=e_cap)
-
             cap = sum(x.capacity_sec for x in org_rows)
             pd = sum(x.pd_sec for x in org_rows)
             gz = sum(x.gz_sec for x in org_rows)
-
-            self.details.set_data(
-                UsageTotals(
-                    title=f"Учреждение: {org_rows[0].org_name}",
-                    period_title=self._period.title,
-                    cap_sec=cap,
-                    pd_sec=pd,
-                    gz_sec=gz,
-                    m_cap=m_cap,
-                    m_pd=sum(x.morning_pd_sec for x in org_rows),
-                    m_gz=sum(x.morning_gz_sec for x in org_rows),
-                    d_cap=d_cap,
-                    d_pd=sum(x.day_pd_sec for x in org_rows),
-                    d_gz=sum(x.day_gz_sec for x in org_rows),
-                    e_cap=e_cap,
-                    e_pd=sum(x.evening_pd_sec for x in org_rows),
-                    e_gz=sum(x.evening_gz_sec for x in org_rows),
-                )
-            )
+            self.details.set_data(UsageTotals(
+                title=f"Учреждение: {org_rows[0].org_name}", period_title=self._period.title,
+                cap_sec=cap, pd_sec=pd, gz_sec=gz,
+                m_cap=m_cap, m_pd=sum(x.morning_pd_sec for x in org_rows), m_gz=sum(x.morning_gz_sec for x in org_rows),
+                d_cap=d_cap, d_pd=sum(x.day_pd_sec for x in org_rows), d_gz=sum(x.day_gz_sec for x in org_rows),
+                e_cap=e_cap, e_pd=sum(x.evening_pd_sec for x in org_rows), e_gz=sum(x.evening_gz_sec for x in org_rows),
+            ))
             return
 
         self.details.set_data(None)
