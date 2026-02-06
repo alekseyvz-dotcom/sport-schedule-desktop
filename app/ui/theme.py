@@ -343,24 +343,47 @@ QProgressBar#usagePctNeutral::chunk { background: rgba(255,255,255,0.18); border
 QToolButton#zoneTile {
     border: 2px solid rgba(255,255,255,0.14);
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 10px 12px;
     background: rgba(11, 18, 32, 0.65);
     color: rgba(255,255,255,0.92);
-    font-weight: 600;
+    font-weight: 700;
     min-height: 44px;
 }
-QToolButton#zoneTile:hover {
-    border: 2px solid rgba(255,255,255,0.28);
-    background: rgba(255,255,255,0.06);
+
+/* unknown */
+QToolButton#zoneTile[conflicts="-1"] {
+    border-color: rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.03);
 }
-/* conflicts property: -1 unknown, 0 ok, >0 bad */
-QToolButton#zoneTile[conflicts="-1"] { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.03); }
-QToolButton#zoneTile[conflicts="0"]  { border-color: rgba(34,197,94,0.85);  background: rgba(34,197,94,0.10); }
-/* QSS не умеет [conflicts>0], поэтому conflicts_bad */
-QToolButton#zoneTile[conflicts_bad="1"] { border-color: rgba(239,68,68,0.90); background: rgba(239,68,68,0.10); }
-/* selected flag */
-QToolButton#zoneTile[selected="true"] { background: rgba(96,165,250,0.16); border-color: rgba(96,165,250,0.95); }
-/* selected + ok/bad overrides */
-QToolButton#zoneTile[selected="true"][conflicts="0"] { background: rgba(34,197,94,0.18); border-color: rgba(34,197,94,0.90); }
-QToolButton#zoneTile[selected="true"][conflicts_bad="1"] { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.95); }
+
+/* свободна */
+QToolButton#zoneTile[conflicts="0"] {
+    border-color: rgba(34,197,94,0.85);
+    background: rgba(34,197,94,0.10);
+}
+
+/* занята (conflicts > 0) */
+QToolButton#zoneTile[conflicts_bad="1"] {
+    border-color: rgba(239,68,68,0.90);
+    background: rgba(239,68,68,0.10);
+}
+
+/* ВЫБРАНО (checked) — делаем явно заметно */
+QToolButton#zoneTile:checked {
+    background: rgba(96,165,250,0.22);
+    border-color: rgba(96,165,250,0.95);
+    color: rgba(255,255,255,0.98);
+}
+
+/* выбран + свободна */
+QToolButton#zoneTile:checked[conflicts="0"] {
+    background: rgba(34,197,94,0.22);
+    border-color: rgba(34,197,94,0.98);
+}
+
+/* выбран + занята */
+QToolButton#zoneTile:checked[conflicts_bad="1"] {
+    background: rgba(239,68,68,0.22);
+    border-color: rgba(239,68,68,0.98);
+}
 """
