@@ -170,8 +170,6 @@ class WelcomeLoginPage(QWidget):
 
         # --- Card hover/focus micro anim ---
         self._shadow = shadow
-        self._hover_anim.setDuration(180)
-        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._shadow_anim = QPropertyAnimation(self._shadow, b"blurRadius", self)
         self._shadow_anim.setDuration(180)
