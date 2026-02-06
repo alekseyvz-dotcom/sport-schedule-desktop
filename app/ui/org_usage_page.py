@@ -205,26 +205,39 @@ class OrgUsagePage(QWidget):
         pb.setValue(max(0, min(100, int(round(pct)))))
         pb.setTextVisible(True)
         pb.setFormat(f"{pct:.1f}%")
-
+    
+        # --- ВАШИ пороги (поставьте как нужно) ---
+        # пример: 0=neutral, 1..50 red, 51..70 orange, 71..99 yellow, 100 green
         if pct >= 100:
-            pb.setObjectName("usagePctGreen")
+            chunk = "#22c55e"     # green
         elif pct >= 71:
-            pb.setObjectName("usagePctYellow")
+            chunk = "#facc15"     # yellow
         elif pct >= 51:
-            pb.setObjectName("usagePctOrange")
+            chunk = "#f59e0b"     # orange
         elif pct >= 1:
-            pb.setObjectName("usagePctRed")
+            chunk = "#ef4444"     # red
         else:
-            pb.setObjectName("usagePctNeutral")
-
-        if is_total:
-            pb.setProperty("is_total", True)   # подхватим в QSS (см. ниже)
-            pb.setObjectName("usageTotalBar")  # отдельный стиль
-
-        # принудительно переполировать, т.к. objectName/properties меняются после создания
-        pb.style().unpolish(pb)
-        pb.style().polish(pb)
-
+            chunk = "rgba(255,255,255,0.18)"  # neutral
+    
+        bg = "rgba(99,102,241,0.10)" if is_total else "rgba(11,18,32,0.65)"
+        br = "rgba(99,102,241,0.25)" if is_total else "rgba(255,255,255,0.14)"
+    
+        pb.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {br};
+                border-radius: 8px;
+                background: {bg};
+                text-align: center;
+                padding: 2px;
+                min-width: 120px;
+                color: rgba(255,255,255,0.90);
+            }}
+            QProgressBar::chunk {{
+                background: {chunk};
+                border-radius: 8px;
+            }}
+        """)
+    
         return pb
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
