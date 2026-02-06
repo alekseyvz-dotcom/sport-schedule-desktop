@@ -101,39 +101,29 @@ from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
 class BookingBlockDelegate(QStyledItemDelegate):
-    """
-    v4 — полностью с нуля.
-    Ключевая идея: top-ячейка рисует ВЕСЬ блок целиком (fill + border + content),
-    middle/bottom только заливают свой rect цветом (без зазоров).
-    Текст и бейджи рисуются в top, но используют полную высоту блока.
-    """
+    """v5 — радикально убираем полосы + гарантируем суб-бейдж."""
 
-    ROLE_PART  = Qt.ItemDataRole.UserRole + 1
-    ROLE_ROWS  = Qt.ItemDataRole.UserRole + 2   # (r0, r1) — диапазон строк блока
+    ROLE_PART = Qt.ItemDataRole.UserRole + 1
+    ROLE_ROWS = Qt.ItemDataRole.UserRole + 2
 
-    # ── Палитра ──
+    # Палитра
     PD_FILL       = QColor(71, 132, 210, 120)
     PD_BADGE      = QColor(59, 130, 246, 230)
-
     GZ_FILL       = QColor(210, 140, 30, 120)
     GZ_BADGE      = QColor(217, 119, 6, 230)
-
     GZ_FREE_FILL  = QColor(240, 195, 80, 90)
     GZ_FREE_BADGE = QColor(251, 191, 36, 210)
-
     CANC_FILL     = QColor(120, 130, 150, 80)
     CANC_BADGE    = QColor(100, 116, 139, 210)
 
-    BG_OPAQUE     = QColor(11, 18, 32)
-    CELL_EMPTY    = QColor(255, 255, 255, 8)
-    GRID_COLOR    = QColor(255, 255, 255, 12)
+    BG_OPAQUE  = QColor(11, 18, 32)
+    CELL_EMPTY = QColor(255, 255, 255, 8)
+    GRID_COLOR = QColor(255, 255, 255, 12)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._base_font = QFont()
         self._base_font.setPointSizeF(max(self._base_font.pointSizeF(), 9.5))
-
-    # ── helpers ──
 
     def _find_page(self):
         w = self.parent()
@@ -144,63 +134,49 @@ class BookingBlockDelegate(QStyledItemDelegate):
         return None
 
     def _palette(self, booking):
-        """-> (fill_color, badge_color)"""
         if not booking:
             return QColor(0, 0, 0, 0), QColor(0, 0, 0, 0)
-
         st = (getattr(booking, "status", "") or "").lower()
         if st == "cancelled":
             return QColor(self.CANC_FILL), QColor(self.CANC_BADGE)
-
         k = (getattr(booking, "kind", "") or
              getattr(booking, "activity", "") or "").upper()
-
         if k == "GZ":
             gid = getattr(booking, "gz_group_id", None)
             page = self._find_page()
             if page and gid is not None and page._gz_group_is_free.get(int(gid), False):
                 return QColor(self.GZ_FREE_FILL), QColor(self.GZ_FREE_BADGE)
             return QColor(self.GZ_FILL), QColor(self.GZ_BADGE)
-
         return QColor(self.PD_FILL), QColor(self.PD_BADGE)
-
-    # ── paint ──
 
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
             super().paint(painter, option, index)
             return
 
-        rect  = option.rect
-        bk    = index.data(Qt.ItemDataRole.UserRole)
-        part  = index.data(self.ROLE_PART)
+        rect = option.rect
+        bk   = index.data(Qt.ItemDataRole.UserRole)
+        part = index.data(self.ROLE_PART)
 
         painter.save()
-        painter.setClipRect(rect)
+        # Расширяем clip на 2px вверх чтобы перехлёст не обрезался
+        clip = rect.adjusted(0, -2, 0, 0)
+        painter.setClipRect(clip)
 
-        # 1. Непрозрачная подложка
+        # 1. Непрозрачная подложка — весь rect
         painter.fillRect(rect, self.BG_OPAQUE)
 
         if not bk:
-            # пустая ячейка
             painter.fillRect(rect, self.CELL_EMPTY)
-
-            # ── SELECTION для пустой ячейки ──
             if option.state & QStyle.StateFlag.State_Selected:
                 painter.fillRect(rect, QColor(99, 102, 241, 45))
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                pen = QPen(QColor(99, 102, 241, 120), 1)
-                painter.setPen(pen)
+                painter.setPen(QPen(QColor(99, 102, 241, 120), 1))
                 painter.drawRect(rect.adjusted(0, 0, -1, -1))
-            # ── HOVER для пустой ячейки ──
             elif option.state & QStyle.StateFlag.State_MouseOver:
                 painter.fillRect(rect, QColor(255, 255, 255, 12))
-
-            # Сетка
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            p = QPen(self.GRID_COLOR)
-            p.setWidth(1)
-            painter.setPen(p)
+            painter.setPen(QPen(self.GRID_COLOR, 1))
             painter.drawLine(rect.left(), rect.bottom(),
                              rect.right(), rect.bottom())
             painter.drawLine(rect.right(), rect.top(),
@@ -208,24 +184,26 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # --- далее бронь (без изменений) ---
         fill, badge_clr = self._palette(bk)
-        R = 8.0
+        R  = 8.0
         MX = 2
+        # Перехлёст: middle и bottom начинаются на 2px выше своего rect,
+        # чтобы гарантированно перекрыть зазор между строками таблицы.
+        OVERLAP = 2
 
-        x  = rect.left() + MX
-        w  = rect.width() - MX * 2
+        x = rect.left() + MX
+        w = rect.width() - MX * 2
 
         if part == "top":
             y = rect.top() + 1
-            h = rect.height() - 1
+            h = rect.height() - 1 + OVERLAP  # внизу залезаем на следующую строку
         elif part == "bottom":
-            y = rect.top()
-            h = rect.height() - 1
+            y = rect.top() - OVERLAP          # вверху залезаем на предыдущую
+            h = rect.height() - 1 + OVERLAP
         elif part == "middle":
-            y = rect.top()
-            h = rect.height()
-        else:
+            y = rect.top() - OVERLAP
+            h = rect.height() + OVERLAP * 2   # оба направления
+        else:  # single
             y = rect.top() + 1
             h = rect.height() - 2
 
@@ -234,11 +212,9 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
+        painter.drawPath(self._shape(rf, part, R))
 
-        path = self._shape(rf, part, R)
-        painter.drawPath(path)
-
-        # Тонкая рамка
+        # Рамка
         bc = QColor(fill)
         bc.setAlpha(min(255, fill.alpha() + 50))
         painter.setPen(QPen(bc, 1.0))
@@ -250,9 +226,8 @@ class BookingBlockDelegate(QStyledItemDelegate):
             painter.drawPath(self._shape(
                 rf.adjusted(.5, .5, -.5, -.5), part, R))
 
-        # Selection на брони
+        # Selection
         if option.state & QStyle.StateFlag.State_Selected:
-            # Подсветка поверх блока
             painter.setBrush(QColor(255, 255, 255, 25))
             painter.setPen(QPen(QColor(255, 255, 255, 100), 1.5))
             painter.drawPath(self._shape(
@@ -261,35 +236,31 @@ class BookingBlockDelegate(QStyledItemDelegate):
         # Контент
         if part in ("top", None):
             full_h = self._full_block_height(index, rect)
-            content_rf = QRectF(rf.left(), rf.top(), rf.width(), full_h)
+            # content_rf начинается от top rf, высота = полный блок
+            content_rf = QRectF(rf.left(), rect.top() + 1, rf.width(),
+                                max(full_h - 2, rf.height()))
             self._draw_labels(painter, bk, index, content_rf, badge_clr)
 
         painter.restore()
 
     def _full_block_height(self, index, top_rect) -> float:
-        """Вычисляет полную высоту блока в пикселях."""
-        rows_data = index.data(self.ROLE_ROWS)  # (r0, r1)
+        rows_data = index.data(self.ROLE_ROWS)
         if not rows_data:
             return float(top_rect.height())
-
         r0, r1 = rows_data
         table = self.parent()
         if table is None:
             return float(top_rect.height())
-
         total = 0
         for r in range(r0, r1 + 1):
             total += table.rowHeight(r)
         return float(total)
-
-    # ── Форма блока ──
 
     @staticmethod
     def _shape(rf: QRectF, part: str, R: float) -> QPainterPath:
         p = QPainterPath()
         if part == "middle":
             p.addRect(rf)
-
         elif part == "top":
             p.moveTo(rf.left(), rf.bottom())
             p.lineTo(rf.left(), rf.top() + R)
@@ -298,7 +269,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
             p.arcTo(rf.right() - R * 2, rf.top(), R * 2, R * 2, 90, -90)
             p.lineTo(rf.right(), rf.bottom())
             p.closeSubpath()
-
         elif part == "bottom":
             p.moveTo(rf.left(), rf.top())
             p.lineTo(rf.left(), rf.bottom() - R)
@@ -307,26 +277,22 @@ class BookingBlockDelegate(QStyledItemDelegate):
             p.arcTo(rf.right() - R * 2, rf.bottom() - R * 2, R * 2, R * 2, 270, 90)
             p.lineTo(rf.right(), rf.top())
             p.closeSubpath()
-
-        else:  # single
+        else:
             p.addRoundedRect(rf, R, R)
         return p
 
-    # ── Бейджи и текст ──
-
     def _draw_labels(self, painter: QPainter, bk, index,
                      rf: QRectF, badge_clr: QColor):
-
         kind   = (getattr(bk, "kind", "") or
                   getattr(bk, "activity", "") or "").upper()
         status = (getattr(bk, "status", "") or "").lower()
 
-        raw   = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        raw = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
         lines = [l.strip() for l in raw.split("\n") if l.strip()]
         tenant_text = lines[0] if lines else ""
         event_text  = lines[1] if len(lines) > 1 else ""
 
-        # ── Бейдж типа (ПД / ГЗ / ОТМ) ──
+        # ── Бейдж типа ──
         tag = ("ОТМ" if status == "cancelled"
                else "ПД" if kind == "PD"
                else "ГЗ" if kind == "GZ"
@@ -337,19 +303,18 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.setFont(fb)
         fm = painter.fontMetrics()
 
-        px  = 8
-        bw  = fm.horizontalAdvance(tag) + px * 2
-        bh  = fm.height() + 6
-        bx  = rf.right() - bw - 8
-        by  = rf.top() + 6
-        brect = QRectF(bx, by, bw, bh)
+        px = 8
+        bw = fm.horizontalAdvance(tag) + px * 2
+        bh = fm.height() + 6
+        bx = rf.right() - bw - 8
+        by = rf.top() + 6
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(badge_clr)
-        painter.drawRoundedRect(brect, 6, 6)
-
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 6, 6)
         painter.setPen(QColor(255, 255, 255, 245))
-        painter.drawText(brect, Qt.AlignmentFlag.AlignCenter, tag)
+        painter.drawText(QRectF(bx, by, bw, bh),
+                         Qt.AlignmentFlag.AlignCenter, tag)
 
         # ── Имя арендатора ──
         cl = rf.left() + 10
@@ -361,15 +326,12 @@ class BookingBlockDelegate(QStyledItemDelegate):
         ft.setBold(True)
         painter.setFont(ft)
         fmn = painter.fontMetrics()
-
         painter.setPen(QColor(255, 255, 255, 235))
         elided = fmn.elidedText(tenant_text,
                                 Qt.TextElideMode.ElideRight, int(cw))
-        name_rect = QRectF(cl, by, cw, bh)
-        painter.drawText(name_rect,
+        painter.drawText(QRectF(cl, by, cw, bh),
                          Qt.AlignmentFlag.AlignLeft |
-                         Qt.AlignmentFlag.AlignVCenter,
-                         elided)
+                         Qt.AlignmentFlag.AlignVCenter, elided)
 
         # ── Суб-бейдж события ──
         if not event_text:
@@ -388,18 +350,13 @@ class BookingBlockDelegate(QStyledItemDelegate):
         sbh = fms.height() + spy * 2
         sy  = by + bh + 5
 
-        # Проверяем по ПОЛНОЙ высоте блока (не одной ячейки!)
         if sy + sbh > rf.bottom() - 4 or sbw < 30:
             return
 
-        sb_rect = QRectF(cl, sy, sbw, sbh)
-
-        # Полупрозрачный тёмный фон
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 0, 0, 60))
-        painter.drawRoundedRect(sb_rect, 5, 5)
+        painter.drawRoundedRect(QRectF(cl, sy, sbw, sbh), 5, 5)
 
-        # Текст
         elided_ev = fms.elidedText(event_text,
                                    Qt.TextElideMode.ElideRight,
                                    int(sbw - spx * 2))
@@ -411,6 +368,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
+
 
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
