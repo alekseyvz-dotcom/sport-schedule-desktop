@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta, timezone
 from typing import List, Dict, Tuple, Optional, Set
 
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QWidget,
@@ -33,6 +33,7 @@ from app.ui.usage_details_widget import UsageDetailsWidget, UsageTotals
 
 
 ROLE_IS_TOTAL = Qt.ItemDataRole.UserRole + 50
+ROLE_PCT      = Qt.ItemDataRole.UserRole + 51
 
 
 @dataclass(frozen=True)
@@ -51,59 +52,97 @@ def _hours(sec: int) -> float:
 
 class UsageRowDelegate(QStyledItemDelegate):
     """
-    Делегат для usageTable.
-    Итоговые строки (ROLE_IS_TOTAL=True) — рисуем ВСЁ сами,
-    чтобы QSS не перебил фон.
-    Обычные строки — стандартный paint.
+    Делегат для usageTable:
+    - Итоговые строки подсвечиваем.
+    - Колонка "Загрузка" (index.column()==2): рисуем pill progress сами (без QProgressBar).
     """
 
-    TOTAL_BG     = QColor(40, 42, 80)       # непрозрачный тёмно-индиго
-    TOTAL_BG_SEL = QColor(55, 58, 110)      # чуть светлее при selection
-    TOTAL_BORDER = QColor(99, 102, 241, 60) # линия-разделитель снизу
+    TOTAL_BG     = QColor(40, 42, 80)
+    TOTAL_BG_SEL = QColor(55, 58, 110)
+    TOTAL_BORDER = QColor(99, 102, 241, 60)
     TOTAL_FG     = QColor(255, 255, 255, 235)
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
-        is_total = index.data(ROLE_IS_TOTAL)
+    BAR_BG   = QColor(255, 255, 255, 18)
+    BAR_BR   = QColor(255, 255, 255, 35)
+    BAR_TXT  = QColor(255, 255, 255, 220)
 
-        if not is_total:
-            super().paint(painter, option, index)
+    def _chunk_color(self, pct: float) -> QColor:
+        if pct >= 100:
+            return QColor("#22c55e")
+        if pct >= 71:
+            return QColor("#facc15")
+        if pct >= 51:
+            return QColor("#f59e0b")
+        if pct >= 1:
+            return QColor("#ef4444")
+        return QColor(255, 255, 255, 40)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        is_total = bool(index.data(ROLE_IS_TOTAL))
+
+        painter.save()
+
+        # 1) Фон итоговой строки (для всех колонок)
+        if is_total:
+            r = option.rect
+            painter.fillRect(r, self.TOTAL_BG_SEL if (option.state & QStyle.StateFlag.State_Selected) else self.TOTAL_BG)
+            painter.setPen(QPen(self.TOTAL_BORDER, 1))
+            painter.drawLine(r.bottomLeft(), r.bottomRight())
+
+        # 2) Колонка "Загрузка": рисуем прогресс
+        if index.column() == 2:
+            r = option.rect.adjusted(10, 6, -10, -6)  # padding
+            radius = min(r.height() / 2.0, 8.0)
+
+            pct = index.data(ROLE_PCT)
+            try:
+                pct = float(pct)
+            except Exception:
+                pct = 0.0
+            pct = max(0.0, min(100.0, pct))
+
+            # фон pill
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(self.BAR_BR, 1))
+            painter.setBrush(self.BAR_BG)
+            painter.drawRoundedRect(r, radius, radius)
+
+            # chunk
+            if pct > 0:
+                w = r.width() * (pct / 100.0)
+                cr = QRectF(r.left(), r.top(), w, r.height())
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(self._chunk_color(pct))
+                painter.drawRoundedRect(cr, radius, radius)
+
+            # текст процента
+            painter.setPen(self.BAR_TXT)
+            painter.setFont(option.font)
+            painter.drawText(r, int(Qt.AlignmentFlag.AlignCenter), f"{pct:.1f}%")
+
+            painter.restore()
             return
 
-        # ── Итоговая строка: рисуем всё сами ──
-        painter.save()
-        r = option.rect
-
-        # 1. Фон — непрозрачный, QSS не перебьёт
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(r, self.TOTAL_BG_SEL)
-        else:
-            painter.fillRect(r, self.TOTAL_BG)
-
-        # 2. Линия-разделитель снизу
-        painter.setPen(QPen(self.TOTAL_BORDER, 1))
-        painter.drawLine(r.bottomLeft(), r.bottomRight())
-
-        # 3. Текст
-        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        if text:
-            font = index.data(Qt.ItemDataRole.FontRole)
-            if isinstance(font, QFont):
-                painter.setFont(font)
-            else:
-                painter.setFont(option.font)
-
-            painter.setPen(self.TOTAL_FG)
-
-            # Определяем alignment
-            align = index.data(Qt.ItemDataRole.TextAlignmentRole)
-            if align is None:
-                align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-            # Отступы как в QSS: padding 6px 10px
-            text_rect = r.adjusted(10, 0, -10, 0)
-            painter.drawText(text_rect, int(align), text)
-
         painter.restore()
+
+        # 3) Остальные колонки: текст (для итогов — вручную, чтобы QSS не мешал)
+        if is_total:
+            painter.save()
+            r = option.rect
+            text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+            if text:
+                font = index.data(Qt.ItemDataRole.FontRole)
+                painter.setFont(font if isinstance(font, QFont) else option.font)
+                painter.setPen(self.TOTAL_FG)
+                align = index.data(Qt.ItemDataRole.TextAlignmentRole)
+                if align is None:
+                    align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                painter.drawText(r.adjusted(10, 0, -10, 0), int(align), text)
+            painter.restore()
+            return
+
+        # обычные строки
+        super().paint(painter, option, index)
 
 class OrgUsagePage(QWidget):
     TZ_OFFSET_HOURS = 3
