@@ -97,12 +97,18 @@ from app.ui.booking_dialog import BookingDialog
 
 from PySide6.QtCore import QRectF
 
+from PySide6.QtCore import QRectF
+from PySide6.QtWidgets import QStyle
+
 class BookingBlockDelegate(QStyledItemDelegate):
     ROLE_PART = Qt.ItemDataRole.UserRole + 1  # "top"/"middle"/"bottom"
 
     PD = QColor(96, 165, 250)
     GZ = QColor(245, 158, 11)
     CANC = QColor(148, 163, 184)
+
+    GRID_PEN = QPen(QColor(255, 255, 255, 18), 1)  # тонкая общая сетка
+    CELL_BG = QColor(15, 23, 42, 35)              # фон пустой ячейки
 
     @staticmethod
     def _accent_for(booking) -> QColor:
@@ -117,7 +123,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         return QColor(BookingBlockDelegate.PD)
 
     def paint(self, painter: QPainter, option, index):
-        # колонку времени рисуем стандартно
+        # колонку времени — стандартно
         if index.column() == 0:
             super().paint(painter, option, index)
             return
@@ -129,20 +135,30 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # базовый фон ячейки (НЕ рисуем сетку линиями)
-        painter.fillRect(rect, QColor(15, 23, 42, 40))
+        # 1) Всегда красим фон ячейки
+        painter.fillRect(rect, self.CELL_BG)
 
+        # 2) Рисуем общую сетку (всегда, чтобы была "общая сетка")
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(self.GRID_PEN)
+        painter.drawLine(rect.topLeft(), rect.topRight())
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        painter.drawLine(rect.topLeft(), rect.bottomLeft())
+        painter.drawLine(rect.topRight(), rect.bottomRight())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Нет брони — на этом всё
         if not booking:
             painter.restore()
             return
 
+        # 3) Есть бронь: рисуем ПОЛНОСТЬЮ непрозрачный блок,
+        # чтобы сетка/подложка/selection не "просвечивали" полосами
         accent = self._accent_for(booking)
 
-        # делаем блок НЕпрозрачным, чтобы не просвечивала подложка/полосы
         fill = QColor(accent)
-        fill.setAlpha(230)
+        fill.setAlpha(255)  # ВАЖНО: непрозрачный
 
-        # рисуем почти на весь rect, без "прозрачных краёв"
         r = rect.adjusted(1, 1, -1, -1)
         rf = QRectF(r)
         radius = 10.0
@@ -150,6 +166,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
 
+        # форма блока по частям
         if part == "middle":
             painter.drawRect(rf)
         elif part == "top":
@@ -165,23 +182,25 @@ class BookingBlockDelegate(QStyledItemDelegate):
         else:
             painter.drawRoundedRect(rf, radius, radius)
 
-        # левая акцентная полоса
-        painter.setBrush(accent)
+        # левая акцентная полоска
+        painter.setBrush(accent.darker(115))
         painter.drawRect(QRectF(rf.left(), rf.top(), 4, rf.height()))
 
-        # бейдж+текст только в top/одиночном
+        # 4) Если ячейка выделена — вместо штатной подложки просто рисуем тонкую обводку
+        if option.state & QStyle.StateFlag.State_Selected:
+            pen = QPen(QColor(255, 255, 255, 120), 1)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rf, radius, radius)
+
+        # 5) Текст/бейдж только в top/одиночной
         if part == "top" or part is None:
             kind = (getattr(booking, "kind", "") or getattr(booking, "activity", "") or "").upper()
             status = (getattr(booking, "status", "") or "").lower()
 
-            if status == "cancelled":
-                badge_text = "ОТМ"
-                badge_bg = QColor(self.CANC)
-                badge_bg.setAlpha(240)
-            else:
-                badge_text = "ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—"))
-                badge_bg = QColor(accent)
-                badge_bg.setAlpha(245)
+            badge_text = "ОТМ" if status == "cancelled" else ("ПД" if kind == "PD" else ("ГЗ" if kind == "GZ" else (kind or "—")))
+            badge_bg = QColor(self.CANC if status == "cancelled" else accent)
+            badge_bg.setAlpha(255)
 
             fm = painter.fontMetrics()
             pad_x, pad_y = 8, 3
@@ -205,7 +224,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
                 f2 = painter.font()
                 f2.setBold(False)
                 painter.setFont(f2)
-                painter.setPen(QPen(QColor(255, 255, 255, 238)))
+                painter.setPen(QPen(QColor(255, 255, 255, 245)))
                 text_rect = QRectF(rf.left() + 10, rf.top() + 8, rf.width() - 10 - 70, rf.height() - 12)
                 painter.drawText(
                     text_rect,
