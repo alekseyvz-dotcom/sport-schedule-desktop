@@ -101,17 +101,11 @@ from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
 
 class BookingBlockDelegate(QStyledItemDelegate):
-    """
-    v7 — максимально простой подход.
-    Каждая ячейка блока просто заливается непрозрачным цветом на ВЕСЬ rect.
-    Никаких зазоров, никаких adjusted, никаких overlap.
-    Скругление ТОЛЬКО у top (сверху) и bottom (снизу) через clip mask.
-    """
+    """v8 — fillRect + скругления через маску + текст без clip."""
 
     ROLE_PART = Qt.ItemDataRole.UserRole + 1
     ROLE_ROWS = Qt.ItemDataRole.UserRole + 2
 
-    # Непрозрачная палитра
     PD_FILL    = QColor(30, 58, 95)
     PD_BORDER  = QColor(50, 90, 145)
     PD_BADGE   = QColor(59, 130, 246)
@@ -131,6 +125,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
     BG         = QColor(11, 18, 32)
     EMPTY      = QColor(15, 20, 32)
     GRID       = QColor(255, 255, 255, 12)
+    RAD        = 10  # радиус скругления
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -173,7 +168,6 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.setClipRect(r)
         painter.fillRect(r, self.BG)
 
-        # ── Пустая ячейка ──
         if not bk:
             painter.fillRect(r, self.EMPTY)
             if option.state & QStyle.StateFlag.State_Selected:
@@ -189,35 +183,88 @@ class BookingBlockDelegate(QStyledItemDelegate):
             return
 
         fill, bdr, badge = self._pal(bk)
+        R = self.RAD
+        mx = 2
 
-        # ── Заливка: весь rect, без зазоров ──
-        # Рисуем просто fillRect на весь rect — это ГАРАНТИРУЕТ отсутствие полос
+        # ── 1. Заливаем ВЕСЬ rect цветом блока ──
         painter.fillRect(r, fill)
 
-        # ── Боковые рамки (всегда) ──
+        # ── 2. Скругления — рисуем углы цветом фона ──
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self.BG)
+
+        if part in ("top", None):
+            # Левый верхний угол: заливаем квадрат R×R, вырезаем дугу
+            self._round_corner(painter, r.left() + mx, r.top(), R, "tl", fill)
+            # Правый верхний угол
+            self._round_corner(painter, r.right() - mx - R, r.top(), R, "tr", fill)
+
+        if part in ("bottom", None):
+            # Левый нижний
+            self._round_corner(painter, r.left() + mx, r.bottom() - R, R, "bl", fill)
+            # Правый нижний
+            self._round_corner(painter, r.right() - mx - R, r.bottom() - R, R, "br", fill)
+
+        # ── 3. Боковые рамки ──
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(QPen(bdr, 1))
-        mx = 1
         painter.drawLine(r.left() + mx, r.top(), r.left() + mx, r.bottom())
         painter.drawLine(r.right() - mx, r.top(), r.right() - mx, r.bottom())
 
-        # ── Горизонтальные рамки (только top сверху, bottom снизу) ──
+        # Верх/низ рамки
         if part in ("top", None):
-            painter.drawLine(r.left() + mx, r.top(), r.right() - mx, r.top())
+            painter.drawLine(r.left() + mx + R, r.top(),
+                             r.right() - mx - R, r.top())
         if part in ("bottom", None):
-            painter.drawLine(r.left() + mx, r.bottom(), r.right() - mx, r.bottom())
+            painter.drawLine(r.left() + mx + R, r.bottom(),
+                             r.right() - mx - R, r.bottom())
 
-        # ── Selection ──
+        # ── 4. Selection ──
         if option.state & QStyle.StateFlag.State_Selected:
             painter.fillRect(r, QColor(255, 255, 255, 18))
 
-        # ── Контент — только top / single ──
+        # ── 5. Контент ──
         if part in ("top", None):
             fh = self._block_h(index, r)
+            # Снимаем clip чтобы текст мог рисоваться в middle-ячейках ниже
+            painter.setClipping(False)
             self._labels(painter, bk, index,
-                         QRectF(r.left() + 2, r.top(), r.width() - 4, fh),
+                         QRectF(r.left() + mx, r.top(),
+                                r.width() - mx * 2, fh),
                          badge)
 
         painter.restore()
+
+    def _round_corner(self, painter: QPainter, x: float, y: float,
+                      R: int, corner: str, fill: QColor):
+        """
+        Рисует скруглённый угол: заливаем квадрат R×R цветом фона,
+        потом рисуем четверть круга цветом заливки блока.
+        """
+        rect = QRectF(x, y, R, R)
+
+        # Заливаем квадрат фоном (убираем угол блока)
+        painter.setBrush(self.BG)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(rect)
+
+        # Рисуем четверть эллипса цветом блока
+        painter.setBrush(fill)
+        arc_rect = QRectF(0, 0, R * 2, R * 2)
+
+        if corner == "tl":
+            arc_rect.moveTo(x, y)
+            painter.drawPie(arc_rect, 90 * 16, 90 * 16)
+        elif corner == "tr":
+            arc_rect.moveTo(x - R, y)
+            painter.drawPie(arc_rect, 0 * 16, 90 * 16)
+        elif corner == "bl":
+            arc_rect.moveTo(x, y - R)
+            painter.drawPie(arc_rect, 180 * 16, 90 * 16)
+        elif corner == "br":
+            arc_rect.moveTo(x - R, y - R)
+            painter.drawPie(arc_rect, 270 * 16, 90 * 16)
 
     def _block_h(self, index, top_rect) -> float:
         rd = index.data(self.ROLE_ROWS)
@@ -240,14 +287,13 @@ class BookingBlockDelegate(QStyledItemDelegate):
         name  = parts[0] if parts else ""
         event = parts[1] if len(parts) > 1 else ""
 
-        # fallback: показываем время
         if not event:
             sa = getattr(bk, "starts_at", None)
             ea = getattr(bk, "ends_at", None)
             if sa and ea:
                 event = f"{sa:%H:%M} – {ea:%H:%M}"
 
-        # ── Бейдж типа (справа, вверху) ──
+        # ── Бейдж типа ──
         tag = ("ОТМ" if status == "cancelled"
                else "ПД" if kind == "PD"
                else "ГЗ" if kind == "GZ"
@@ -273,7 +319,7 @@ class BookingBlockDelegate(QStyledItemDelegate):
         painter.drawText(QRectF(bx, by, bw, bh),
                          Qt.AlignmentFlag.AlignCenter, tag)
 
-        # ── Имя (слева, вверху) ──
+        # ── Имя ──
         nl = rf.left() + 8
         nw = bx - 8 - nl
         if nw < 20:
@@ -291,27 +337,27 @@ class BookingBlockDelegate(QStyledItemDelegate):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             el)
 
-        # ── Событие / время (вторая строка) ──
+        # ── Вторая строка (событие / время) ──
         if not event:
             return
 
-        ey = by + bh + 4
-        ew = rf.width() - 16
-
         fs = QFont(self._bf)
         fs.setBold(False)
-        fs.setPointSizeF(max(self._bf.pointSizeF() - 1.0, 8.0))
+        fs.setPointSizeF(max(self._bf.pointSizeF() - 0.5, 8.5))
         painter.setFont(fs)
         fms = painter.fontMetrics()
 
-        # проверяем по ПОЛНОЙ высоте блока
-        if ey + fms.height() + 4 > rf.bottom() - 2 or ew < 30:
+        ey = by + bh + 3
+        ew = rf.width() - 16
+        eh = fms.height() + 4
+
+        if ey + eh > rf.bottom() - 2 or ew < 30:
             return
 
-        painter.setPen(QColor(255, 255, 255, 150))
+        painter.setPen(QColor(255, 255, 255, 160))
         el_ev = fms.elidedText(event, Qt.TextElideMode.ElideRight, int(ew))
         painter.drawText(
-            QRectF(rf.left() + 8, ey, ew, fms.height() + 4),
+            QRectF(rf.left() + 8, ey, ew, eh),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             el_ev)
 
