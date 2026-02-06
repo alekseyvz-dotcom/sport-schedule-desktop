@@ -231,7 +231,8 @@ class OrgUsagePage(QWidget):
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.tbl.setColumnWidth(2, 240)
         for c in (3, 4, 5, 6):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
 
