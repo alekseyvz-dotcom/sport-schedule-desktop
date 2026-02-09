@@ -333,6 +333,41 @@ class BookingBlockDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return super().sizeHint(option, index)
 
+class ListColorBarDelegate(QStyledItemDelegate):
+    """Рисует цветную вертикальную полосу слева в первой колонке списка."""
+    
+    ROLE_BAR_COLOR = Qt.ItemDataRole.UserRole + 20
+    BAR_WIDTH = 4
+    BAR_MARGIN = 2
+    
+    def paint(self, painter: QPainter, option, index):
+        # Сначала рисуем стандартный контент
+        super().paint(painter, option, index)
+        
+        # Рисуем цветную полосу слева
+        bar_color = index.data(self.ROLE_BAR_COLOR)
+        if bar_color and isinstance(bar_color, QColor) and bar_color.isValid():
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            r = option.rect
+            bar_rect = QRectF(
+                r.left() + self.BAR_MARGIN,
+                r.top() + 3,
+                self.BAR_WIDTH,
+                r.height() - 6
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(bar_color))
+            painter.drawRoundedRect(bar_rect, 2, 2)
+            painter.restore()
+
+    def sizeHint(self, option, index):
+        sh = super().sizeHint(option, index)
+        # Добавляем место для полосы в первой колонке
+        if index.column() == 0:
+            sh.setWidth(sh.width() + self.BAR_WIDTH + self.BAR_MARGIN * 2 + 4)
+        return sh
+
 class SchedulePage(QWidget):
     SLOT_MINUTES = 30
 
@@ -623,10 +658,14 @@ class SchedulePage(QWidget):
         self.tbl_list.verticalHeader().setVisible(False)
         self.tbl_list.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl_list.itemSelectionChanged.connect(self._update_details_from_selection)
-
+    
         self.tbl_list.setColumnCount(7)
         self.tbl_list.setHorizontalHeaderLabels(["Дата", "Время", "Арендатор", "Событие", "Площадка", "Тип", "Статус"])
-
+    
+        # Делегат с цветной полосой для первой колонки
+        self._list_bar_delegate = ListColorBarDelegate(self.tbl_list)
+        self.tbl_list.setItemDelegateForColumn(0, self._list_bar_delegate)
+    
         header = self.tbl_list.horizontalHeader()
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -637,7 +676,7 @@ class SchedulePage(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-
+    
         f = QFont()
         f.setPointSize(max(f.pointSize(), 10))
         self.tbl_list.setFont(f)
@@ -686,10 +725,11 @@ class SchedulePage(QWidget):
     def _status_color(self, status: str) -> QColor:
         s = (status or "").lower()
         if s == "cancelled":
-            return QColor("#ef4444")
+            return QColor("#ef4444")       # красный
         if s == "done":
-            return QColor("#64748b")
-        return QColor("#0f172a")
+            return QColor("#94a3b8")       # slate-400, видно на тёмном
+        # planned и прочее
+        return QColor("#4ade80")           # green-400, хорошо видно
 
     # -------- selection helpers --------
 
@@ -1037,7 +1077,7 @@ class SchedulePage(QWidget):
 
     def _reload_list(self):
         self.meta_row.setVisible(True)
-
+    
         self.tbl_list.setRowCount(0)
         if not self._resources:
             self.lbl_period.setText("Период: —")
@@ -1047,17 +1087,17 @@ class SchedulePage(QWidget):
             self.kpi_gz.setText("—")
             self.kpi_cancelled.setText("—")
             return
-
+    
         anchor = self.dt_day.date().toPython()
         d0, d1 = self._period_range(anchor)
         self.lbl_period.setText(f"Период: {d0:%d.%m.%Y} – {d1:%d.%m.%Y}")
-
+    
         start = datetime.combine(d0, time(0, 0), tzinfo=self.TZ)
         end = datetime.combine(d1 + timedelta(days=1), time(0, 0), tzinfo=self.TZ)
-
+    
         include_cancelled = self.cb_cancelled.isChecked()
         venue_ids = sorted({rsrc.venue_id for rsrc in self._resources})
-
+    
         try:
             bookings = list_bookings_for_range(venue_ids, start, end, include_cancelled=include_cancelled)
         except Exception as e:
@@ -1065,17 +1105,17 @@ class SchedulePage(QWidget):
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Расписание", f"Ошибка загрузки списка бронирований:\n{e}")
             return
-
+    
         total = len(bookings)
         pd = sum(1 for b in bookings if (getattr(b, "kind", "") or "").upper() == "PD")
         gz = sum(1 for b in bookings if (getattr(b, "kind", "") or "").upper() == "GZ")
         canc = sum(1 for b in bookings if (getattr(b, "status", "") or "").lower() == "cancelled")
-
+    
         self.kpi_total.setText(str(total))
         self.kpi_pd.setText(str(pd))
         self.kpi_gz.setText(str(gz))
         self.kpi_cancelled.setText(str(canc))
-
+    
         busy_sec = 0
         for b in bookings:
             s = getattr(b, "starts_at", None)
@@ -1084,14 +1124,14 @@ class SchedulePage(QWidget):
                 busy_sec += int((e - s).total_seconds())
         busy_hours = round(busy_sec / 3600.0, 1)
         self.lbl_total.setText(f"Занято: {busy_hours} ч | Бронирований: {total}")
-
+    
         bookings_sorted = sorted(bookings, key=lambda b: (getattr(b, "starts_at", datetime.min), getattr(b, "ends_at", datetime.min)))
         self.tbl_list.setRowCount(len(bookings_sorted))
-
+    
         for row, b in enumerate(bookings_sorted):
             starts_at = getattr(b, "starts_at", None)
             ends_at = getattr(b, "ends_at", None)
-
+    
             dt_str = starts_at.strftime("%d.%m.%Y") if starts_at else ""
             time_str = f"{starts_at:%H:%M}–{ends_at:%H:%M}" if starts_at and ends_at else ""
             kind_raw = (getattr(b, "kind", "") or "").upper()
@@ -1099,34 +1139,43 @@ class SchedulePage(QWidget):
             if kind_raw == "GZ":
                 tenant = (getattr(b, "gz_group_name", "") or "").strip()
             title = (getattr(b, "title", "") or "").strip()
-
+    
             venue_id = int(getattr(b, "venue_id", 0) or 0)
             unit_id = getattr(b, "venue_unit_id", None)
             resource_name = self._resolve_resource_name(venue_id, unit_id)
-
+    
             kind = self._kind_title(getattr(b, "kind", ""))
             status = self._status_title(getattr(b, "status", ""))
-
-            it0 = QTableWidgetItem(dt_str)
+    
+            # Отступ для полосы в первой колонке
+            it0 = QTableWidgetItem(f"   {dt_str}")
             it1 = QTableWidgetItem(time_str)
             it2 = QTableWidgetItem(tenant)
             it3 = QTableWidgetItem(title)
             it4 = QTableWidgetItem(resource_name)
             it5 = QTableWidgetItem(kind)
             it6 = QTableWidgetItem(status)
-
+    
             it0.setData(self.LIST_ROLE_BOOKING, b)
-
-            base = self._base_color_for_booking(b)
-            for it in (it0, it1, it2, it3, it4, it5, it6):
-                it.setData(Qt.ItemDataRole.BackgroundRole, base)
-                it.setData(Qt.ItemDataRole.ForegroundRole, QColor(255, 255, 255, 230))
-
+    
+            # Цветная полоса — цвет определяется типом брони
+            bar_color = self._base_color_for_booking(b)
+            it0.setData(ListColorBarDelegate.ROLE_BAR_COLOR, bar_color)
+    
+            # Текст — светлый на тёмном фоне (без заливки фона строки)
+            text_color = QColor(226, 232, 240, 230)
+            for it in (it0, it1, it2, it3, it4, it5):
+                it.setData(Qt.ItemDataRole.ForegroundRole, text_color)
+    
+            # Тип — подкрашиваем цветом маркера
+            it5.setData(Qt.ItemDataRole.ForegroundRole, bar_color)
+    
+            # Статус — видимый цвет
+            it6.setData(Qt.ItemDataRole.ForegroundRole, self._status_color(getattr(b, "status", "")))
+    
             for it in (it1, it5, it6):
                 it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            it6.setData(Qt.ItemDataRole.ForegroundRole, self._status_color(getattr(b, "status", "")))
-
+    
             self.tbl_list.setItem(row, 0, it0)
             self.tbl_list.setItem(row, 1, it1)
             self.tbl_list.setItem(row, 2, it2)
@@ -1134,9 +1183,9 @@ class SchedulePage(QWidget):
             self.tbl_list.setItem(row, 4, it4)
             self.tbl_list.setItem(row, 5, it5)
             self.tbl_list.setItem(row, 6, it6)
-
+    
         self.tbl_list.resizeRowsToContents()
-
+    
         if self.tbl_list.rowCount() > 0:
             self.tbl_list.setCurrentCell(0, 0)
             self._update_details_from_selection()
