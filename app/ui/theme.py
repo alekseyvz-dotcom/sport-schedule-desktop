@@ -237,28 +237,115 @@ QComboBox QAbstractItemView {
 }
 
 /* ---- Calendar popup (QDateEdit) ---- */
-QCalendarWidget QWidget { alternate-background-color: rgba(255, 255, 255, 0.04); }
+QCalendarWidget {
+    background: #0b1220;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+}
+
+/* Навигационная панель (месяц/год, стрелки) */
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background: rgba(15, 23, 42, 0.95);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    padding: 4px;
+}
+
+/* Кнопки навигации */
 QCalendarWidget QToolButton {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px 10px;
+    color: rgba(255, 255, 255, 0.90);
+    font-weight: 700;
+    min-width: 24px;
 }
 QCalendarWidget QToolButton:hover {
     border-color: rgba(255, 255, 255, 0.22);
     background: rgba(255, 255, 255, 0.10);
 }
+QCalendarWidget QToolButton:pressed {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* Кнопка выбора месяца (с выпадающим меню) */
+QCalendarWidget QToolButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
+/* Спинбокс года */
+QCalendarWidget QSpinBox {
+    background: rgba(11, 18, 32, 0.65);
+    color: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-weight: 700;
+}
+QCalendarWidget QSpinBox::up-button,
+QCalendarWidget QSpinBox::down-button {
+    width: 16px;
+    border: none;
+    background: transparent;
+}
+
+/* Меню выбора месяца */
 QCalendarWidget QMenu {
     background: rgba(11, 18, 32, 0.98);
     color: rgba(255, 255, 255, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 4px;
 }
-QCalendarWidget QAbstractItemView:enabled {
+QCalendarWidget QMenu::item {
+    padding: 6px 16px;
+    border-radius: 6px;
+}
+QCalendarWidget QMenu::item:selected {
+    background: rgba(99, 102, 241, 0.35);
+}
+
+/* Таблица с днями — КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ */
+QCalendarWidget QAbstractItemView {
     background: rgba(11, 18, 32, 0.92);
     color: rgba(255, 255, 255, 0.88);
-    selection-background-color: rgba(99, 102, 241, 0.35);
+    selection-background-color: rgba(99, 102, 241, 0.45);
     selection-color: rgba(255, 255, 255, 0.95);
     outline: 0;
+    border: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    font-size: 13px;
+    gridline-color: transparent;
+}
+
+/* Заголовки дней недели */
+QCalendarWidget QAbstractItemView::item {
+    padding: 6px;
+    border: none;
+    border-radius: 6px;
+}
+QCalendarWidget QAbstractItemView::item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+QCalendarWidget QAbstractItemView::item:selected {
+    background: rgba(99, 102, 241, 0.45);
+    color: rgba(255, 255, 255, 0.95);
+    border-radius: 6px;
+}
+
+/* Дни не текущего месяца (серые) */
+QCalendarWidget QAbstractItemView:disabled {
+    color: rgba(226, 232, 240, 0.30);
+}
+
+/* Фикс: все вложенные виджеты календаря получают непрозрачный фон */
+QCalendarWidget QWidget {
+    background: rgba(11, 18, 32, 0.92);
+    alternate-background-color: rgba(255, 255, 255, 0.04);
 }
 
 /* ---- ScrollArea ---- */
