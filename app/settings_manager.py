@@ -125,7 +125,12 @@ _defaults: Dict[str, Dict[str, Any]] = {
         "provider": "postgres",
         "database_url": "postgresql://sport_app_user:K0j1ma095@185.55.58.31:5432/sport_schedule?sslmode=disable",
         "sslmode": "disable",
-    }
+    },
+    "LOGIN": {
+        "remember": False,
+        "username": "",
+        "password": "",
+    },
 }
 
 _store: Dict[str, Dict[str, Any]] = {}
@@ -166,4 +171,20 @@ def get_database_url() -> str:
 def set_database_url(url: str):
     ensure_config()
     _store["DB"]["database_url"] = (url or "").strip()
+    save_settings()
+
+# === LOGIN REMEMBER FEATURE ===
+
+def get_remembered_login() -> tuple[str, str]:
+    ensure_config()
+    r = _store.get("LOGIN", {})
+    if not r.get("remember", False):
+        return "", ""
+    return str(r.get("username", "")), str(r.get("password", ""))
+
+def set_remembered_login(username: str, password: str, remember: bool):
+    ensure_config()
+    _store["LOGIN"]["remember"] = bool(remember)
+    _store["LOGIN"]["username"] = username if remember else ""
+    _store["LOGIN"]["password"] = password if remember else ""
     save_settings()
