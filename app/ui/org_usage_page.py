@@ -307,7 +307,7 @@ class OrgUsagePage(QWidget):
         self.dt_anchor.setDisplayFormat("dd.MM.yyyy")
         self.dt_anchor.setFixedWidth(130)
 
-        _style_calendar_widget(self.dt_day)
+        _style_calendar_widget(self.dt_anchor)
 
         self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_cancelled.setChecked(False)
