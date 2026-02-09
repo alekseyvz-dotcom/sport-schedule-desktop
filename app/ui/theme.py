@@ -243,24 +243,38 @@ QCalendarWidget {
     border-radius: 12px;
 }
 
-/* Навигационная панель (месяц/год, стрелки) */
-QCalendarWidget QWidget#qt_calendar_navigationbar {
-    background: rgba(15, 23, 42, 0.95);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-    padding: 4px;
+/* ВСЕ вложенные виджеты — тёмный фон (убивает белый фон навбара) */
+QCalendarWidget QWidget {
+    background: #0f172a;
+    color: rgba(255, 255, 255, 0.90);
 }
 
-/* Кнопки навигации */
+/* Навигационная панель */
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background: #0f172a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    min-height: 36px;
+}
+
+/* Лейбл месяца/года (QLabel внутри навбара) */
+QCalendarWidget QWidget#qt_calendar_navigationbar QLabel {
+    color: rgba(255, 255, 255, 0.90);
+    font-weight: 700;
+    font-size: 13px;
+    background: transparent;
+    padding: 0 6px;
+}
+
+/* Кнопки навигации (стрелки + месяц) */
 QCalendarWidget QToolButton {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     color: rgba(255, 255, 255, 0.90);
     font-weight: 700;
-    min-width: 24px;
+    min-width: 20px;
+    min-height: 20px;
 }
 QCalendarWidget QToolButton:hover {
     border-color: rgba(255, 255, 255, 0.22);
@@ -269,8 +283,6 @@ QCalendarWidget QToolButton:hover {
 QCalendarWidget QToolButton:pressed {
     background: rgba(255, 255, 255, 0.07);
 }
-
-/* Кнопка выбора месяца (с выпадающим меню) */
 QCalendarWidget QToolButton::menu-indicator {
     image: none;
     width: 0px;
@@ -278,11 +290,11 @@ QCalendarWidget QToolButton::menu-indicator {
 
 /* Спинбокс года */
 QCalendarWidget QSpinBox {
-    background: rgba(11, 18, 32, 0.65);
+    background: rgba(11, 18, 32, 0.80);
     color: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
-    padding: 4px 8px;
+    padding: 2px 6px;
     font-weight: 700;
 }
 QCalendarWidget QSpinBox::up-button,
@@ -294,7 +306,7 @@ QCalendarWidget QSpinBox::down-button {
 
 /* Меню выбора месяца */
 QCalendarWidget QMenu {
-    background: rgba(11, 18, 32, 0.98);
+    background: #0b1220;
     color: rgba(255, 255, 255, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
@@ -308,25 +320,25 @@ QCalendarWidget QMenu::item:selected {
     background: rgba(99, 102, 241, 0.35);
 }
 
-/* Таблица с днями — КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ */
+/* Таблица с днями */
 QCalendarWidget QAbstractItemView {
-    background: rgba(11, 18, 32, 0.92);
+    background: #0b1220;
     color: rgba(255, 255, 255, 0.88);
     selection-background-color: rgba(99, 102, 241, 0.45);
     selection-color: rgba(255, 255, 255, 0.95);
+    alternate-background-color: #0b1220;
     outline: 0;
     border: none;
-    border-bottom-left-radius: 12px;
-    border-bottom-right-radius: 12px;
     font-size: 13px;
     gridline-color: transparent;
 }
 
-/* Заголовки дней недели */
+/* Ячейки дней */
 QCalendarWidget QAbstractItemView::item {
     padding: 6px;
     border: none;
     border-radius: 6px;
+    background: transparent;
 }
 QCalendarWidget QAbstractItemView::item:hover {
     background: rgba(255, 255, 255, 0.08);
@@ -334,18 +346,29 @@ QCalendarWidget QAbstractItemView::item:hover {
 QCalendarWidget QAbstractItemView::item:selected {
     background: rgba(99, 102, 241, 0.45);
     color: rgba(255, 255, 255, 0.95);
-    border-radius: 6px;
 }
 
-/* Дни не текущего месяца (серые) */
+/* Дни не текущего месяца */
 QCalendarWidget QAbstractItemView:disabled {
     color: rgba(226, 232, 240, 0.30);
 }
 
-/* Фикс: все вложенные виджеты календаря получают непрозрачный фон */
-QCalendarWidget QWidget {
-    background: rgba(11, 18, 32, 0.92);
-    alternate-background-color: rgba(255, 255, 255, 0.04);
+/* Заголовки дней недели (Пн, Вт...) — горизонтальный хедер */
+QCalendarWidget QHeaderView {
+    background: #0f172a;
+}
+QCalendarWidget QHeaderView::section {
+    background: #0f172a;
+    color: rgba(226, 232, 240, 0.70);
+    border: none;
+    padding: 4px;
+    font-weight: 700;
+}
+
+/* Номера недель — вертикальный хедер */
+QCalendarWidget QHeaderView::section:vertical {
+    background: #0f172a;
+    color: rgba(226, 232, 240, 0.50);
 }
 
 /* ---- ScrollArea ---- */
