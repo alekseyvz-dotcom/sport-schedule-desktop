@@ -23,6 +23,56 @@ from PySide6.QtWidgets import (
 from app.services.gz_service import GzCoach
 from app.ui.gz_rules_widget import GzRulesWidget
 
+from PySide6.QtGui import QColor, QPalette
+
+
+def _style_calendar_widget(date_edit: QDateEdit) -> None:
+    cal = date_edit.calendarWidget()
+    if cal is None:
+        return
+    from PySide6.QtWidgets import QWidget
+
+    dark_bg = QColor("#0f172a")
+    darker_bg = QColor("#0b1220")
+    text_color = QColor(226, 232, 240)
+    accent = QColor(99, 102, 241)
+    dim_text = QColor(226, 232, 240, 120)
+
+    pal = cal.palette()
+    pal.setColor(QPalette.ColorRole.Window, dark_bg)
+    pal.setColor(QPalette.ColorRole.Base, darker_bg)
+    pal.setColor(QPalette.ColorRole.AlternateBase, dark_bg)
+    pal.setColor(QPalette.ColorRole.WindowText, text_color)
+    pal.setColor(QPalette.ColorRole.Text, text_color)
+    pal.setColor(QPalette.ColorRole.ButtonText, text_color)
+    pal.setColor(QPalette.ColorRole.ToolTipText, text_color)
+    pal.setColor(QPalette.ColorRole.Button, dark_bg)
+    pal.setColor(QPalette.ColorRole.Highlight, accent)
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, dim_text)
+    pal.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Text, dim_text)
+
+    cal.setPalette(pal)
+    for child in cal.findChildren(QWidget):
+        child.setPalette(pal)
+        child.setAutoFillBackground(True)
+    cal.setAutoFillBackground(True)
+
+    cal.setStyleSheet("""
+        QCalendarWidget { background: #0b1220; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; }
+        QCalendarWidget QWidget { background: #0f172a; color: rgba(226,232,240,0.90); }
+        QCalendarWidget QToolButton { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 4px 8px; color: rgba(255,255,255,0.90); font-weight: 700; }
+        QCalendarWidget QToolButton:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.22); }
+        QCalendarWidget QToolButton::menu-indicator { image: none; width: 0px; }
+        QCalendarWidget QSpinBox { background: #0b1220; color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; padding: 2px 6px; }
+        QCalendarWidget QMenu { background: #0b1220; color: rgba(255,255,255,0.90); border: 1px solid rgba(255,255,255,0.14); }
+        QCalendarWidget QMenu::item:selected { background: rgba(99,102,241,0.35); }
+        QCalendarWidget QAbstractItemView { background: #0b1220; color: rgba(255,255,255,0.88); selection-background-color: rgba(99,102,241,0.45); selection-color: rgba(255,255,255,0.95); alternate-background-color: #0b1220; outline: 0; border: none; }
+        QCalendarWidget QAbstractItemView::item { padding: 4px; }
+        QCalendarWidget QAbstractItemView::item:hover { background: rgba(255,255,255,0.08); }
+        QCalendarWidget QAbstractItemView::item:selected { background: rgba(99,102,241,0.45); }
+        QCalendarWidget QHeaderView::section { background: #0f172a; color: rgba(226,232,240,0.70); border: none; padding: 4px; font-weight: 700; }
+    """)
 
 class GzGroupDialog(QDialog):
     def __init__(
@@ -73,6 +123,9 @@ class GzGroupDialog(QDialog):
         self.dt_to.setSpecialValueText("—")
         self.dt_to.setDate(date.today())
         self.dt_to.setMinimumDate(date(1900, 1, 1))
+
+        _style_calendar_widget(self.dt_from)
+        _style_calendar_widget(self.dt_to)
 
         self.ed_notes = QTextEdit()
         self.ed_notes.setPlaceholderText("Примечание…")
