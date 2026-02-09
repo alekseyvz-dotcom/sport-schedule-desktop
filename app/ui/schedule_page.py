@@ -17,7 +17,7 @@ from app.services.users_service import AuthUser
 from app.services.gz_service import list_active_gz_groups_for_booking
 
 from PySide6.QtCore import Qt, QTimer, QSettings
-from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPainterPath, QBrush
+from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPainterPath, QBrush, QPalette
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -97,8 +97,116 @@ from app.ui.booking_dialog import BookingDialog
 
 from PySide6.QtCore import QRectF
 
-from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
+
+
+def _style_calendar_widget(date_edit: QDateEdit) -> None:
+    """
+    Программно стилизует QCalendarWidget внутри QDateEdit,
+    чтобы убрать белый фон навигационной панели.
+    """
+    cal = date_edit.calendarWidget()
+    if cal is None:
+        return
+
+    dark_bg = QColor("#0f172a")
+    darker_bg = QColor("#0b1220")
+    text_color = QColor(226, 232, 240)
+    accent = QColor(99, 102, 241)
+    dim_text = QColor(226, 232, 240, 120)
+
+    pal = cal.palette()
+    pal.setColor(QPalette.ColorRole.Window, dark_bg)
+    pal.setColor(QPalette.ColorRole.Base, darker_bg)
+    pal.setColor(QPalette.ColorRole.AlternateBase, dark_bg)
+    pal.setColor(QPalette.ColorRole.WindowText, text_color)
+    pal.setColor(QPalette.ColorRole.Text, text_color)
+    pal.setColor(QPalette.ColorRole.ButtonText, text_color)
+    pal.setColor(QPalette.ColorRole.ToolTipText, text_color)
+    pal.setColor(QPalette.ColorRole.Button, dark_bg)
+    pal.setColor(QPalette.ColorRole.Highlight, accent)
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, dim_text)
+    pal.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Text, dim_text)
+
+    cal.setPalette(pal)
+
+    for child in cal.findChildren(QWidget):
+        child.setPalette(pal)
+        child.setAutoFillBackground(True)
+
+    cal.setAutoFillBackground(True)
+
+    cal.setStyleSheet("""
+        QCalendarWidget {
+            background: #0b1220;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+        }
+        QCalendarWidget QWidget {
+            background: #0f172a;
+            color: rgba(226, 232, 240, 0.90);
+        }
+        QCalendarWidget QToolButton {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            padding: 4px 8px;
+            color: rgba(255, 255, 255, 0.90);
+            font-weight: 700;
+            min-width: 20px;
+            min-height: 20px;
+        }
+        QCalendarWidget QToolButton:hover {
+            background: rgba(255, 255, 255, 0.10);
+            border-color: rgba(255, 255, 255, 0.22);
+        }
+        QCalendarWidget QToolButton::menu-indicator {
+            image: none;
+            width: 0px;
+        }
+        QCalendarWidget QSpinBox {
+            background: #0b1220;
+            color: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 6px;
+            padding: 2px 6px;
+        }
+        QCalendarWidget QMenu {
+            background: #0b1220;
+            color: rgba(255, 255, 255, 0.90);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        QCalendarWidget QMenu::item:selected {
+            background: rgba(99, 102, 241, 0.35);
+        }
+        QCalendarWidget QAbstractItemView {
+            background: #0b1220;
+            color: rgba(255, 255, 255, 0.88);
+            selection-background-color: rgba(99, 102, 241, 0.45);
+            selection-color: rgba(255, 255, 255, 0.95);
+            alternate-background-color: #0b1220;
+            outline: 0;
+            border: none;
+            font-size: 13px;
+        }
+        QCalendarWidget QAbstractItemView::item {
+            padding: 4px;
+        }
+        QCalendarWidget QAbstractItemView::item:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        QCalendarWidget QAbstractItemView::item:selected {
+            background: rgba(99, 102, 241, 0.45);
+        }
+        QCalendarWidget QHeaderView::section {
+            background: #0f172a;
+            color: rgba(226, 232, 240, 0.70);
+            border: none;
+            padding: 4px;
+            font-weight: 700;
+        }
+    """)
 
 class BookingBlockDelegate(QStyledItemDelegate):
     """v9 — без скруглений, текст второй строки в первой middle-ячейке."""
@@ -1662,135 +1770,3 @@ class SchedulePage(QWidget):
         for _ in range(max(0, int(steps))):
             c = c.lighter(int(amount))
         return c
-
-    def _style_calendar_widget(date_edit: QDateEdit) -> None:
-        """
-        Программно стилизует QCalendarWidget внутри QDateEdit,
-        чтобы убрать белый фон навигационной панели.
-        QSS не справляется с этим на Windows.
-        """
-        cal = date_edit.calendarWidget()
-        if cal is None:
-            return
-    
-        # --- Палитра: тёмный фон для ВСЕХ внутренних виджетов ---
-        dark_bg = QColor("#0f172a")
-        darker_bg = QColor("#0b1220")
-        text_color = QColor(226, 232, 240)
-        accent = QColor(99, 102, 241)
-        dim_text = QColor(226, 232, 240, 120)
-    
-        pal = cal.palette()
-        # Основной фон виджета
-        pal.setColor(QPalette.ColorRole.Window, dark_bg)
-        pal.setColor(QPalette.ColorRole.Base, darker_bg)
-        pal.setColor(QPalette.ColorRole.AlternateBase, dark_bg)
-        # Текст
-        pal.setColor(QPalette.ColorRole.WindowText, text_color)
-        pal.setColor(QPalette.ColorRole.Text, text_color)
-        pal.setColor(QPalette.ColorRole.ButtonText, text_color)
-        pal.setColor(QPalette.ColorRole.ToolTipText, text_color)
-        # Кнопки навигации
-        pal.setColor(QPalette.ColorRole.Button, dark_bg)
-        # Выделение
-        pal.setColor(QPalette.ColorRole.Highlight, accent)
-        pal.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
-        # Неактивный текст (дни чужого месяца)
-        pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, dim_text)
-        pal.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Text, dim_text)
-    
-        cal.setPalette(pal)
-    
-        # --- Рекурсивно на ВСЕ дочерние виджеты ---
-        for child in cal.findChildren(QWidget):
-            child.setPalette(pal)
-            # Убираем autoFillBackground чтобы палитра работала
-            child.setAutoFillBackground(True)
-    
-        cal.setAutoFillBackground(True)
-    
-        # --- QSS поверх палитры (теперь сработает, т.к. фон уже тёмный) ---
-        cal.setStyleSheet("""
-            QCalendarWidget {
-                background: #0b1220;
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 8px;
-            }
-            
-            /* Навигационная панель */
-            QCalendarWidget QWidget {
-                background: #0f172a;
-                color: rgba(226, 232, 240, 0.90);
-            }
-            
-            /* Кнопки < > и месяц/год */
-            QCalendarWidget QToolButton {
-                background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 8px;
-                padding: 4px 8px;
-                color: rgba(255, 255, 255, 0.90);
-                font-weight: 700;
-                min-width: 20px;
-                min-height: 20px;
-            }
-            QCalendarWidget QToolButton:hover {
-                background: rgba(255, 255, 255, 0.10);
-                border-color: rgba(255, 255, 255, 0.22);
-            }
-            QCalendarWidget QToolButton::menu-indicator {
-                image: none;
-                width: 0px;
-            }
-    
-            /* Спинбокс года */
-            QCalendarWidget QSpinBox {
-                background: #0b1220;
-                color: rgba(255, 255, 255, 0.92);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 6px;
-                padding: 2px 6px;
-            }
-            
-            /* Меню выбора месяца */
-            QCalendarWidget QMenu {
-                background: #0b1220;
-                color: rgba(255, 255, 255, 0.90);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-            }
-            QCalendarWidget QMenu::item:selected {
-                background: rgba(99, 102, 241, 0.35);
-            }
-    
-            /* Таблица дней */
-            QCalendarWidget QAbstractItemView {
-                background: #0b1220;
-                color: rgba(255, 255, 255, 0.88);
-                selection-background-color: rgba(99, 102, 241, 0.45);
-                selection-color: rgba(255, 255, 255, 0.95);
-                alternate-background-color: #0b1220;
-                outline: 0;
-                border: none;
-                font-size: 13px;
-            }
-            
-            /* Заголовки Пн Вт Ср... */
-            QCalendarWidget QAbstractItemView::item {
-                padding: 4px;
-            }
-            QCalendarWidget QAbstractItemView::item:hover {
-                background: rgba(255, 255, 255, 0.08);
-            }
-            QCalendarWidget QAbstractItemView::item:selected {
-                background: rgba(99, 102, 241, 0.45);
-            }
-            
-            /* Заголовок дней недели */
-            QCalendarWidget QHeaderView::section {
-                background: #0f172a;
-                color: rgba(226, 232, 240, 0.70);
-                border: none;
-                padding: 4px;
-                font-weight: 700;
-            }
-        """)
