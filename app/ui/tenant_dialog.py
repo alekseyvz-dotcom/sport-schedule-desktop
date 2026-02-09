@@ -419,7 +419,7 @@ class TenantDialog(QDialog):
         else:
             w.setDate(QDate.currentDate())
 
-         _style_calendar_widget(w)
+        _style_calendar_widget(w)
         return w
 
     def _on_accept(self):
