@@ -288,14 +288,21 @@ def generate_bookings_for_tenant(*, user_id: int, role_code: str, tenant_id: int
     )
 
     total_created = 0
-    total_skipped = 0
+    total_skipped_busy = 0
+    total_skipped_error = 0
     errors: List[str] = []
 
     for rule in rules:
         venue_id = get_venue_id_by_unit(rule.venue_unit_id)
         rep = generate_bookings_for_rule_soft(rule=rule, venue_id=venue_id, tz=tz)
         total_created += rep.created
-        total_skipped += rep.skipped
+        total_skipped_busy += rep.skipped_busy
+        total_skipped_error += rep.skipped_error
         errors.extend(rep.errors)
 
-    return GenerateReport(created=total_created, skipped=total_skipped, errors=errors)
+    return GenerateReport(
+        created=total_created,
+        skipped_busy=total_skipped_busy,
+        skipped_error=total_skipped_error,
+        errors=errors,
+    )
