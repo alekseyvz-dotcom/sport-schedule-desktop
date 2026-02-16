@@ -675,3 +675,23 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* Добавить в конец style.css */
+
+.cell-time.now {
+    color: var(--accent-hover) !important;
+    font-weight: 700;
+    position: relative;
+}
+
+.cell-time.now::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.4;
+    transform: translateY(-50%);
+}
