@@ -6,11 +6,13 @@
     <div class="header-top">
         <h1>⚽ Расписание</h1>
         <div class="header-user">
-            {% if has_analytics %}
-            <a href="/analytics" class="btn-link">📊 Аналитика</a>
-            {% endif %}
-            {{ user.full_name or user.username }}
-            <a href="/logout" class="btn-link">Выход</a>
+            <span class="header-nav-links">
+                {% if has_analytics %}
+                <a href="/analytics" class="btn-link">📊 Аналитика</a>
+                {% endif %}
+            </span>
+            <span class="header-user-name">{{ user.full_name or user.username }}</span>
+            <a href="/logout" class="btn-link header-nav-links">Выход</a>
         </div>
     </div>
 
