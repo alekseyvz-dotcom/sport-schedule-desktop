@@ -18,6 +18,7 @@
     --green:        #4ade80;
     --red:          #ef4444;
     --slate:        #94a3b8;
+    --tab-bar-h:    0px;
 }
 
 * {
@@ -413,6 +414,7 @@ body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding: 0;
+    padding-bottom: var(--tab-bar-h);
 }
 
 .schedule-grid {
@@ -455,18 +457,6 @@ body {
 }
 
 .res-short { display: none; }
-
-@media (max-width: 768px) {
-    .res-full  { display: none; }
-    .res-short { display: inline; }
-    .schedule-grid { min-width: 400px; }
-    .col-time {
-        width: 44px;
-        min-width: 44px;
-        max-width: 44px;
-    }
-    .col-resource { min-width: 70px; }
-}
 
 .cell-time {
     text-align: right;
@@ -618,6 +608,7 @@ body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding: 0 8px 16px 8px;
+    padding-bottom: calc(16px + var(--tab-bar-h));
 }
 
 .list-table {
@@ -669,7 +660,6 @@ body {
     background: rgba(99, 102, 241, 0.1);
 }
 
-/* Цветная полоска слева */
 .list-table tbody td:first-child {
     position: relative;
     padding-left: 18px;
@@ -690,26 +680,12 @@ body {
 .bar-GZ { background: var(--amber); }
 .bar-cancelled { background: var(--slate); }
 
-/* Тип — цвет */
 .kind-PD { color: var(--blue); font-weight: 600; }
 .kind-GZ { color: var(--amber); font-weight: 600; }
 
-/* Статус — цвет */
-.status-planned {
-    color: var(--green);
-    font-weight: 600;
-}
-
-.status-done {
-    color: var(--slate);
-    font-weight: 600;
-}
-
-.status-cancelled {
-    color: var(--red);
-    font-weight: 600;
-    opacity: 0.7;
-}
+.status-planned   { color: var(--green); font-weight: 600; }
+.status-done      { color: var(--slate); font-weight: 600; }
+.status-cancelled { color: var(--red); font-weight: 600; opacity: 0.7; }
 
 .empty-row {
     text-align: center;
@@ -754,16 +730,6 @@ body {
 @keyframes slideUp {
     from { transform: translateY(100%); }
     to   { transform: translateY(0); }
-}
-
-@media (min-width: 768px) {
-    .modal {
-        align-items: center;
-    }
-    .modal-content {
-        border-radius: 16px;
-        max-height: 70vh;
-    }
 }
 
 .modal-header {
@@ -840,6 +806,94 @@ body {
     background: rgba(255, 255, 255, 0.2);
 }
 
+/* ══════════════════════════════════════
+   BOTTOM TAB BAR (мобильная навигация)
+   ══════════════════════════════════════ */
+
+.bottom-tab-bar {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    :root {
+        --tab-bar-h: 64px;
+    }
+
+    body {
+        padding-bottom: var(--tab-bar-h);
+    }
+
+    .bottom-tab-bar {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: var(--tab-bar-h);
+        background: var(--bg-card);
+        border-top: 1px solid var(--border);
+        z-index: 200;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        justify-content: space-around;
+        align-items: center;
+    }
+
+    .tab-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        text-decoration: none;
+        color: var(--text-muted);
+        font-size: 10px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 10px;
+        transition: all 0.15s;
+        -webkit-tap-highlight-color: transparent;
+        min-width: 60px;
+    }
+
+    .tab-item:active {
+        transform: scale(0.92);
+    }
+
+    .tab-icon {
+        font-size: 22px;
+        line-height: 1;
+    }
+
+    .tab-item.active {
+        color: var(--accent-hover);
+    }
+
+    .tab-item.active .tab-icon {
+        color: var(--accent);
+    }
+
+    /* Прячем текстовые ссылки из хедера на мобилке */
+    .header-nav-links {
+        display: none !important;
+    }
+
+    .header-user-name {
+        display: none;
+    }
+}
+
+/* ── Desktop: модальное окно по центру ── */
+
+@media (min-width: 769px) {
+    .modal {
+        align-items: center;
+    }
+    .modal-content {
+        border-radius: 16px;
+        max-height: 70vh;
+    }
+}
+
 /* ── Мобильная адаптация ── */
 
 @media (max-width: 768px) {
@@ -849,6 +903,10 @@ body {
 
     .header-top h1 {
         font-size: 15px;
+    }
+
+    .header-top {
+        margin-bottom: 8px;
     }
 
     .view-controls {
@@ -876,6 +934,16 @@ body {
     .date-formatted {
         font-size: 14px;
     }
+
+    .res-full  { display: none; }
+    .res-short { display: inline; }
+    .schedule-grid { min-width: 400px; }
+    .col-time {
+        width: 44px;
+        min-width: 44px;
+        max-width: 44px;
+    }
+    .col-resource { min-width: 70px; }
 
     .list-meta-bar {
         gap: 8px;
