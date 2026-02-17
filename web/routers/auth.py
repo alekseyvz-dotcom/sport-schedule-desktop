@@ -3,8 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from psycopg2.extras import RealDictCursor
 
-import bcrypt
-
+from app.auth import verify_password
 from web.deps import get_db
 
 router = APIRouter()
@@ -42,7 +41,7 @@ def login_submit(
             "error": "Неверный логин или пароль",
         })
 
-    if not bcrypt.checkpw(password.encode(), user["password_hash"].encode()):
+    if not verify_password(password, user["password_hash"]):
         return templates.TemplateResponse("login.html", {
             "request": request,
             "error": "Неверный логин или пароль",
