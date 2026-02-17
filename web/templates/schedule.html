@@ -2,7 +2,6 @@
 {% block title %}Расписание — {{ selected_org.name }}{% endblock %}
 
 {% block body %}
-<!-- ══ Шапка ══ -->
 <header class="header">
     <div class="header-top">
         <h1>⚽ Расписание</h1>
@@ -12,64 +11,75 @@
         </div>
     </div>
 
-    <!-- Учреждение -->
     <div class="controls">
         <select id="orgSelect" onchange="changeOrg(this.value)">
             {% for o in orgs %}
-            <option value="{{ o.id }}"
-                    {% if o.id == org_id %}selected{% endif %}>
+            <option value="{{ o.id }}" {% if o.id == org_id %}selected{% endif %}>
                 {{ o.name }}
             </option>
             {% endfor %}
         </select>
     </div>
 
-    <!-- Навигация по дате -->
     <div class="date-nav">
-        <a href="/schedule?org_id={{ org_id }}&day={{ prev_day }}&show_cancelled={{ show_cancelled }}"
+        <a href="/schedule?org_id={{ org_id }}&day={{ prev_day }}&show_cancelled={{ show_cancelled }}&view={{ view }}&period={{ period }}"
            class="btn-icon" title="Предыдущий день">◀</a>
-
         <div class="date-display">
             <span class="date-weekday">{{ day_weekday }}</span>
             <input type="date" id="datePicker"
                    value="{{ selected_day.isoformat() }}"
                    onchange="changeDate(this.value)">
-            <span class="date-formatted">
-                {{ selected_day.strftime('%d.%m.%Y') }}
-            </span>
+            <span class="date-formatted">{{ selected_day.strftime('%d.%m.%Y') }}</span>
         </div>
-
-        <a href="/schedule?org_id={{ org_id }}&day={{ next_day }}&show_cancelled={{ show_cancelled }}"
+        <a href="/schedule?org_id={{ org_id }}&day={{ next_day }}&show_cancelled={{ show_cancelled }}&view={{ view }}&period={{ period }}"
            class="btn-icon" title="Следующий день">▶</a>
-
         {% if selected_day.isoformat() != today %}
-        <a href="/schedule?org_id={{ org_id }}&day={{ today }}&show_cancelled={{ show_cancelled }}"
+        <a href="/schedule?org_id={{ org_id }}&day={{ today }}&show_cancelled={{ show_cancelled }}&view={{ view }}&period={{ period }}"
            class="btn-small">Сегодня</a>
         {% endif %}
     </div>
 
-    <!-- Мета-информация -->
-    <div class="meta-bar">
-        <span>Бронирований: <strong>{{ total_bookings }}</strong></span>
+    <!-- View tabs + controls -->
+    <div class="view-controls">
+        <div class="view-tabs">
+            <a href="/schedule?org_id={{ org_id }}&day={{ selected_day.isoformat() }}&show_cancelled={{ show_cancelled }}&view=grid&period={{ period }}"
+               class="view-tab {% if view == 'grid' %}active{% endif %}">Слоты</a>
+            <a href="/schedule?org_id={{ org_id }}&day={{ selected_day.isoformat() }}&show_cancelled={{ show_cancelled }}&view=list&period={{ period }}"
+               class="view-tab {% if view == 'list' %}active{% endif %}">Список</a>
+        </div>
+
+        {% if view == 'list' %}
+        <select id="periodSelect" onchange="changePeriod(this.value)" class="period-select">
+            {% for val, label in [('day','День'),('week','Неделя'),('month','Месяц'),('quarter','Квартал'),('year','Год')] %}
+            <option value="{{ val }}" {% if period == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+
         <label class="toggle-cancelled">
             <input type="checkbox"
                    {% if show_cancelled %}checked{% endif %}
                    onchange="toggleCancelled(this.checked)">
             Отменённые
         </label>
+
+        <span class="meta-count">Бронирований: <strong>{{ total_bookings }}</strong></span>
     </div>
 </header>
 
-<!-- ══ Сетка расписания ══ -->
+{% if view == 'grid' %}
+<!-- ══ GRID VIEW ══ -->
 <div class="schedule-wrap">
     <table class="schedule-grid" id="scheduleGrid">
         <thead>
             <tr>
                 <th class="col-time">Время</th>
                 {% for r in resources %}
-                <th class="col-resource">
-                    <span class="res-full">{{ r.name }}</span>
-                    <span class="res-short">{{ r.short_name }}</span>
+                <th class="col-resource" title="{{ r.name }}">
+                    <div class="res-header">
+                        <span class="res-full">{{ r.name }}</span>
+                        <span class="res-short">{{ r.short_name }}</span>
+                    </div>
                 </th>
                 {% endfor %}
             </tr>
@@ -77,20 +87,12 @@
         <tbody>
             {% for row_idx in range(slots|length) %}
             <tr>
-                <!-- Время -->
-                <td class="cell-time">
-                    {{ slots[row_idx].strftime('%H:%M') }}
-                </td>
-
-                <!-- Ячейки ресурсов -->
+                <td class="cell-time">{{ slots[row_idx].strftime('%H:%M') }}</td>
                 {% for col_idx in range(resources|length) %}
                 {% set booking_id = grid[row_idx][col_idx] %}
-
                 {% if booking_id and booking_id in spans %}
                     {% set sp = spans[booking_id] %}
-
                     {% if sp.row_start == row_idx %}
-                    {# Первая ячейка блока — рендерим с rowspan #}
                     {% set b = sp.booking %}
                     {% set css_class = 'booking-canc' if b.status == 'cancelled'
                                   else 'booking-pd' if b.activity == 'PD'
@@ -101,31 +103,20 @@
                     {% set badge_text = 'ОТМ' if b.status == 'cancelled'
                                    else 'ПД' if b.activity == 'PD'
                                    else 'ГЗ' %}
-
                     <td class="cell-booking {{ css_class }}"
                         rowspan="{{ sp.span }}"
                         onclick="showBooking({{ b.id }})"
-                        title="{{ sp.display_name }} | {{ sp.time_str }}">
-
+                        title="{{ sp.display_name }} | {{ sp.time_str }} | {{ b.resource_name }}">
                         <div class="booking-inner">
-                            <span class="b-badge {{ badge_class }}">
-                                {{ badge_text }}
-                            </span>
+                            <span class="b-badge {{ badge_class }}">{{ badge_text }}</span>
                             <div class="b-name">{{ sp.display_name }}</div>
                             {% if sp.span >= 2 %}
-                            <div class="b-title">
-                                {{ b.title or sp.time_str }}
-                            </div>
+                            <div class="b-title">{{ b.title or sp.time_str }}</div>
                             {% endif %}
                         </div>
                     </td>
-
-                    {% else %}
-                    {# Скрытая ячейка (rowspan съел) — ничего не рендерим #}
                     {% endif %}
-
                 {% else %}
-                {# Пустой слот #}
                 <td class="cell-empty"></td>
                 {% endif %}
                 {% endfor %}
@@ -135,7 +126,54 @@
     </table>
 </div>
 
-<!-- ══ Модалка деталей бронирования ══ -->
+{% else %}
+<!-- ══ LIST VIEW ══ -->
+<div class="list-meta-bar">
+    <span>Период: <strong>{{ list_period_label }}</strong></span>
+    <span>Занято: <strong>{{ list_stats.busy_hours }}</strong> ч</span>
+    <span class="kpi-item">Всего: <strong>{{ list_stats.total }}</strong></span>
+    <span class="kpi-item kpi-pd">ПД: <strong>{{ list_stats.pd }}</strong></span>
+    <span class="kpi-item kpi-gz">ГЗ: <strong>{{ list_stats.gz }}</strong></span>
+    <span class="kpi-item kpi-canc">Отм: <strong>{{ list_stats.cancelled }}</strong></span>
+</div>
+
+<div class="list-wrap">
+    <table class="list-table">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Время</th>
+                <th>Арендатор</th>
+                <th>Событие</th>
+                <th>Площадка</th>
+                <th>Тип</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in list_bookings %}
+            <tr class="list-row" onclick="showBooking({{ item.id }})">
+                <td>
+                    <span class="bar-{{ item.kind_raw }}"></span>
+                    {{ item.date_str }}
+                </td>
+                <td>{{ item.time_str }}</td>
+                <td>{{ item.tenant }}</td>
+                <td>{{ item.title or '—' }}</td>
+                <td>{{ item.resource_name }}</td>
+                <td class="kind-{{ item.kind_raw }}">{{ item.kind }}</td>
+                <td class="status-{{ item.status_raw }}">{{ item.status }}</td>
+            </tr>
+            {% endfor %}
+            {% if not list_bookings %}
+            <tr><td colspan="7" class="empty-row">Нет бронирований за выбранный период</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ══ Модалка ══ -->
 <div id="bookingModal" class="modal" style="display:none">
     <div class="modal-backdrop" onclick="closeModal()"></div>
     <div class="modal-content">
@@ -143,9 +181,7 @@
             <h2>Детали бронирования</h2>
             <button onclick="closeModal()" class="btn-close">✕</button>
         </div>
-        <div class="modal-body" id="bookingDetails">
-            Загрузка...
-        </div>
+        <div class="modal-body" id="bookingDetails">Загрузка...</div>
     </div>
 </div>
 {% endblock %}
@@ -153,12 +189,18 @@
 {% block scripts %}
 <script src="/static/js/schedule.js"></script>
 <script>
-    // Передаём данные для JS
     window.SCHEDULE_DATA = {
         orgId: {{ org_id }},
         day: "{{ selected_day.isoformat() }}",
         showCancelled: {{ 'true' if show_cancelled else 'false' }},
+        view: "{{ view }}",
+        period: "{{ period }}",
         spans: {{ spans | tojson }},
     };
+
+    function changePeriod(val) {
+        const d = window.SCHEDULE_DATA;
+        window.location.href = `/schedule?org_id=${d.orgId}&day=${d.day}&show_cancelled=${d.showCancelled}&view=${d.view}&period=${val}`;
+    }
 </script>
 {% endblock %}
