@@ -9,11 +9,33 @@
     <link rel="icon" href="/static/apple-touch-icon.png" type="image/png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <title>{% block title %}Расписание{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=4">
     {% block head %}{% endblock %}
 </head>
 <body>
     {% block body %}{% endblock %}
+
+    {% set current_page = request.url.path %}
+    {% set user_session = request.session.get('user') %}
+    {% if user_session and current_page != '/login' %}
+    <nav class="bottom-tab-bar">
+        <a href="/schedule" class="tab-item {{ 'active' if current_page == '/schedule' }}">
+            <span class="tab-icon">📅</span>
+            <span>Расписание</span>
+        </a>
+        {% if has_analytics is defined and has_analytics %}
+        <a href="/analytics" class="tab-item {{ 'active' if current_page == '/analytics' }}">
+            <span class="tab-icon">📊</span>
+            <span>Аналитика</span>
+        </a>
+        {% endif %}
+        <a href="/logout" class="tab-item">
+            <span class="tab-icon">👤</span>
+            <span>Выход</span>
+        </a>
+    </nav>
+    {% endif %}
+
     {% block scripts %}{% endblock %}
 </body>
 </html>
