@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Аналитика{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/analytics.css?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="app-container">
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <img src="/static/logo.png" alt="" class="header-logo">
+            <span class="header-title">Аналитика</span>
+        </div>
+        <div class="header-right">
+            <a href="/schedule" class="header-link">📅 Расписание</a>
+            <span class="header-user">{{ user.full_name or user.username }}</span>
+            <a href="/logout" class="header-link">Выход</a>
+        </div>
+    </header>
+
+    <!-- Filters -->
+    <div class="filters-bar">
+        <form method="GET" action="/analytics" class="filters-form" id="filtersForm">
+            <div class="filter-group">
+                <label>Учреждение</label>
+                <select name="org_id" onchange="this.form.submit()">
+                    <option value="">Все</option>
+                    {% for o in orgs %}
+                    <option value="{{ o.id }}" {{ 'selected' if org_id == o.id }}>{{ o.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Период</label>
+                <select name="period" onchange="this.form.submit()">
+                    {% for val, txt in [('day','День'),('week','Неделя'),('month','Месяц'),('quarter','Квартал'),('year','Год')] %}
+                    <option value="{{ val }}" {{ 'selected' if period == val }}>{{ txt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Дата</label>
+                <input type="date" name="day" value="{{ anchor }}" onchange="this.form.submit()">
+            </div>
+            <div class="filter-group filter-check">
+                <label>
+                    <input type="checkbox" name="show_cancelled" value="true"
+                           {{ 'checked' if show_cancelled }}
+                           onchange="this.form.submit()"> Отменённые
+                </label>
+            </div>
+        </form>
+    </div>
+
+    <!-- Period info -->
+    <div class="analytics-meta">
+        <span class="meta-period">{{ period_label }}</span>
+        <span class="meta-total">
+            ПД {{ total_pd_h }}ч ({{ "%.1f"|format(total_pct if total_cap_h > 0 else 0) }}%) |
+            ГЗ {{ total_gz_h }}ч |
+            Занято {{ total_busy_h }}ч / {{ total_cap_h }}ч
+        </span>
+    </div>
+
+    <!-- Table -->
+    <div class="analytics-table-wrap">
+        <table class="analytics-table">
+            <thead>
+                <tr>
+                    <th>Учреждение</th>
+                    <th>Площадка</th>
+                    <th class="col-bar">Загрузка</th>
+                    <th class="col-num">%</th>
+                    <th class="col-num">ПД, ч</th>
+                    <th class="col-num">ГЗ, ч</th>
+                    <th class="col-num">Всего, ч</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr class="{{ 'row-total' if r.is_total else 'row-venue' }}"
+                    data-detail='{{ {
+                        "title": (r.org_name ~ " — ИТОГО") if r.is_total else r.venue_name,
+                        "pct": r.pct,
+                        "pd_h": r.pd_h, "gz_h": r.gz_h, "busy_h": r.busy_h, "cap_h": r.cap_h,
+                        "m_cap": r.m_cap, "m_pd": r.m_pd, "m_gz": r.m_gz,
+                        "d_cap": r.d_cap, "d_pd": r.d_pd, "d_gz": r.d_gz,
+                        "e_cap": r.e_cap, "e_pd": r.e_pd, "e_gz": r.e_gz
+                    } | tojson }}'
+                    onclick="showDetail(this)">
+
+                    <td>{{ r.org_name }}</td>
+                    <td>{{ "ИТОГО" if r.is_total else r.venue_name }}</td>
+                    <td class="col-bar">
+                        <div class="bar-cell">
+                            <div class="bar-bg">
+                                <div class="bar-fill bar-color-{{ 'green' if r.pct >= 100 else 'yellow' if r.pct >= 71 else 'orange' if r.pct >= 51 else 'red' if r.pct >= 1 else 'gray' }}"
+                                     style="width: {{ [r.pct, 100] | min }}%"></div>
+                            </div>
+                            <span class="bar-label">{{ "%.1f"|format(r.pct) }}%</span>
+                        </div>
+                    </td>
+                    <td class="col-num">{{ "%.1f"|format(r.pct) }}%</td>
+                    <td class="col-num">{{ r.pd_h }}</td>
+                    <td class="col-num">{{ r.gz_h }}</td>
+                    <td class="col-num">{{ r.busy_h }}</td>
+                </tr>
+                {% endfor %}
+
+                {% if not rows %}
+                <tr><td colspan="7" class="empty-row">Нет данных за выбранный период</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Detail panel (appears on row click) -->
+    <div id="detailPanel" class="detail-panel hidden">
+        <div class="detail-header">
+            <h3 id="detailTitle">—</h3>
+            <button class="detail-close" onclick="hideDetail()">✕</button>
+        </div>
+        <div class="detail-body">
+            <div class="detail-main-bar">
+                <div class="detail-bar-bg">
+                    <div id="detailBarFill" class="detail-bar-fill"></div>
+                </div>
+                <div id="detailBarLabel" class="detail-bar-label">0%</div>
+            </div>
+            <div class="detail-numbers" id="detailNumbers"></div>
+            <div class="detail-shifts" id="detailShifts"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function pctColor(p) {
+    if (p >= 100) return '#22c55e';
+    if (p >= 71) return '#facc15';
+    if (p >= 51) return '#f59e0b';
+    if (p >= 1) return '#ef4444';
+    return 'rgba(255,255,255,0.15)';
+}
+
+function hrs(sec) { return (sec / 3600).toFixed(1); }
+function pct(sec, cap) { return cap > 0 ? (100 * sec / cap).toFixed(1) : '0.0'; }
+
+function showDetail(tr) {
+    const d = JSON.parse(tr.dataset.detail);
+    document.getElementById('detailTitle').textContent = d.title;
+
+    const fill = document.getElementById('detailBarFill');
+    fill.style.width = Math.min(d.pct, 100) + '%';
+    fill.style.background = pctColor(d.pct);
+    document.getElementById('detailBarLabel').textContent = d.pct.toFixed(1) + '%';
+
+    document.getElementById('detailNumbers').innerHTML = `
+        <div class="dn-row"><span>ПД</span><span>${d.pd_h} ч</span></div>
+        <div class="dn-row"><span>ГЗ</span><span>${d.gz_h} ч</span></div>
+        <div class="dn-row dn-total"><span>Занято</span><span>${d.busy_h} / ${d.cap_h} ч</span></div>
+    `;
+
+    let shifts = '';
+    const names = [
+        {key: 'm', label: 'Утро (08–12)'},
+        {key: 'd', label: 'День (12–18)'},
+        {key: 'e', label: 'Вечер (18–22)'}
+    ];
+    for (const s of names) {
+        const cap = d[s.key + '_cap'];
+        const pd = d[s.key + '_pd'];
+        const gz = d[s.key + '_gz'];
+        const busy = pd + gz;
+        const p = cap > 0 ? (100 * busy / cap).toFixed(1) : '0.0';
+        if (cap > 0) {
+            shifts += `
+                <div class="shift-block">
+                    <div class="shift-label">${s.label}</div>
+                    <div class="shift-bar-bg">
+                        <div class="shift-bar-fill" style="width:${Math.min(p,100)}%;background:${pctColor(p)}"></div>
+                    </div>
+                    <div class="shift-nums">
+                        <span>ПД ${hrs(pd)}ч</span>
+                        <span>ГЗ ${hrs(gz)}ч</span>
+                        <span>${p}%</span>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    document.getElementById('detailShifts').innerHTML = shifts;
+
+    document.getElementById('detailPanel').classList.remove('hidden');
+
+    // highlight row
+    document.querySelectorAll('.analytics-table tr.active-row').forEach(r => r.classList.remove('active-row'));
+    tr.classList.add('active-row');
+}
+
+function hideDetail() {
+    document.getElementById('detailPanel').classList.add('hidden');
+    document.querySelectorAll('.analytics-table tr.active-row').forEach(r => r.classList.remove('active-row'));
+}
+</script>
+{% endblock %}
