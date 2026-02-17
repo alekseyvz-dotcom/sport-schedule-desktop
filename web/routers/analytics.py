@@ -336,7 +336,7 @@ def _build_result(agg):
 @router.get("/analytics", response_class=HTMLResponse)
 def analytics_page(
     request: Request,
-    org_id: Optional[int] = Query(None),
+    org_id: Optional[str] = Query(None),
     day: Optional[str] = Query(None),
     period: str = Query("month"),
     show_cancelled: bool = Query(False),
@@ -349,6 +349,17 @@ def analytics_page(
 
     if not has_perm:
         raise HTTPException(403, "Нет доступа к аналитике")
+
+    # org_id: "" → None, "5" → 5
+    if org_id is not None:
+        org_id = org_id.strip()
+        if org_id == "" or org_id.lower() == "none":
+            org_id = None
+        else:
+            try:
+                org_id = int(org_id)
+            except ValueError:
+                org_id = None
 
     orgs = _load_orgs(conn, user)
 
