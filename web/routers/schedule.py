@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from psycopg2.extras import RealDictCursor
 
-from web.deps import get_db, get_current_user, require_org_access
+from web.deps import get_db, get_current_user, require_org_access, has_permission
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -265,6 +265,7 @@ def schedule_page(
             "orgs": [],
             "selected_org": None,
             "error": "Нет доступных учреждений",
+            "has_analytics": False,
         })
 
     if org_id is None:
@@ -286,7 +287,6 @@ def schedule_page(
     venue_ids = list({r["venue_id"] for r in resources})
     slots = _time_slots(ws, we)
 
-    # Навигация
     prev_day = selected_day - timedelta(days=1)
     next_day = selected_day + timedelta(days=1)
     weekdays_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
@@ -295,10 +295,8 @@ def schedule_page(
     view = view if view in ("grid", "list") else "grid"
     period = period if period in ("day", "week", "month", "quarter", "year") else "day"
 
-    # === GRID MODE ===
     grid = []
     spans = {}
-    # === LIST MODE ===
     list_bookings = []
     list_period_label = ""
     list_stats = {"total": 0, "pd": 0, "gz": 0, "cancelled": 0, "busy_hours": 0.0}
@@ -325,10 +323,7 @@ def schedule_page(
         )
 
         list_stats = {
-            "total": total,
-            "pd": pd,
-            "gz": gz,
-            "cancelled": canc,
+            "total": total, "pd": pd, "gz": gz, "cancelled": canc,
             "busy_hours": round(busy_sec / 3600.0, 1),
         }
 
@@ -353,6 +348,9 @@ def schedule_page(
                 "booking": _serialize_booking(b),
             })
 
+    # Проверяем право на аналитику
+    show_analytics = has_permission(conn, user, "page.analytics") or has_permission(conn, user, "tab.analytics")
+
     return templates.TemplateResponse("schedule.html", {
         "request": request,
         "user": user,
@@ -375,4 +373,5 @@ def schedule_page(
         "list_bookings": list_bookings,
         "list_period_label": list_period_label,
         "list_stats": list_stats,
+        "has_analytics": show_analytics,
     })
