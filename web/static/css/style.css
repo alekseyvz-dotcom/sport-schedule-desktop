@@ -339,7 +339,74 @@ body {
 }
 
 /* ══════════════════════════════════════
-   Сетка расписания
+   View Controls (Слоты / Список)
+   ══════════════════════════════════════ */
+
+.view-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    flex-wrap: wrap;
+}
+
+.view-tabs {
+    display: inline-flex;
+    gap: 0;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-hover);
+    border-radius: 10px;
+    padding: 3px;
+    flex-shrink: 0;
+}
+
+.view-tab {
+    padding: 7px 18px;
+    border-radius: 8px;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 13px;
+    transition: all 0.15s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.view-tab:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+}
+
+.view-tab.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.period-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-hover);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 7px 12px;
+    font-size: 13px;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.period-select option {
+    background: var(--bg-card);
+    color: var(--text);
+}
+
+.meta-count {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-left: auto;
+}
+
+/* ══════════════════════════════════════
+   Сетка расписания (GRID)
    ══════════════════════════════════════ */
 
 .schedule-wrap {
@@ -355,13 +422,12 @@ body {
     table-layout: fixed;
 }
 
-/* Заголовки колонок */
 .schedule-grid thead th {
     position: sticky;
     top: 0;
     z-index: 10;
     background: var(--bg-card);
-    padding: 10px 4px;
+    padding: 10px 6px;
     font-size: 11px;
     font-weight: 700;
     color: var(--text-dim);
@@ -378,7 +444,16 @@ body {
     max-width: 52px;
 }
 
-/* На мобиле — короткие имена */
+.col-resource {
+    min-width: 100px;
+}
+
+.res-header {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .res-short { display: none; }
 
 @media (max-width: 768px) {
@@ -390,9 +465,9 @@ body {
         min-width: 44px;
         max-width: 44px;
     }
+    .col-resource { min-width: 70px; }
 }
 
-/* Ячейка времени */
 .cell-time {
     text-align: right;
     padding: 2px 8px 2px 4px;
@@ -404,7 +479,6 @@ body {
     height: 40px;
 }
 
-/* Пустая ячейка */
 .cell-empty {
     height: 40px;
     border-bottom: 1px solid var(--border);
@@ -416,8 +490,6 @@ body {
 .cell-empty:hover {
     background: rgba(255, 255, 255, 0.03);
 }
-
-/* ── Блок бронирования ── */
 
 .cell-booking {
     border-left: 1px solid var(--border);
@@ -439,8 +511,6 @@ body {
     position: relative;
 }
 
-/* ── Типы бронирований ── */
-
 .booking-pd {
     background: rgba(96, 165, 250, 0.12);
     border-left: 3px solid var(--blue) !important;
@@ -457,7 +527,6 @@ body {
     opacity: 0.6;
 }
 
-/* Бейджи */
 .b-badge {
     position: absolute;
     top: 4px;
@@ -475,7 +544,6 @@ body {
 .badge-gz   { background: var(--amber); }
 .badge-canc { background: var(--slate); }
 
-/* Текст внутри блока */
 .b-name {
     font-size: 12px;
     font-weight: 600;
@@ -495,6 +563,159 @@ body {
     text-overflow: ellipsis;
     margin-top: 2px;
     line-height: 1.3;
+}
+
+.cell-time.now {
+    color: var(--accent-hover) !important;
+    font-weight: 700;
+    position: relative;
+}
+
+.cell-time.now::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.4;
+    transform: translateY(-50%);
+}
+
+/* ══════════════════════════════════════
+   LIST VIEW
+   ══════════════════════════════════════ */
+
+.list-meta-bar {
+    display: flex;
+    gap: 16px;
+    padding: 12px 16px;
+    color: var(--text-dim);
+    font-size: 13px;
+    flex-wrap: wrap;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    margin: 0 8px;
+}
+
+.list-meta-bar strong {
+    color: var(--text);
+}
+
+.kpi-item {
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.kpi-pd strong { color: var(--blue); }
+.kpi-gz strong { color: var(--amber); }
+.kpi-canc strong { color: var(--slate); }
+
+.list-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 8px 16px 8px;
+}
+
+.list-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+    background: var(--bg-card);
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+}
+
+.list-table thead th {
+    text-align: left;
+    padding: 12px 10px;
+    color: var(--text-dim);
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    background: var(--bg-card);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+.list-table tbody td {
+    padding: 12px 10px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+.list-table tbody tr {
+    cursor: pointer;
+    transition: background 0.12s;
+}
+
+.list-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.list-table tbody tr:active {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+/* Цветная полоска слева */
+.list-table tbody td:first-child {
+    position: relative;
+    padding-left: 18px;
+}
+
+.bar-PD, .bar-GZ, .bar-cancelled {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: calc(100% - 12px);
+    border-radius: 2px;
+    display: inline-block;
+}
+
+.bar-PD { background: var(--blue); }
+.bar-GZ { background: var(--amber); }
+.bar-cancelled { background: var(--slate); }
+
+/* Тип — цвет */
+.kind-PD { color: var(--blue); font-weight: 600; }
+.kind-GZ { color: var(--amber); font-weight: 600; }
+
+/* Статус — цвет */
+.status-planned {
+    color: var(--green);
+    font-weight: 600;
+}
+
+.status-done {
+    color: var(--slate);
+    font-weight: 600;
+}
+
+.status-cancelled {
+    color: var(--red);
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.empty-row {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 10px !important;
+    font-size: 14px;
 }
 
 /* ══════════════════════════════════════
@@ -562,8 +783,6 @@ body {
     padding: 20px;
 }
 
-/* ── Детали бронирования в модалке ── */
-
 .detail-row {
     display: flex;
     justify-content: space-between;
@@ -597,25 +816,9 @@ body {
     font-weight: 700;
 }
 
-.status-planned   { background: rgba(74, 222, 128, 0.15); color: var(--green); }
-.status-done      { background: rgba(148, 163, 184, 0.15); color: var(--slate); }
-.status-cancelled { background: rgba(239, 68, 68, 0.15); color: var(--red); }
-
-/* ── Свайп-подсказка (мобиль) ── */
-
-.swipe-hint {
-    display: none;
-    text-align: center;
-    padding: 8px;
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-@media (max-width: 768px) {
-    .swipe-hint {
-        display: block;
-    }
-}
+.status-badge.status-planned   { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+.status-badge.status-done      { background: rgba(148, 163, 184, 0.15); color: var(--slate); }
+.status-badge.status-cancelled { background: rgba(239, 68, 68, 0.15); color: var(--red); }
 
 /* ── Скроллбар ── */
 
@@ -637,7 +840,91 @@ body {
     background: rgba(255, 255, 255, 0.2);
 }
 
-/* ── Пустое состояние ── */
+/* ── Мобильная адаптация ── */
+
+@media (max-width: 768px) {
+    .header {
+        padding: 10px 12px;
+    }
+
+    .header-top h1 {
+        font-size: 15px;
+    }
+
+    .view-controls {
+        gap: 6px;
+    }
+
+    .view-tab {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    .period-select {
+        padding: 6px 8px;
+        font-size: 12px;
+    }
+
+    .meta-count {
+        font-size: 11px;
+    }
+
+    .date-nav {
+        gap: 4px;
+    }
+
+    .date-formatted {
+        font-size: 14px;
+    }
+
+    .list-meta-bar {
+        gap: 8px;
+        padding: 8px 12px;
+        font-size: 12px;
+        margin: 0 4px;
+    }
+
+    .list-wrap {
+        padding: 0 4px 12px 4px;
+    }
+
+    .list-table {
+        min-width: 580px;
+        font-size: 12px;
+    }
+
+    .list-table thead th {
+        padding: 8px 6px;
+        font-size: 10px;
+    }
+
+    .list-table tbody td {
+        padding: 10px 6px;
+        max-width: 150px;
+    }
+
+    .modal-content {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .list-table {
+        min-width: 500px;
+        font-size: 11px;
+    }
+
+    .view-tabs {
+        padding: 2px;
+    }
+
+    .view-tab {
+        padding: 5px 10px;
+        font-size: 11px;
+    }
+}
+
+/* ── Пустое / Загрузка ── */
 
 .empty-state {
     text-align: center;
@@ -649,12 +936,6 @@ body {
     font-size: 48px;
     margin-bottom: 12px;
 }
-
-.empty-state p {
-    font-size: 14px;
-}
-
-/* ── Лоадер ── */
 
 .loader {
     display: flex;
@@ -675,128 +956,3 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
-
-
-.cell-time.now {
-    color: var(--accent-hover) !important;
-    font-weight: 700;
-    position: relative;
-}
-
-.cell-time.now::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 2px;
-    background: var(--accent);
-    opacity: 0.4;
-    transform: translateY(-50%);
-}
-
-/* ══ View controls ══ */
-.view-controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    flex-wrap: wrap;
-}
-.view-tabs {
-    display: flex;
-    gap: 4px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 10px;
-    padding: 3px;
-}
-.view-tab {
-    padding: 6px 16px;
-    border-radius: 8px;
-    color: rgba(226,232,240,0.7);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 13px;
-    transition: all 0.15s;
-}
-.view-tab:hover { background: rgba(255,255,255,0.08); color: #fff; }
-.view-tab.active {
-    background: rgba(99,102,241,0.9);
-    color: #fff;
-}
-.period-select {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 8px;
-    color: rgba(226,232,240,0.9);
-    padding: 6px 10px;
-    font-size: 13px;
-}
-.meta-count { color: rgba(226,232,240,0.6); font-size: 13px; }
-
-/* ══ Grid: заголовки ресурсов ══ */
-.col-resource {
-    min-width: 100px;
-    max-width: 200px;
-    position: relative;
-}
-.res-header {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.schedule-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-}
-.schedule-grid {
-    min-width: 600px;
-}
-.schedule-grid th.col-resource {
-    min-width: 120px;
-}
-/* На мобильных — показываем short_name */
-.res-short { display: none; }
-@media (max-width: 768px) {
-    .res-full { display: none; }
-    .res-short { display: inline; }
-    .schedule-grid th.col-resource { min-width: 80px; }
-}
-
-/* ══ LIST VIEW ══ */
-.list-meta-bar {
-    display: flex;
-    gap: 16px;
-    padding: 10px 16px;
-    color: rgba(226,232,240,0.8);
-    font-size: 13px;
-    flex-wrap: wrap;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-.kpi-pd strong { color: #60a5fa; }
-.kpi-gz strong { color: #f59e0b; }
-.kpi-canc strong { color: #94a3b8; }
-
-.list-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 8px;
-}
-.list-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    min-width: 600px;
-}
-.list-table thead th {
-    text-align: left;
-    padding: 10px 8px;
-    color: rgba(226,232,240,0.6);
-    font-weight: 600;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    white-space: nowrap;
-}
-.list-table tbody td {
-    padding: 10px 8px;
-    color: rgba(226,232,240,0.88);
-    border-bottom: 1px solid
