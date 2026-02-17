@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Generator
 
 from fastapi import Request, HTTPException
@@ -18,7 +17,6 @@ def get_db() -> Generator:
 
 
 def get_current_user(request: Request) -> dict:
-    """Читает user из session. Если нет — редирект на логин."""
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=302, headers={"Location": "/login"})
@@ -26,7 +24,6 @@ def get_current_user(request: Request) -> dict:
 
 
 def require_org_access(user: dict, org_id: int, conn) -> dict:
-    """Проверяет доступ пользователя к учреждению."""
     role = user.get("role_code", "")
     user_id = user["id"]
 
@@ -48,3 +45,15 @@ def require_org_access(user: dict, org_id: int, conn) -> dict:
         raise HTTPException(403, "Нет доступа к этому учреждению")
 
     return row
+
+
+def has_permission(conn, user: dict, perm_code: str) -> bool:
+    """Проверяет наличие permission у пользователя. Admin имеет всё."""
+    if user.get("role_code") == "admin":
+        return True
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM app_user_permissions WHERE user_id = %s AND perm_code = %s",
+            (user["id"], perm_code),
+        )
+        return cur.fetchone() is not None
