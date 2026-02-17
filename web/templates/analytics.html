@@ -99,6 +99,7 @@
                             <div class="bar-bg">
                                 <div class="bar-fill bar-color-{{ 'green' if r.pct >= 100 else 'yellow' if r.pct >= 71 else 'orange' if r.pct >= 51 else 'red' if r.pct >= 1 else 'gray' }}"
                                      style="width: {{ [r.pct, 100] | min }}%"></div>
+                                <span class="bar-pct-inside">{{ "%.1f"|format(r.pct) }}%</span>
                             </div>
                             <span class="bar-label">{{ "%.1f"|format(r.pct) }}%</span>
                         </div>
