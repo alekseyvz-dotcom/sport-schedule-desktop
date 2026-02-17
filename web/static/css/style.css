@@ -676,7 +676,6 @@ body {
     to { transform: rotate(360deg); }
 }
 
-/* Добавить в конец style.css */
 
 .cell-time.now {
     color: var(--accent-hover) !important;
@@ -695,3 +694,109 @@ body {
     opacity: 0.4;
     transform: translateY(-50%);
 }
+
+/* ══ View controls ══ */
+.view-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+}
+.view-tabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 3px;
+}
+.view-tab {
+    padding: 6px 16px;
+    border-radius: 8px;
+    color: rgba(226,232,240,0.7);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+.view-tab:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.view-tab.active {
+    background: rgba(99,102,241,0.9);
+    color: #fff;
+}
+.period-select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px;
+    color: rgba(226,232,240,0.9);
+    padding: 6px 10px;
+    font-size: 13px;
+}
+.meta-count { color: rgba(226,232,240,0.6); font-size: 13px; }
+
+/* ══ Grid: заголовки ресурсов ══ */
+.col-resource {
+    min-width: 100px;
+    max-width: 200px;
+    position: relative;
+}
+.res-header {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.schedule-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.schedule-grid {
+    min-width: 600px;
+}
+.schedule-grid th.col-resource {
+    min-width: 120px;
+}
+/* На мобильных — показываем short_name */
+.res-short { display: none; }
+@media (max-width: 768px) {
+    .res-full { display: none; }
+    .res-short { display: inline; }
+    .schedule-grid th.col-resource { min-width: 80px; }
+}
+
+/* ══ LIST VIEW ══ */
+.list-meta-bar {
+    display: flex;
+    gap: 16px;
+    padding: 10px 16px;
+    color: rgba(226,232,240,0.8);
+    font-size: 13px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.kpi-pd strong { color: #60a5fa; }
+.kpi-gz strong { color: #f59e0b; }
+.kpi-canc strong { color: #94a3b8; }
+
+.list-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 8px;
+}
+.list-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 600px;
+}
+.list-table thead th {
+    text-align: left;
+    padding: 10px 8px;
+    color: rgba(226,232,240,0.6);
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    white-space: nowrap;
+}
+.list-table tbody td {
+    padding: 10px 8px;
+    color: rgba(226,232,240,0.88);
+    border-bottom: 1px solid
