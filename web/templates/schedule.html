@@ -6,6 +6,9 @@
     <div class="header-top">
         <h1>⚽ Расписание</h1>
         <div class="header-user">
+            {% if has_analytics %}
+            <a href="/analytics" class="btn-link">📊 Аналитика</a>
+            {% endif %}
             {{ user.full_name or user.username }}
             <a href="/logout" class="btn-link">Выход</a>
         </div>
@@ -39,7 +42,6 @@
         {% endif %}
     </div>
 
-    <!-- View tabs + controls -->
     <div class="view-controls">
         <div class="view-tabs">
             <a href="/schedule?org_id={{ org_id }}&day={{ selected_day.isoformat() }}&show_cancelled={{ show_cancelled }}&view=grid&period={{ period }}"
@@ -68,7 +70,6 @@
 </header>
 
 {% if view == 'grid' %}
-<!-- ══ GRID VIEW ══ -->
 <div class="schedule-wrap">
     <table class="schedule-grid" id="scheduleGrid">
         <thead>
@@ -127,7 +128,6 @@
 </div>
 
 {% else %}
-<!-- ══ LIST VIEW ══ -->
 <div class="list-meta-bar">
     <span>Период: <strong>{{ list_period_label }}</strong></span>
     <span>Занято: <strong>{{ list_stats.busy_hours }}</strong> ч</span>
@@ -173,7 +173,6 @@
 </div>
 {% endif %}
 
-<!-- ══ Модалка ══ -->
 <div id="bookingModal" class="modal" style="display:none">
     <div class="modal-backdrop" onclick="closeModal()"></div>
     <div class="modal-content">
