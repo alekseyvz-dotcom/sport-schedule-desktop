@@ -43,4 +43,441 @@
     border-color: #6366f1;
 }
 
-.filter-
+.filter-check {
+    justify-content: flex-end;
+    padding-bottom: 4px;
+}
+
+.filter-check label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: none;
+    cursor: pointer;
+}
+
+.filter-check input[type="checkbox"] {
+    accent-color: #6366f1;
+    width: 16px;
+    height: 16px;
+}
+
+/* ── Meta ── */
+
+.analytics-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.meta-period {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.meta-total {
+    font-size: 13px;
+    color: #6366f1;
+    font-weight: 600;
+}
+
+/* ── Table ── */
+
+.analytics-table-wrap {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: auto;
+    padding: 0 8px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.analytics-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.analytics-table thead th {
+    position: sticky;
+    top: 0;
+    background: #0f172a;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 2;
+}
+
+.analytics-table th.col-num,
+.analytics-table td.col-num {
+    text-align: right;
+    white-space: nowrap;
+    min-width: 60px;
+}
+
+.analytics-table th.col-bar,
+.analytics-table td.col-bar {
+    min-width: 140px;
+    width: 25%;
+}
+
+.analytics-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.analytics-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.analytics-table tbody tr.active-row {
+    background: rgba(99, 102, 241, 0.12);
+}
+
+.analytics-table td {
+    padding: 10px 8px;
+    color: rgba(255, 255, 255, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    vertical-align: middle;
+}
+
+/* Total rows */
+.row-total {
+    background: rgba(99, 102, 241, 0.06) !important;
+}
+
+.row-total td {
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    border-bottom: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.empty-row {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.3);
+    padding: 40px 16px !important;
+    font-size: 15px;
+}
+
+/* ── Progress bars in table ── */
+
+.bar-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bar-bg {
+    flex: 1;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 11px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 11px;
+    transition: width 0.4s ease;
+}
+
+.bar-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    min-width: 48px;
+    text-align: right;
+}
+
+.bar-color-green { background: #22c55e; }
+.bar-color-yellow { background: #facc15; }
+.bar-color-orange { background: #f59e0b; }
+.bar-color-red { background: #ef4444; }
+.bar-color-gray { background: rgba(255, 255, 255, 0.12); }
+
+/* ── Detail panel ── */
+
+.detail-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #1a1f36;
+    border-top: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 20px 20px 0 0;
+    padding: 16px 20px 24px;
+    z-index: 100;
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.detail-panel.hidden {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.detail-header h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+}
+
+.detail-close {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.detail-close:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+/* Main bar in detail */
+.detail-main-bar {
+    margin-bottom: 16px;
+}
+
+.detail-bar-bg {
+    height: 28px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.detail-bar-fill {
+    height: 100%;
+    border-radius: 14px;
+    transition: width 0.4s ease, background 0.3s;
+}
+
+.detail-bar-label {
+    text-align: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 8px;
+}
+
+/* Detail numbers */
+.detail-numbers {
+    margin-bottom: 16px;
+}
+
+.dn-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dn-row span:last-child {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.dn-total {
+    color: #fff;
+    font-weight: 700;
+}
+
+.dn-total span:last-child {
+    color: #6366f1;
+}
+
+/* Shifts */
+.detail-shifts {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shift-block {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.shift-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.shift-bar-bg {
+    height: 18px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 9px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.shift-bar-fill {
+    height: 100%;
+    border-radius: 9px;
+    transition: width 0.4s ease;
+}
+
+.shift-nums {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.shift-nums span:last-child {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── Header ── */
+
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+.header-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-link {
+    color: rgba(255, 255, 255, 0.6);
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.header-link:hover {
+    color: #fff;
+}
+
+.header-user {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── App container ── */
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+/* ── Mobile ── */
+
+@media (max-width: 768px) {
+    .filters-form {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .filter-group select,
+    .filter-group input[type="date"] {
+        width: 100%;
+    }
+
+    .analytics-meta {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .analytics-table th.col-num:nth-child(n+5),
+    .analytics-table td.col-num:nth-child(n+5) {
+        display: none;
+    }
+
+    .header-right {
+        gap: 8px;
+    }
+
+    .header-user {
+        display: none;
+    }
+
+    .bar-label {
+        display: none;
+    }
+
+    .analytics-table {
+        font-size: 12px;
+    }
+
+    .analytics-table td,
+    .analytics-table th {
+        padding: 8px 6px;
+    }
+}
+
+@media (max-width: 480px) {
+    .analytics-table th:first-child,
+    .analytics-table td:first-child {
+        display: none;
+    }
+
+    .analytics-table th.col-num:nth-child(4),
+    .analytics-table td.col-num:nth-child(4) {
+        display: none;
+    }
+}
