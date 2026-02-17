@@ -80,6 +80,8 @@ def _load_resources(conn, org_id: int) -> list:
 
 def _load_bookings(conn, venue_ids: list, start: datetime, end: datetime,
                    include_cancelled: bool = False) -> list:
+    if not venue_ids:
+        return []
     cancel_filter = "" if include_cancelled else "AND b.status <> 'cancelled'"
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -113,6 +115,26 @@ def _time_slots(ws: time, we: time) -> list:
         slots.append(cur.time())
         cur += timedelta(minutes=SLOT_MINUTES)
     return slots
+
+
+def _serialize_booking(b: dict) -> dict:
+    """Конвертирует datetime-поля бронирования в строки для JSON."""
+    return {
+        "id": b["id"],
+        "venue_id": b["venue_id"],
+        "venue_unit_id": b["venue_unit_id"],
+        "activity": b["activity"],
+        "title": b["title"],
+        "status": b["status"],
+        "comment": b["comment"],
+        "tenant_id": b["tenant_id"],
+        "gz_group_id": b["gz_group_id"],
+        "tenant_name": b["tenant_name"],
+        "gz_group_name": b["gz_group_name"],
+        "gz_is_free": b["gz_is_free"],
+        "starts_at": b["starts_at"].isoformat() if b["starts_at"] else None,
+        "ends_at": b["ends_at"].isoformat() if b["ends_at"] else None,
+    }
 
 
 def _build_grid(slots, resources, bookings, day, ws):
@@ -169,7 +191,7 @@ def _build_grid(slots, resources, bookings, day, ws):
             "row_start": r0,
             "row_end": r1,
             "span": r1 - r0 + 1,
-            "booking": b,
+            "booking": _serialize_booking(b),
             "display_name": display_name,
             "time_str": f"{b['starts_at']:%H:%M}–{b['ends_at']:%H:%M}",
         }
