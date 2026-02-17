@@ -196,6 +196,7 @@
         view: "{{ view }}",
         period: "{{ period }}",
         spans: {{ spans | tojson }},
+        listBookings: {{ list_bookings | tojson }},
     };
 
     function changePeriod(val) {
