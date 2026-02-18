@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from psycopg2.extras import RealDictCursor
@@ -10,10 +10,11 @@ from psycopg2.extras import RealDictCursor
 from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox, QDateEdit, QCheckBox,
     QPushButton, QTableWidget, QTableWidgetItem,
-    QMessageBox, QHeaderView, QStyledItemDelegate, QStyle
+    QMessageBox, QHeaderView, QStyledItemDelegate, QStyle,
+    QLineEdit, QProgressBar, QScrollArea, QFrame, QSplitter,
 )
 
 from app.db import get_conn, put_conn
@@ -33,6 +34,8 @@ BORDER = QColor(255, 255, 255, 20)
 TEXT = QColor(226, 232, 240)
 TEXT_DIM = QColor(226, 232, 240, 140)
 
+WEEKDAYS_RU = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
+
 
 def _load_org_work_window(org_id: int) -> tuple[time, time, bool]:
     conn = None
@@ -40,11 +43,7 @@ def _load_org_work_window(org_id: int) -> tuple[time, time, bool]:
         conn = get_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """
-                SELECT work_start, work_end, is_24h
-                FROM public.sport_orgs
-                WHERE id=%s
-                """,
+                "SELECT work_start, work_end, is_24h FROM public.sport_orgs WHERE id=%s",
                 (int(org_id),),
             )
             row = cur.fetchone()
@@ -66,6 +65,30 @@ class Resource:
     venue_name: str
 
 
+@dataclass
+class FreeSlot:
+    resource_name: str
+    day: date
+    start: time
+    end: time
+    venue_id: int
+    venue_unit_id: Optional[int]
+
+    @property
+    def duration_min(self) -> int:
+        s = datetime.combine(self.day, self.start)
+        e = datetime.combine(self.day, self.end)
+        return max(0, int((e - s).total_seconds()) // 60)
+
+    @property
+    def duration_str(self) -> str:
+        m = self.duration_min
+        if m >= 60:
+            h, mm = divmod(m, 60)
+            return f"{h}ч {mm}мин" if mm else f"{h}ч"
+        return f"{m}мин"
+
+
 def _week_range(anchor: date) -> tuple[date, date]:
     start = anchor - timedelta(days=anchor.weekday())
     return start, start + timedelta(days=6)
@@ -81,6 +104,16 @@ def _sec_between(t0: time, t1: time) -> int:
     return int(
         (datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds()
     )
+
+
+def _format_duration(seconds: int) -> str:
+    h, rem = divmod(abs(seconds), 3600)
+    m = rem // 60
+    if h and m:
+        return f"{h}ч {m}мин"
+    if h:
+        return f"{h}ч"
+    return f"{m}мин"
 
 
 def _load_resources_for_org(org_id: int) -> List[Resource]:
@@ -140,6 +173,81 @@ def _load_bookings_for_week(
             put_conn(conn)
 
 
+def _find_free_slots(
+    resources: List[Resource],
+    bookings: list[dict],
+    days: List[date],
+    ws: time,
+    we: time,
+    min_duration_min: int = 30,
+) -> List[FreeSlot]:
+    """Find free time slots for each resource on each day."""
+    slots: List[FreeSlot] = []
+
+    for rsrc in resources:
+        for d in days:
+            day_start = datetime.combine(d, ws, tzinfo=TZ)
+            day_end = datetime.combine(d, we, tzinfo=TZ)
+
+            # collect bookings for this resource+day
+            intervals: List[Tuple[datetime, datetime]] = []
+            for b in bookings:
+                vid = int(b["venue_id"])
+                uid = b["venue_unit_id"]
+                if rsrc.venue_unit_id is not None:
+                    if vid != rsrc.venue_id or uid != rsrc.venue_unit_id:
+                        continue
+                else:
+                    if vid != rsrc.venue_id:
+                        continue
+
+                bs = max(b["starts_at"], day_start)
+                be = min(b["ends_at"], day_end)
+                if bs < be:
+                    intervals.append((bs, be))
+
+            # merge overlapping intervals
+            intervals.sort()
+            merged: List[Tuple[datetime, datetime]] = []
+            for s, e in intervals:
+                if merged and s <= merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+                else:
+                    merged.append((s, e))
+
+            # find gaps
+            cursor = day_start
+            for s, e in merged:
+                if s > cursor:
+                    gap_min = int((s - cursor).total_seconds()) // 60
+                    if gap_min >= min_duration_min:
+                        slots.append(FreeSlot(
+                            resource_name=rsrc.name,
+                            day=d,
+                            start=cursor.timetz().replace(tzinfo=None),
+                            end=s.timetz().replace(tzinfo=None),
+                            venue_id=rsrc.venue_id,
+                            venue_unit_id=rsrc.venue_unit_id,
+                        ))
+                cursor = max(cursor, e)
+
+            if cursor < day_end:
+                gap_min = int((day_end - cursor).total_seconds()) // 60
+                if gap_min >= min_duration_min:
+                    slots.append(FreeSlot(
+                        resource_name=rsrc.name,
+                        day=d,
+                        start=cursor.timetz().replace(tzinfo=None),
+                        end=we,
+                        venue_id=rsrc.venue_id,
+                        venue_unit_id=rsrc.venue_unit_id,
+                    ))
+
+    # sort: longest first, then by day
+    slots.sort(key=lambda s: (-s.duration_min, s.day, s.resource_name))
+    return slots
+
+
 def _heat_level(pct: float) -> int:
     if pct < 1:
         return 0
@@ -166,6 +274,16 @@ def _level_color(level: int) -> QColor:
     if level == 4:
         return QColor(34, 197, 94, 55)
     return QColor(34, 197, 94, 95)
+
+
+_LEVEL_CSS = {
+    0: "background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);",
+    1: "background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.35);",
+    2: "background: rgba(245,158,11,0.22); border: 1px solid rgba(245,158,11,0.40);",
+    3: "background: rgba(250,204,21,0.24); border: 1px solid rgba(250,204,21,0.45);",
+    4: "background: rgba(34,197,94,0.22); border: 1px solid rgba(34,197,94,0.40);",
+    5: "background: rgba(34,197,94,0.38); border: 1px solid rgba(34,197,94,0.55);",
+}
 
 
 class HeatmapCellDelegate(QStyledItemDelegate):
@@ -221,7 +339,15 @@ class LoadPage(QWidget):
         self.user = user
         self._open_schedule = open_schedule_cb
         self._settings = QSettings("SportApp", "Load")
+        self._last_resources: List[Resource] = []
+        self._last_bookings: list[dict] = []
+        self._last_days: List[date] = []
+        self._last_ws: time = time(8, 0)
+        self._last_we: time = time(22, 0)
+        self._last_cap_day: int = 0
+        self._last_busy: Dict = {}
 
+        # ── top bar ──
         self.lbl_title = QLabel("Загрузка (неделя)")
         self.lbl_title.setObjectName("sectionTitle")
 
@@ -234,7 +360,6 @@ class LoadPage(QWidget):
         self.dt_anchor.setDisplayFormat("dd.MM.yyyy")
         self.dt_anchor.setFixedWidth(130)
         self.dt_anchor.dateChanged.connect(lambda *_: self.reload())
-     
         _style_calendar_widget(self.dt_anchor)
 
         self.btn_prev = QPushButton("◀")
@@ -243,6 +368,10 @@ class LoadPage(QWidget):
         self.btn_next.setFixedWidth(36)
         self.btn_prev.clicked.connect(lambda: self._shift_week(-7))
         self.btn_next.clicked.connect(lambda: self._shift_week(+7))
+
+        self.btn_today = QPushButton("Сегодня")
+        self.btn_today.setFixedWidth(80)
+        self.btn_today.clicked.connect(lambda: self.dt_anchor.setDate(date.today()))
 
         self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_cancelled.setChecked(False)
@@ -253,20 +382,24 @@ class LoadPage(QWidget):
             "color: rgba(226,232,240,0.6); font-weight: 700;"
         )
 
-        # KPI
-        self.kpi_avg_t, self.kpi_avg = self._make_kpi("Средняя загрузка")
-        self.kpi_best_day_t, self.kpi_best_day = self._make_kpi("Пик недели (день)")
-        self.kpi_best_res_t, self.kpi_best_res = self._make_kpi("Пик недели (ресурс)")
-        self.kpi_hours_t, self.kpi_hours = self._make_kpi("Занято / Доступно")
+        # ── filter ──
+        self.ed_filter = QLineEdit()
+        self.ed_filter.setPlaceholderText("Фильтр ресурсов…")
+        self.ed_filter.setClearButtonEnabled(True)
+        self.ed_filter.setFixedWidth(220)
+        self.ed_filter.textChanged.connect(self._apply_resource_filter)
 
-        self.lbl_legend = QLabel(
-            "Легенда: 0% · 1–25% · 26–50% · 51–75% · 76–100% · 100%+"
-        )
-        self.lbl_legend.setStyleSheet(
-            "color: rgba(226,232,240,0.45); font-weight: 700; padding: 0 12px;"
-        )
+        # ── KPI cards ──
+        self.kpi_avg_card = self._make_kpi_card("Средняя загрузка")
+        self.kpi_peak_day_card = self._make_kpi_card("Пик (день)")
+        self.kpi_peak_res_card = self._make_kpi_card("Пик (ресурс)")
+        self.kpi_hours_card = self._make_kpi_card("Занято / Доступно")
+        self.kpi_free_card = self._make_kpi_card("Свободных окон")
 
-        # table
+        # ── legend ──
+        legend_widget = self._build_legend()
+
+        # ── heatmap table ──
         self.tbl = QTableWidget()
         self.tbl.setObjectName("loadHeatmap")
         self.tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -284,7 +417,24 @@ class LoadPage(QWidget):
         header.setStretchLastSection(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # top bar
+        # ── free slots panel ──
+        self.free_slots_container = QWidget()
+        self.free_slots_layout = QVBoxLayout(self.free_slots_container)
+        self.free_slots_layout.setContentsMargins(0, 0, 0, 0)
+        self.free_slots_layout.setSpacing(4)
+
+        free_scroll = QScrollArea()
+        free_scroll.setWidgetResizable(True)
+        free_scroll.setWidget(self.free_slots_container)
+        free_scroll.setFixedHeight(180)
+        free_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.lbl_free_title = QLabel("🔍 Свободные окна (от 30 мин)")
+        self.lbl_free_title.setStyleSheet(
+            "color: rgba(226,232,240,0.82); font-weight: 800; font-size: 13px; padding: 4px 0;"
+        )
+
+        # ── layout ──
         top = QHBoxLayout()
         top.setContentsMargins(12, 12, 12, 8)
         top.setSpacing(10)
@@ -295,35 +445,36 @@ class LoadPage(QWidget):
         top.addWidget(self.btn_prev)
         top.addWidget(self.dt_anchor)
         top.addWidget(self.btn_next)
+        top.addWidget(self.btn_today)
         top.addSpacing(10)
         top.addWidget(self.cb_cancelled)
         top.addStretch(1)
         top.addWidget(self.lbl_range)
 
-        # kpi row
-        kpi_row = QWidget(self)
-        kpi_l = QHBoxLayout(kpi_row)
-        kpi_l.setContentsMargins(12, 0, 12, 0)
-        kpi_l.setSpacing(18)
-        for t, v in (
-            (self.kpi_avg_t, self.kpi_avg),
-            (self.kpi_best_day_t, self.kpi_best_day),
-            (self.kpi_best_res_t, self.kpi_best_res),
-            (self.kpi_hours_t, self.kpi_hours),
-        ):
-            box = QVBoxLayout()
-            box.setSpacing(2)
-            box.addWidget(t)
-            box.addWidget(v)
-            kpi_l.addLayout(box, 1)
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(12, 0, 12, 0)
+        filter_row.addWidget(self.ed_filter)
+        filter_row.addStretch(1)
+        filter_row.addWidget(legend_widget)
+
+        kpi_row = QHBoxLayout()
+        kpi_row.setContentsMargins(12, 0, 12, 0)
+        kpi_row.setSpacing(12)
+        kpi_row.addWidget(self.kpi_avg_card["widget"], 1)
+        kpi_row.addWidget(self.kpi_peak_day_card["widget"], 1)
+        kpi_row.addWidget(self.kpi_peak_res_card["widget"], 1)
+        kpi_row.addWidget(self.kpi_hours_card["widget"], 1)
+        kpi_row.addWidget(self.kpi_free_card["widget"], 1)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
-        root.setSpacing(10)
+        root.setSpacing(8)
         root.addLayout(top)
-        root.addWidget(kpi_row)
-        root.addWidget(self.lbl_legend)
-        root.addWidget(self.tbl, 1)
+        root.addLayout(kpi_row)
+        root.addLayout(filter_row)
+        root.addWidget(self.tbl, 3)
+        root.addWidget(self.lbl_free_title)
+        root.addWidget(free_scroll, 1)
 
         QTimer.singleShot(0, self._load_refs)
 
@@ -347,14 +498,140 @@ class LoadPage(QWidget):
             }
         """)
 
-    def _make_kpi(self, title: str) -> tuple[QLabel, QLabel]:
-        t = QLabel(title)
-        t.setStyleSheet("color: rgba(226,232,240,0.55); font-weight: 800;")
-        v = QLabel("—")
-        v.setStyleSheet(
-            "color: rgba(226,232,240,0.92); font-weight: 900; font-size: 16px;"
+    # ── KPI card builder ──
+    def _make_kpi_card(self, title: str) -> dict:
+        w = QFrame()
+        w.setStyleSheet("""
+            QFrame {
+                background: rgba(15,23,42,0.45);
+                border: 1px solid rgba(255,255,255,0.10);
+                border-radius: 12px;
+                padding: 10px 14px;
+            }
+        """)
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(4)
+
+        lbl_t = QLabel(title)
+        lbl_t.setStyleSheet(
+            "color: rgba(226,232,240,0.55); font-weight: 800; font-size: 11px; border: none; background: transparent;"
         )
-        return t, v
+        lbl_v = QLabel("—")
+        lbl_v.setStyleSheet(
+            "color: rgba(226,232,240,0.95); font-weight: 900; font-size: 18px; border: none; background: transparent;"
+        )
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setFixedHeight(6)
+        bar.setTextVisible(False)
+        bar.setStyleSheet("""
+            QProgressBar {
+                background: rgba(255,255,255,0.06);
+                border: none;
+                border-radius: 3px;
+            }
+            QProgressBar::chunk {
+                background: rgba(99,102,241,0.75);
+                border-radius: 3px;
+            }
+        """)
+
+        lay.addWidget(lbl_t)
+        lay.addWidget(lbl_v)
+        lay.addWidget(bar)
+
+        return {"widget": w, "title": lbl_t, "value": lbl_v, "bar": bar}
+
+    def _update_kpi(self, card: dict, value: str, pct: float = 0.0,
+                    bar_color: str = ""):
+        card["value"].setText(value)
+        card["bar"].setValue(min(100, max(0, int(pct))))
+        if bar_color:
+            card["bar"].setStyleSheet(f"""
+                QProgressBar {{
+                    background: rgba(255,255,255,0.06);
+                    border: none; border-radius: 3px;
+                }}
+                QProgressBar::chunk {{
+                    background: {bar_color};
+                    border-radius: 3px;
+                }}
+            """)
+
+    # ── legend builder ──
+    def _build_legend(self) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        labels = ["0%", "1–25%", "26–50%", "51–75%", "76–100%", "100%+"]
+        for i, txt in enumerate(labels):
+            sq = QLabel()
+            sq.setFixedSize(14, 14)
+            sq.setStyleSheet(
+                f"border-radius: 4px; {_LEVEL_CSS.get(i, '')}"
+            )
+            lbl = QLabel(txt)
+            lbl.setStyleSheet(
+                "color: rgba(226,232,240,0.50); font-size: 11px; font-weight: 700;"
+            )
+            lay.addWidget(sq)
+            lay.addWidget(lbl)
+
+        return w
+
+    # ── free slot card builder ──
+    def _make_free_slot_widget(self, slot: FreeSlot, org_id: int) -> QWidget:
+        w = QFrame()
+        w.setCursor(Qt.CursorShape.PointingHandCursor)
+        w.setStyleSheet("""
+            QFrame {
+                background: rgba(34,197,94,0.08);
+                border: 1px solid rgba(34,197,94,0.25);
+                border-radius: 10px;
+                padding: 6px 12px;
+            }
+            QFrame:hover {
+                background: rgba(34,197,94,0.15);
+                border-color: rgba(34,197,94,0.45);
+            }
+        """)
+
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(12)
+
+        day_str = f"{WEEKDAYS_RU[slot.day.weekday()]} {slot.day:%d.%m}"
+        time_str = f"{slot.start:%H:%M}–{slot.end:%H:%M}"
+
+        lbl_res = QLabel(slot.resource_name)
+        lbl_res.setStyleSheet(
+            "color: rgba(226,232,240,0.90); font-weight: 700; font-size: 12px; border: none; background: transparent;"
+        )
+        lbl_day = QLabel(day_str)
+        lbl_day.setStyleSheet(
+            "color: rgba(226,232,240,0.70); font-weight: 600; font-size: 12px; border: none; background: transparent;"
+        )
+        lbl_time = QLabel(time_str)
+        lbl_time.setStyleSheet(
+            "color: rgba(34,197,94,0.95); font-weight: 800; font-size: 12px; border: none; background: transparent;"
+        )
+        lbl_dur = QLabel(slot.duration_str)
+        lbl_dur.setStyleSheet(
+            "color: rgba(226,232,240,0.55); font-weight: 600; font-size: 11px; border: none; background: transparent;"
+        )
+
+        lay.addWidget(lbl_res, 2)
+        lay.addWidget(lbl_day, 1)
+        lay.addWidget(lbl_time, 1)
+        lay.addWidget(lbl_dur, 1)
+
+        # click handler
+        w.mousePressEvent = lambda ev: self._open_schedule(int(org_id), slot.day)
+        return w
 
     def _shift_week(self, delta_days: int) -> None:
         d = self.dt_anchor.date().toPython()
@@ -391,6 +668,15 @@ class LoadPage(QWidget):
         v = self.cmb_org.currentData()
         return int(v) if v is not None else None
 
+    def _apply_resource_filter(self) -> None:
+        q = (self.ed_filter.text() or "").strip().lower()
+        for r in range(self.tbl.rowCount()):
+            item = self.tbl.item(r, 0)
+            if not item:
+                continue
+            name = (item.text() or "").lower()
+            self.tbl.setRowHidden(r, bool(q) and q not in name)
+
     def reload(self) -> None:
         org_id = self._current_org_id()
         if org_id is None:
@@ -416,14 +702,15 @@ class LoadPage(QWidget):
         if not resources:
             self.tbl.setRowCount(0)
             self.tbl.setColumnCount(0)
-            self.kpi_avg.setText("—")
-            self.kpi_best_day.setText("—")
-            self.kpi_best_res.setText("—")
-            self.kpi_hours.setText("—")
+            self._update_kpi(self.kpi_avg_card, "—")
+            self._update_kpi(self.kpi_peak_day_card, "—")
+            self._update_kpi(self.kpi_peak_res_card, "—")
+            self._update_kpi(self.kpi_hours_card, "—")
+            self._update_kpi(self.kpi_free_card, "—")
+            self._clear_free_slots()
             return
 
         days = [week_start + timedelta(days=i) for i in range(7)]
-        weekdays = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
 
         start_dt = datetime.combine(week_start, time(0, 0), tzinfo=TZ)
         end_dt = datetime.combine(
@@ -435,8 +722,16 @@ class LoadPage(QWidget):
             int(org_id), start_dt, end_dt, include_cancelled
         )
 
+        # save for free slots
+        self._last_resources = resources
+        self._last_bookings = bookings
+        self._last_days = days
+        self._last_ws = ws
+        self._last_we = we
+        self._last_cap_day = cap_day
+
         res_keys = {(r.venue_id, r.venue_unit_id) for r in resources}
-        busy = defaultdict(int)
+        busy: Dict = defaultdict(int)
 
         for b in bookings:
             for i in range(7):
@@ -454,7 +749,9 @@ class LoadPage(QWidget):
                     if (int(b["venue_id"]), None) in res_keys:
                         busy[(int(b["venue_id"]), None, d)] += sec
 
-        # KPI
+        self._last_busy = busy
+
+        # ── KPI ──
         total_busy = 0
         total_cap = cap_day * 7 * len(resources)
 
@@ -486,32 +783,66 @@ class LoadPage(QWidget):
             else 0.0
         )
 
-        self.kpi_avg.setText(f"{avg_pct:.1f}%")
-        self.kpi_best_day.setText(
-            f"{weekdays[best_day.weekday()]} {best_day:%d.%m} ({best_day_pct:.0f}%)"
-        )
-        self.kpi_best_res.setText(
-            f"{best_res.name} ({best_res_pct:.0f}%)"
-        )
-
         busy_h = total_busy / 3600.0
         cap_h = total_cap / 3600.0
-        self.kpi_hours.setText(f"{busy_h:.1f} ч / {cap_h:.1f} ч")
 
-        # table
+        # color by avg
+        if avg_pct < 25:
+            avg_bar_color = "rgba(239,68,68,0.75)"
+        elif avg_pct < 50:
+            avg_bar_color = "rgba(245,158,11,0.75)"
+        elif avg_pct < 75:
+            avg_bar_color = "rgba(250,204,21,0.75)"
+        else:
+            avg_bar_color = "rgba(34,197,94,0.75)"
+
+        self._update_kpi(self.kpi_avg_card, f"{avg_pct:.1f}%", avg_pct, avg_bar_color)
+        self._update_kpi(
+            self.kpi_peak_day_card,
+            f"{WEEKDAYS_RU[best_day.weekday()]} {best_day:%d.%m} ({best_day_pct:.0f}%)",
+            best_day_pct,
+            "rgba(99,102,241,0.75)",
+        )
+        self._update_kpi(
+            self.kpi_peak_res_card,
+            f"{best_res.name[:25]}{'…' if len(best_res.name) > 25 else ''} ({best_res_pct:.0f}%)",
+            best_res_pct,
+            "rgba(99,102,241,0.75)",
+        )
+        self._update_kpi(
+            self.kpi_hours_card,
+            f"{busy_h:.1f}ч / {cap_h:.1f}ч",
+            avg_pct,
+            avg_bar_color,
+        )
+
+        # ── free slots ──
+        free_slots = _find_free_slots(resources, bookings, days, ws, we, min_duration_min=30)
+        self._update_kpi(
+            self.kpi_free_card,
+            str(len(free_slots)),
+            min(100, len(free_slots) * 3),
+            "rgba(34,197,94,0.75)",
+        )
+        self._render_free_slots(free_slots[:30], int(org_id))
+
+        # ── heatmap table ──
         self.tbl.blockSignals(True)
         self.tbl.clear()
 
-        self.tbl.setRowCount(len(resources))
-        self.tbl.setColumnCount(1 + 7)
+        # +1 for "Итого" column, +1 for "Итого" row
+        n_res = len(resources)
+        self.tbl.setRowCount(n_res + 1)  # +1 summary row
+        self.tbl.setColumnCount(1 + 7 + 1)  # resource + 7 days + total
         self.tbl.setHorizontalHeaderLabels(
             ["Ресурс"]
-            + [f"{weekdays[d.weekday()]}\n{d:%d.%m}" for d in days]
+            + [f"{WEEKDAYS_RU[d.weekday()]}\n{d:%d.%m}" for d in days]
+            + ["Итого"]
         )
 
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in range(1, 8):
+        for c in range(1, 9):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
             self.tbl.setColumnWidth(c, 78)
 
@@ -536,10 +867,21 @@ class LoadPage(QWidget):
             )
             self.tbl.setItem(r_idx, 0, it_res)
 
+            row_total_sec = 0
             for i, d in enumerate(days):
                 sec = busy.get((rsrc.venue_id, rsrc.venue_unit_id, d), 0)
+                row_total_sec += sec
                 pct = 0.0 if cap_day <= 0 else (100.0 * sec / cap_day)
                 level = _heat_level(pct)
+
+                free_sec = max(0, cap_day - sec)
+                tooltip = (
+                    f"{rsrc.name}\n"
+                    f"{WEEKDAYS_RU[d.weekday()]} {d:%d.%m.%Y}\n"
+                    f"Занято: {_format_duration(sec)}\n"
+                    f"Свободно: {_format_duration(free_sec)}\n"
+                    f"Загрузка: {pct:.1f}%"
+                )
 
                 it = QTableWidgetItem(f"{pct:.0f}%")
                 it.setFont(f_pct)
@@ -550,14 +892,118 @@ class LoadPage(QWidget):
                     if level != 3
                     else QColor(0, 0, 0, 200)
                 )
+                it.setToolTip(tooltip)
                 it.setData(
                     Qt.ItemDataRole.UserRole,
                     ("cell", int(org_id), rsrc.venue_id, rsrc.venue_unit_id, d),
                 )
                 self.tbl.setItem(r_idx, 1 + i, it)
 
+            # row total column
+            row_cap = cap_day * 7
+            row_pct = (100.0 * row_total_sec / row_cap) if row_cap > 0 else 0.0
+            row_level = _heat_level(row_pct)
+
+            it_total = QTableWidgetItem(f"{row_pct:.0f}%")
+            it_total.setFont(f_pct)
+            it_total.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            it_total.setData(HeatmapCellDelegate.ROLE_PCT, float(row_pct))
+            it_total.setForeground(
+                QColor(255, 255, 255, 240)
+                if row_level != 3
+                else QColor(0, 0, 0, 200)
+            )
+            it_total.setToolTip(
+                f"{rsrc.name} — неделя\n"
+                f"Занято: {_format_duration(row_total_sec)}\n"
+                f"Загрузка: {row_pct:.1f}%"
+            )
+            self.tbl.setItem(r_idx, 8, it_total)
+
+        # ── summary row (bottom) ──
+        it_summary_label = QTableWidgetItem("ИТОГО")
+        it_summary_label.setFont(f_pct)
+        it_summary_label.setForeground(TEXT)
+        it_summary_label.setBackground(QBrush(QColor(15, 23, 42, 180)))
+        it_summary_label.setTextAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.tbl.setItem(n_res, 0, it_summary_label)
+
+        week_total_sec = 0
+        for i, d in enumerate(days):
+            col_sec = day_busy.get(d, 0)
+            week_total_sec += col_sec
+            col_cap = cap_day * len(resources)
+            col_pct = (100.0 * col_sec / col_cap) if col_cap > 0 else 0.0
+            col_level = _heat_level(col_pct)
+
+            it_col = QTableWidgetItem(f"{col_pct:.0f}%")
+            it_col.setFont(f_pct)
+            it_col.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            it_col.setData(HeatmapCellDelegate.ROLE_PCT, float(col_pct))
+            it_col.setForeground(
+                QColor(255, 255, 255, 240)
+                if col_level != 3
+                else QColor(0, 0, 0, 200)
+            )
+            it_col.setToolTip(
+                f"{WEEKDAYS_RU[d.weekday()]} {d:%d.%m} — все ресурсы\n"
+                f"Занято: {_format_duration(col_sec)}\n"
+                f"Загрузка: {col_pct:.1f}%"
+            )
+            it_col.setData(
+                Qt.ItemDataRole.UserRole,
+                ("cell", int(org_id), 0, None, d),
+            )
+            self.tbl.setItem(n_res, 1 + i, it_col)
+
+        # bottom-right: grand total
+        grand_pct = (100.0 * week_total_sec / total_cap) if total_cap > 0 else 0.0
+        grand_level = _heat_level(grand_pct)
+        it_grand = QTableWidgetItem(f"{grand_pct:.0f}%")
+        it_grand.setFont(f_pct)
+        it_grand.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        it_grand.setData(HeatmapCellDelegate.ROLE_PCT, float(grand_pct))
+        it_grand.setForeground(
+            QColor(255, 255, 255, 240)
+            if grand_level != 3
+            else QColor(0, 0, 0, 200)
+        )
+        it_grand.setToolTip(
+            f"Вся неделя — все ресурсы\n"
+            f"Занято: {_format_duration(week_total_sec)}\n"
+            f"Загрузка: {grand_pct:.1f}%"
+        )
+        self.tbl.setItem(n_res, 8, it_grand)
+
         self.tbl.resizeRowsToContents()
         self.tbl.blockSignals(False)
+
+        self._apply_resource_filter()
+
+    def _clear_free_slots(self) -> None:
+        while self.free_slots_layout.count():
+            child = self.free_slots_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+    def _render_free_slots(self, slots: List[FreeSlot], org_id: int) -> None:
+        self._clear_free_slots()
+
+        if not slots:
+            lbl = QLabel("Нет свободных окон от 30 мин")
+            lbl.setStyleSheet(
+                "color: rgba(226,232,240,0.45); font-style: italic; padding: 12px;"
+            )
+            self.free_slots_layout.addWidget(lbl)
+            return
+
+        for slot in slots:
+            w = self._make_free_slot_widget(slot, org_id)
+            self.free_slots_layout.addWidget(w)
+
+        self.free_slots_layout.addStretch(1)
 
     def _on_cell_clicked(self, item: QTableWidgetItem) -> None:
         data = item.data(Qt.ItemDataRole.UserRole)
