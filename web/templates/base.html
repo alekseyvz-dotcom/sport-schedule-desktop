@@ -23,6 +23,10 @@
             <span class="tab-icon">📅</span>
             <span>Расписание</span>
         </a>
+        <a href="/load" class="tab-item {{ 'active' if current_page == '/load' }}">
+          <span class="tab-icon">▦</span>
+          <span>Загрузка</span>
+        </a>
         {% if has_analytics is defined and has_analytics %}
         <a href="/analytics" class="tab-item {{ 'active' if current_page == '/analytics' }}">
             <span class="tab-icon">📊</span>
