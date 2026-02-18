@@ -59,9 +59,9 @@
     <div class="analytics-meta">
         <span class="meta-period">{{ period_label }}</span>
         <span class="meta-total">
-            ПД {{ total_pd_h }}ч ({{ "%.1f"|format(total_pct if total_cap_h > 0 else 0) }}%) |
-            ГЗ {{ total_gz_h }}ч |
-            Занято {{ total_busy_h }}ч / {{ total_cap_h }}ч
+            ПД {{ total_pd_h }}ч ({{ "%.1f"|format(total_pd_pct) }}%) |
+            ГЗ {{ total_gz_h }}ч ({{ "%.1f"|format(total_gz_pct) }}%) |
+            Итого {{ total_busy_h }}ч ({{ "%.1f"|format(total_pct) }}%) / {{ total_cap_h }}ч
         </span>
     </div>
 
@@ -73,7 +73,9 @@
                     <th>Учреждение</th>
                     <th>Площадка</th>
                     <th class="col-bar">Загрузка</th>
-                    <th class="col-num">%</th>
+                    <th class="col-num">Итого, %</th>
+                    <th class="col-num">ПД, %</th>
+                    <th class="col-num">ГЗ, %</th>
                     <th class="col-num">ПД, ч</th>
                     <th class="col-num">ГЗ, ч</th>
                     <th class="col-num">Всего, ч</th>
@@ -105,6 +107,8 @@
                         </div>
                     </td>
                     <td class="col-num">{{ "%.1f"|format(r.pct) }}%</td>
+                    <td class="col-num">{{ "%.1f"|format(r.pd_pct) }}%</td>
+                    <td class="col-num">{{ "%.1f"|format(r.gz_pct) }}%</td>
                     <td class="col-num">{{ r.pd_h }}</td>
                     <td class="col-num">{{ r.gz_h }}</td>
                     <td class="col-num">{{ r.busy_h }}</td>
@@ -159,10 +163,13 @@ function showDetail(tr) {
     fill.style.background = pctColor(d.pct);
     document.getElementById('detailBarLabel').textContent = d.pct.toFixed(1) + '%';
 
+    const pdPct = d.cap_h > 0 ? (100 * d.pd_h / d.cap_h).toFixed(1) : '0.0';
+    const gzPct = d.cap_h > 0 ? (100 * d.gz_h / d.cap_h).toFixed(1) : '0.0';
+    
     document.getElementById('detailNumbers').innerHTML = `
-        <div class="dn-row"><span>ПД</span><span>${d.pd_h} ч</span></div>
-        <div class="dn-row"><span>ГЗ</span><span>${d.gz_h} ч</span></div>
-        <div class="dn-row dn-total"><span>Занято</span><span>${d.busy_h} / ${d.cap_h} ч</span></div>
+        <div class="dn-row"><span>ПД</span><span>${d.pd_h} ч (${pdPct}%)</span></div>
+        <div class="dn-row"><span>ГЗ</span><span>${d.gz_h} ч (${gzPct}%)</span></div>
+        <div class="dn-row dn-total"><span>Итого</span><span>${d.busy_h} / ${d.cap_h} ч</span></div>
     `;
 
     let shifts = '';
