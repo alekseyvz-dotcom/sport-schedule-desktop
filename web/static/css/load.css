@@ -1,0 +1,73 @@
+.heatmap-wrap {
+    padding: 0 8px 16px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.heatmap {
+    width: 100%;
+    min-width: 820px;
+    border-collapse: separate;
+    border-spacing: 6px;
+}
+
+.heatmap th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-card);
+    z-index: 5;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+}
+
+.col-res { text-align: left; min-width: 240px; }
+.col-day { min-width: 72px; }
+
+.day-head .wd { font-weight: 800; color: var(--accent-hover); }
+.day-head .dt { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+.res-name {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+}
+
+.cell { padding: 0; }
+
+.cell-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06);
+    text-decoration: none;
+    color: rgba(255,255,255,0.9);
+    font-weight: 800;
+    font-size: 12px;
+    transition: transform 0.08s, filter 0.12s;
+}
+
+.cell-link:active { transform: scale(0.97); }
+.cell-link:hover { filter: brightness(1.08); }
+
+.lvl-0 { background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.4); }
+.lvl-1 { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.30); }
+.lvl-2 { background: rgba(245, 158, 11, 0.22); border-color: rgba(245, 158, 11, 0.35); }
+.lvl-3 { background: rgba(250, 204, 21, 0.22); border-color: rgba(250, 204, 21, 0.35); color: rgba(0,0,0,0.75); }
+.lvl-4 { background: rgba(34, 197, 94, 0.22); border-color: rgba(34, 197, 94, 0.35); }
+.lvl-5 { background: rgba(34, 197, 94, 0.38); border-color: rgba(34, 197, 94, 0.55); }
+
+@media (max-width: 768px) {
+    .heatmap { min-width: 720px; }
+    .col-res { min-width: 200px; }
+    .cell-link { height: 40px; }
+}
