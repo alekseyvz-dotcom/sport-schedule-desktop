@@ -19,15 +19,16 @@ from PySide6.QtWidgets import (
 from app.db import get_conn, put_conn
 from app.services.users_service import AuthUser
 from app.services.access_service import list_allowed_org_ids, get_org_access
-from app.services.ref_service import list_active_orgs_by_ids, list_active_venues
+from app.services.ref_service import list_active_orgs_by_ids
+from app.services.ref_service import list_active_venues
 from app.services.venue_units_service import list_venue_units
 
 
 TZ = timezone(timedelta(hours=3))
 
-# palette
 BG_BASE = QColor("#0b1220")
 BG_CARD = QColor("#0f172a")
+BORDER = QColor(255, 255, 255, 20)
 TEXT = QColor(226, 232, 240)
 TEXT_DIM = QColor(226, 232, 240, 140)
 
@@ -65,8 +66,8 @@ class Resource:
 
 
 def _week_range(anchor: date) -> tuple[date, date]:
-    start = anchor - timedelta(days=anchor.weekday())  # Пн
-    return start, start + timedelta(days=6)            # Вс
+    start = anchor - timedelta(days=anchor.weekday())
+    return start, start + timedelta(days=6)
 
 
 def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> int:
@@ -84,7 +85,6 @@ def _sec_between(t0: time, t1: time) -> int:
 def _load_resources_for_org(org_id: int) -> List[Resource]:
     venues = list_active_venues(org_id)
     out: List[Resource] = []
-
     for v in venues:
         units = list_venue_units(v.id, include_inactive=False)
         if units:
@@ -93,24 +93,19 @@ def _load_resources_for_org(org_id: int) -> List[Resource]:
                 key=lambda u: (int(getattr(u, "sort_order", 0)), str(u.name)),
             )
             for u in units_sorted:
-                out.append(
-                    Resource(
-                        venue_id=int(v.id),
-                        venue_unit_id=int(u.id),
-                        name=f"{v.name} — {u.name}",
-                        venue_name=str(v.name),
-                    )
-                )
-        else:
-            out.append(
-                Resource(
+                out.append(Resource(
                     venue_id=int(v.id),
-                    venue_unit_id=None,
-                    name=str(v.name),
+                    venue_unit_id=int(u.id),
+                    name=f"{v.name} — {u.name}",
                     venue_name=str(v.name),
-                )
-            )
-
+                ))
+        else:
+            out.append(Resource(
+                venue_id=int(v.id),
+                venue_unit_id=None,
+                name=str(v.name),
+                venue_name=str(v.name),
+            ))
     out.sort(key=lambda r: (r.venue_name, r.name))
     return out
 
@@ -128,7 +123,8 @@ def _load_bookings_for_week(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 f"""
-                SELECT b.id, b.venue_id, b.venue_unit_id, b.starts_at, b.ends_at, b.status
+                SELECT b.id, b.venue_id, b.venue_unit_id,
+                       b.starts_at, b.ends_at, b.status
                 FROM bookings b
                 JOIN venues v ON v.id = b.venue_id
                 WHERE v.org_id = %s
@@ -168,11 +164,11 @@ def _level_color(level: int) -> QColor:
         return QColor(250, 204, 21, 60)
     if level == 4:
         return QColor(34, 197, 94, 55)
-    return QColor(34, 197, 94, 95)  # 100%+
+    return QColor(34, 197, 94, 95)
 
 
 class HeatmapCellDelegate(QStyledItemDelegate):
-    ROLE_PCT = Qt.ItemDataRole.UserRole + 101  # float percent
+    ROLE_PCT = Qt.ItemDataRole.UserRole + 101
 
     def paint(self, painter: QPainter, option, index):
         if index.column() == 0:
@@ -203,7 +199,9 @@ class HeatmapCellDelegate(QStyledItemDelegate):
         painter.drawRect(r.adjusted(0, 0, -1, -1))
 
         txt = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        painter.setPen(QColor(0, 0, 0, 200) if level == 3 else QColor(255, 255, 255, 240))
+        painter.setPen(
+            QColor(0, 0, 0, 200) if level == 3 else QColor(255, 255, 255, 240)
+        )
 
         f = painter.font()
         f.setBold(True)
@@ -214,10 +212,6 @@ class HeatmapCellDelegate(QStyledItemDelegate):
 
 
 class LoadPage(QWidget):
-    """
-    Загрузка (неделя): ресурсы x дни, в клетке %.
-    Клик по клетке -> callback open_schedule(org_id, day)
-    """
 
     def __init__(self, user: AuthUser, open_schedule_cb, parent=None):
         super().__init__(parent)
@@ -252,7 +246,9 @@ class LoadPage(QWidget):
         self.cb_cancelled.stateChanged.connect(lambda *_: self.reload())
 
         self.lbl_range = QLabel("—")
-        self.lbl_range.setStyleSheet("color: rgba(226,232,240,0.6); font-weight: 700;")
+        self.lbl_range.setStyleSheet(
+            "color: rgba(226,232,240,0.6); font-weight: 700;"
+        )
 
         # KPI
         self.kpi_avg_t, self.kpi_avg = self._make_kpi("Средняя загрузка")
@@ -260,8 +256,12 @@ class LoadPage(QWidget):
         self.kpi_best_res_t, self.kpi_best_res = self._make_kpi("Пик недели (ресурс)")
         self.kpi_hours_t, self.kpi_hours = self._make_kpi("Занято / Доступно")
 
-        self.lbl_legend = QLabel("Легенда: 0% · 1–25% · 26–50% · 51–75% · 76–100% · 100%+")
-        self.lbl_legend.setStyleSheet("color: rgba(226,232,240,0.45); font-weight: 700; padding: 0 12px;")
+        self.lbl_legend = QLabel(
+            "Легенда: 0% · 1–25% · 26–50% · 51–75% · 76–100% · 100%+"
+        )
+        self.lbl_legend.setStyleSheet(
+            "color: rgba(226,232,240,0.45); font-weight: 700; padding: 0 12px;"
+        )
 
         # table
         self.tbl = QTableWidget()
@@ -324,8 +324,7 @@ class LoadPage(QWidget):
 
         QTimer.singleShot(0, self._load_refs)
 
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QWidget#page { background: #0b1220; }
             QTableWidget#loadHeatmap {
                 background: #0b1220;
@@ -343,14 +342,15 @@ class LoadPage(QWidget):
                 font-size: 11px;
                 text-transform: uppercase;
             }
-            """
-        )
+        """)
 
     def _make_kpi(self, title: str) -> tuple[QLabel, QLabel]:
         t = QLabel(title)
         t.setStyleSheet("color: rgba(226,232,240,0.55); font-weight: 800;")
         v = QLabel("—")
-        v.setStyleSheet("color: rgba(226,232,240,0.92); font-weight: 900; font-size: 16px;")
+        v.setStyleSheet(
+            "color: rgba(226,232,240,0.92); font-weight: 900; font-size: 16px;"
+        )
         return t, v
 
     def _shift_week(self, delta_days: int) -> None:
@@ -359,7 +359,9 @@ class LoadPage(QWidget):
 
     def _load_refs(self) -> None:
         try:
-            allowed_orgs = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
+            allowed_orgs = list_allowed_org_ids(
+                int(self.user.id), str(self.user.role_code)
+            )
             orgs = list_active_orgs_by_ids(allowed_orgs)
 
             self.cmb_org.blockSignals(True)
@@ -375,7 +377,9 @@ class LoadPage(QWidget):
                     self.cmb_org.setCurrentIndex(idx)
 
         except Exception as e:
-            QMessageBox.critical(self, "Загрузка", f"Ошибка загрузки учреждений:\n{e}")
+            QMessageBox.critical(
+                self, "Загрузка", f"Ошибка загрузки учреждений:\n{e}"
+            )
             return
 
         self.reload()
@@ -389,7 +393,9 @@ class LoadPage(QWidget):
         if org_id is None:
             return
 
-        acc = get_org_access(int(self.user.id), str(self.user.role_code), int(org_id))
+        acc = get_org_access(
+            int(self.user.id), str(self.user.role_code), int(org_id)
+        )
         if not bool(getattr(acc, "can_view", True)):
             QMessageBox.warning(self, "Доступ запрещён", "Нет доступа к учреждению.")
             return
@@ -403,16 +409,31 @@ class LoadPage(QWidget):
         ws, we, _is24 = _load_org_work_window(int(org_id))
         cap_day = _sec_between(ws, we)
 
-        resources = _load_resources_forСБ", "ВС"]
+        resources = _load_resources_for_org(int(org_id))
+        if not resources:
+            self.tbl.setRowCount(0)
+            self.tbl.setColumnCount(0)
+            self.kpi_avg.setText("—")
+            self.kpi_best_day.setText("—")
+            self.kpi_best_res.setText("—")
+            self.kpi_hours.setText("—")
+            return
+
+        days = [week_start + timedelta(days=i) for i in range(7)]
+        weekdays = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
 
         start_dt = datetime.combine(week_start, time(0, 0), tzinfo=TZ)
-        end_dt = datetime.combine(week_end + timedelta(days=1), time(0, 0), tzinfo=TZ)
+        end_dt = datetime.combine(
+            week_end + timedelta(days=1), time(0, 0), tzinfo=TZ
+        )
 
         include_cancelled = self.cb_cancelled.isChecked()
-        bookings = _load_bookings_for_week(int(org_id), start_dt, end_dt, include_cancelled)
+        bookings = _load_bookings_for_week(
+            int(org_id), start_dt, end_dt, include_cancelled
+        )
 
         res_keys = {(r.venue_id, r.venue_unit_id) for r in resources}
-        busy = defaultdict(int)  # (venue_id, unit_id, day)->sec
+        busy = defaultdict(int)
 
         for b in bookings:
             for i in range(7):
@@ -450,15 +471,25 @@ class LoadPage(QWidget):
 
         best_day = max(days, key=lambda d: day_busy.get(d, 0))
         best_day_cap = cap_day * len(resources)
-        best_day_pct = (100.0 * day_busy[best_day] / best_day_cap) if best_day_cap > 0 else 0.0
+        best_day_pct = (
+            (100.0 * day_busy[best_day] / best_day_cap) if best_day_cap > 0 else 0.0
+        )
 
         best_res = max(resources, key=lambda r: res_busy.get(r.name, 0))
         best_res_cap = cap_day * 7
-        best_res_pct = (100.0 * res_busy[best_res.name] / best_res_cap) if best_res_cap > 0 else 0.0
+        best_res_pct = (
+            (100.0 * res_busy[best_res.name] / best_res_cap)
+            if best_res_cap > 0
+            else 0.0
+        )
 
         self.kpi_avg.setText(f"{avg_pct:.1f}%")
-        self.kpi_best_day.setText(f"{weekdays[best_day.weekday()]} {best_day:%d.%m} ({best_day_pct:.0f}%)")
-        self.kpi_best_res.setText(f"{best_res.name} ({best_res_pct:.0f}%)")
+        self.kpi_best_day.setText(
+            f"{weekdays[best_day.weekday()]} {best_day:%d.%m} ({best_day_pct:.0f}%)"
+        )
+        self.kpi_best_res.setText(
+            f"{best_res.name} ({best_res_pct:.0f}%)"
+        )
 
         busy_h = total_busy / 3600.0
         cap_h = total_cap / 3600.0
@@ -470,7 +501,10 @@ class LoadPage(QWidget):
 
         self.tbl.setRowCount(len(resources))
         self.tbl.setColumnCount(1 + 7)
-        self.tbl.setHorizontalHeaderLabels(["Ресурс"] + [f"{weekdays[d.weekday()]}\n{d:%d.%m}" for d in days])
+        self.tbl.setHorizontalHeaderLabels(
+            ["Ресурс"]
+            + [f"{weekdays[d.weekday()]}\n{d:%d.%m}" for d in days]
+        )
 
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -490,8 +524,13 @@ class LoadPage(QWidget):
             it_res.setForeground(TEXT)
             it_res.setBackground(QBrush(BG_CARD))
             it_res.setFont(f_res)
-            it_res.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            it_res.setData(Qt.ItemDataRole.UserRole, ("resource", rsrc.venue_id, rsrc.venue_unit_id))
+            it_res.setTextAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            it_res.setData(
+                Qt.ItemDataRole.UserRole,
+                ("resource", rsrc.venue_id, rsrc.venue_unit_id),
+            )
             self.tbl.setItem(r_idx, 0, it_res)
 
             for i, d in enumerate(days):
@@ -503,8 +542,15 @@ class LoadPage(QWidget):
                 it.setFont(f_pct)
                 it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 it.setData(HeatmapCellDelegate.ROLE_PCT, float(pct))
-                it.setForeground(QColor(255, 255, 255, 240) if level != 3 else QColor(0, 0, 0, 200))
-                it.setData(Qt.ItemDataRole.UserRole, ("cell", int(org_id), rsrc.venue_id, rsrc.venue_unit_id, d))
+                it.setForeground(
+                    QColor(255, 255, 255, 240)
+                    if level != 3
+                    else QColor(0, 0, 0, 200)
+                )
+                it.setData(
+                    Qt.ItemDataRole.UserRole,
+                    ("cell", int(org_id), rsrc.venue_id, rsrc.venue_unit_id, d),
+                )
                 self.tbl.setItem(r_idx, 1 + i, it)
 
         self.tbl.resizeRowsToContents()
@@ -521,4 +567,6 @@ class LoadPage(QWidget):
         try:
             self._open_schedule(int(org_id), d)
         except Exception as e:
-            QMessageBox.critical(self, "Переход", f"Не удалось открыть расписание:\n{e}")
+            QMessageBox.critical(
+                self, "Переход", f"Не удалось открыть расписание:\n{e}"
+            )
