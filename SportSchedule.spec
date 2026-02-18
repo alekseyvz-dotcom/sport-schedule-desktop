@@ -9,6 +9,7 @@ hiddenimports += collect_submodules("app.services")
 hiddenimports += collect_submodules("app.ui")
 # на всякий случай можно и весь app:
 hiddenimports += collect_submodules("app")
+hiddenimports += ["app.ui.load_page"]
 
 a = Analysis(
     ["app/main.py"],
