@@ -1,26 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional
-from collections import defaultdict
-
-from psycopg2.extras import RealDictCursor
-
-from PySide6.QtCore import Qt, QTimer, QSettings
-from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QDateEdit, QCheckBox,
-    QPushButton, QTableWidget, QTableWidgetItem,
-    QMessageBox, QHeaderView, QStyledItemDelegate, QStyle
+from datetime import date, datetime, time QHeaderView, QStyledItemDelegate, QStyle
 )
 
 from app.db import get_conn, put_conn
 from app.services.users_service import AuthUser
 from app.services.access_service import list_allowed_org_ids, get_org_access
-from app.services.ref_service import list_active_orgs_by_ids
-from app.services.ref_service import list_active_venues
+from app.services.ref_service import list_active_orgs_by_ids, list_active_venues
 from app.services.venue_units_service import list_venue_units
 
 
@@ -89,7 +76,10 @@ def _load_resources_for_org(org_id: int) -> List[Resource]:
     for v in venues:
         units = list_venue_units(v.id, include_inactive=False)
         if units:
-            units_sorted = sorted(units, key=lambda u: (int(getattr(u, "sort_order", 0)), str(u.name)))
+            units_sorted = sorted(
+                units,
+                key=lambda u: (int(getattr(u, "sort_order", 0)), str(u.name)),
+            )
             for u in units_sorted:
                 out.append(
                     Resource(
@@ -156,7 +146,6 @@ def _heat_level(pct: float) -> int:
 
 
 def _level_color(level: int) -> QColor:
-    # close to web palette
     if level == 0:
         return QColor(255, 255, 255, 8)
     if level == 1:
@@ -223,7 +212,7 @@ class LoadPage(QWidget):
         self.setObjectName("page")
 
         self.user = user
-        self._open_schedule = open_schedule_cb  # callable(org_id:int, day:date)
+        self._open_schedule = open_schedule_cb
         self._settings = QSettings("SportApp", "Load")
 
         self.lbl_title = QLabel("Загрузка (неделя)")
@@ -277,7 +266,7 @@ class LoadPage(QWidget):
 
         header = self.tbl.horizontalHeader()
         header.setHighlightSections(False)
-        header.setStretchLastSection(False)  # важно: иначе ВС растягивается
+        header.setStretchLastSection(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # top bar
@@ -350,7 +339,21 @@ class LoadPage(QWidget):
         t.setStyleSheet("color: rgba(226,232,240,0.55); font-weight: 800;")
         v = QLabel("—")
         v.setStyleSheet("color: rgba(226,232,240,0.92); font-weight: 900; font-size: 16px;")
-        return t, v))
+        return t, v
+
+    def _shift_week(self, delta_days: int) -> None:
+        d = self.dt_anchor.date().toPython()
+        self.dt_anchor.setDate(d + timedelta(days=delta_days))
+
+    def _load_refs(self) -> None:
+        try:
+            allowed_orgs = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
+            orgs = list_active_orgs_by_ids(allowed_orgs)
+
+            self.cmb_org.blockSignals(True)
+            self.cmb_org.clear()
+            for o in orgs:
+                self.cmb_org.addItem(o.name, int(o.id))
             self.cmb_org.blockSignals(False)
 
             last_org = self._settings.value("load/org_id", None)
@@ -388,18 +391,7 @@ class LoadPage(QWidget):
         ws, we, _is24 = _load_org_work_window(int(org_id))
         cap_day = _sec_between(ws, we)
 
-        resources = _load_resources_for_org(int(org_id))
-        if not resources:
-            self.tbl.setRowCount(0)
-            self.tbl.setColumnCount(0)
-            self.kpi_avg.setText("—")
-            self.kpi_best_day.setText("—")
-            self.kpi_best_res.setText("—")
-            self.kpi_hours.setText("—")
-            return
-
-        days = [week_start + timedelta(days=i) for i in range(7)]
-        weekdays = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"]
+        resources = _load_resources_forСБ", "ВС"]
 
         start_dt = datetime.combine(week_start, time(0, 0), tzinfo=TZ)
         end_dt = datetime.combine(week_end + timedelta(days=1), time(0, 0), tzinfo=TZ)
@@ -426,7 +418,7 @@ class LoadPage(QWidget):
                     if (int(b["venue_id"]), None) in res_keys:
                         busy[(int(b["venue_id"]), None, d)] += sec
 
-        # ---- KPI расчёт
+        # KPI
         total_busy = 0
         total_cap = cap_day * 7 * len(resources)
 
@@ -460,7 +452,7 @@ class LoadPage(QWidget):
         cap_h = total_cap / 3600.0
         self.kpi_hours.setText(f"{busy_h:.1f} ч / {cap_h:.1f} ч")
 
-        # ---- Таблица
+        # table
         self.tbl.blockSignals(True)
         self.tbl.clear()
 
