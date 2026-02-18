@@ -30,6 +30,14 @@ jobs:
           Get-ChildItem -Recurse -File app/services | ForEach-Object { $_.FullName }
           if (Test-Path "app/services/tenants_service.py") { "FOUND tenants_service.py" } else { "NOT FOUND tenants_service.py" }
 
+      - name: Debug list app/ui
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -File app/ui | ForEach-Object { $_.FullName }
+          if (Test-Path "app/ui/load_page.py") { "FOUND load_page.py" } else { "NOT FOUND load_page.py" }
+          if (Test-Path "app/ui/__init__.py") { "FOUND ui/__init__.py" } else { "NOT FOUND ui/__init__.py" }
+          if (Test-Path "app/__init__.py") { "FOUND app/__init__.py" } else { "NOT FOUND app/__init__.py" }
+
       - name: Clean build folders
         shell: pwsh
         run: |
