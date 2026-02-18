@@ -22,6 +22,7 @@ from app.services.access_service import list_allowed_org_ids, get_org_access
 from app.services.ref_service import list_active_orgs_by_ids
 from app.services.ref_service import list_active_venues
 from app.services.venue_units_service import list_venue_units
+from app.ui.schedule_page import _style_calendar_widget
 
 
 TZ = timezone(timedelta(hours=3))
@@ -233,6 +234,8 @@ class LoadPage(QWidget):
         self.dt_anchor.setDisplayFormat("dd.MM.yyyy")
         self.dt_anchor.setFixedWidth(130)
         self.dt_anchor.dateChanged.connect(lambda *_: self.reload())
+     
+        _style_calendar_widget(self.dt_anchor)
 
         self.btn_prev = QPushButton("◀")
         self.btn_next = QPushButton("▶")
