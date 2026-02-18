@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Tuple
 from collections import defaultdict
 
 from fastapi import APIRouter, Request, Depends, Query
@@ -17,9 +17,18 @@ templates = Jinja2Templates(directory="web/templates")
 TZ = timezone(timedelta(hours=3))
 
 
+def _has_permission(conn, user_id: int, perm_code: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM app_user_permissions WHERE user_id=%s AND perm_code=%s LIMIT 1",
+            (user_id, perm_code),
+        )
+        return cur.fetchone() is not None
+
+
 def _load_orgs(conn, user: dict) -> list:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        if user["role_code"] == "admin":
+        if user.get("role_code") == "admin":
             cur.execute(
                 "SELECT id, name, work_start, work_end, is_24h "
                 "FROM sport_orgs WHERE is_active = true ORDER BY name"
@@ -55,36 +64,47 @@ def _load_resources(conn, org_id: int) -> list:
         rows = cur.fetchall()
 
     resources = []
-    seen = set()
+    seen_venues = set()
+
     for r in rows:
+        # Если есть зоны — показываем зоны как отдельные ресурсы
         if r["venue_unit_id"]:
-            resources.append({
-                "venue_id": r["venue_id"],
-                "venue_unit_id": r["venue_unit_id"],
-                "name": f"{r['venue_name']} — {r['unit_name']}",
-                "short_name": r["unit_name"],
-                "venue_name": r["venue_name"],
-            })
-            seen.add(r["venue_id"])
-        elif r["venue_id"] not in seen:
-            resources.append({
-                "venue_id": r["venue_id"],
-                "venue_unit_id": None,
-                "name": r["venue_name"],
-                "short_name": r["venue_name"],
-                "venue_name": r["venue_name"],
-            })
-            seen.add(r["venue_id"])
+            resources.append(
+                {
+                    "venue_id": r["venue_id"],
+                    "venue_unit_id": r["venue_unit_id"],
+                    "name": f"{r['venue_name']} — {r['unit_name']}",
+                    "short_name": r["unit_name"],
+                    "venue_name": r["venue_name"],
+                }
+            )
+            seen_venues.add(r["venue_id"])
+        else:
+            # Если зон нет — показываем площадку как ресурс (unit=None)
+            if r["venue_id"] not in seen_venues:
+                resources.append(
+                    {
+                        "venue_id": r["venue_id"],
+                        "venue_unit_id": None,
+                        "name": r["venue_name"],
+                        "short_name": r["venue_name"],
+                        "venue_name": r["venue_name"],
+                    }
+                )
+                seen_venues.add(r["venue_id"])
+
     return resources
 
 
 def _week_range(anchor: date) -> Tuple[date, date]:
     start = anchor - timedelta(days=anchor.weekday())  # Пн
-    return start, start + timedelta(days=6)            # Вс
+    return start, start + timedelta(days=6)  # Вс
 
 
 def _sec_between(t0: time, t1: time) -> int:
-    return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
+    return int(
+        (datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds()
+    )
 
 
 def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> int:
@@ -93,7 +113,13 @@ def _overlap_seconds(a0: datetime, a1: datetime, b0: datetime, b1: datetime) -> 
     return max(0, int((e - s).total_seconds()))
 
 
-def _load_bookings(conn, org_id: int, start_dt: datetime, end_dt: datetime, include_cancelled: bool) -> list:
+def _load_bookings(
+    conn,
+    org_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    include_cancelled: bool,
+) -> list:
     cancel = "" if include_cancelled else "AND b.status <> 'cancelled'"
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
@@ -110,15 +136,18 @@ def _load_bookings(conn, org_id: int, start_dt: datetime, end_dt: datetime, incl
         return cur.fetchall()
 
 
-def _build_heatmap(resources: list, bookings: list, week_start: date, ws: time, we: time) -> Dict[Tuple[int, Optional[int], date], int]:
+def _build_heatmap(
+    resources: list,
+    bookings: list,
+    week_start: date,
+    ws: time,
+    we: time,
+) -> Dict[Tuple[int, Optional[int], date], int]:
     """
     Возвращает занятые секунды по ключу (venue_id, venue_unit_id, day).
-    Логика совпадает с триггером: если бронирование с unit_id — оно относится к зоне,
-    иначе к площадке целиком.
+    Если бронирование с venue_unit_id — относится к зоне, иначе к площадке целиком.
     """
     busy = defaultdict(int)
-
-    # индекс ресурсов для быстрых проверок существования
     res_keys = {(r["venue_id"], r["venue_unit_id"]) for r in resources}
 
     for b in bookings:
@@ -131,12 +160,10 @@ def _build_heatmap(resources: list, bookings: list, week_start: date, ws: time, 
             if sec <= 0:
                 continue
 
-            # ключ бронирования: зона или площадка
             key = (b["venue_id"], b["venue_unit_id"])
             if b["venue_unit_id"] is not None and key in res_keys:
                 busy[(b["venue_id"], b["venue_unit_id"], d)] += sec
             else:
-                # если бронирование без зоны — относим к "площадке" (unit=None)
                 if (b["venue_id"], None) in res_keys:
                     busy[(b["venue_id"], None, d)] += sec
 
@@ -153,14 +180,26 @@ def load_page(
     conn=Depends(get_db),
 ):
     orgs = _load_orgs(conn, user)
+
+    is_admin = user.get("role_code") == "admin"
+    has_analytics = (
+        is_admin
+        or _has_permission(conn, user["id"], "page.analytics")
+        or _has_permission(conn, user["id"], "tab.analytics")
+    )
+
     if not orgs:
-        return templates.TemplateResponse("load.html", {
-            "request": request,
-            "user": user,
-            "orgs": [],
-            "selected_org": None,
-            "error": "Нет доступных учреждений",
-        })
+        return templates.TemplateResponse(
+            "load.html",
+            {
+                "request": request,
+                "user": user,
+                "orgs": [],
+                "selected_org": None,
+                "error": "Нет доступных учреждений",
+                "has_analytics": has_analytics,
+            },
+        )
 
     if org_id is None:
         org_id = orgs[0]["id"]
@@ -175,9 +214,9 @@ def load_page(
         anchor = date.today()
 
     week_start, week_end = _week_range(anchor)
-
     prev_week = week_start - timedelta(days=7)
     next_week = week_start + timedelta(days=7)
+
     days = [week_start + timedelta(days=i) for i in range(7)]
     weekdays_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
@@ -193,41 +232,49 @@ def load_page(
 
     busy = _build_heatmap(resources, bookings, week_start, ws, we)
 
-    # подготовим матрицу процентов
     grid = []
     for r in resources:
-        row = {
-            "resource": r,
-            "cells": []
-        }
+        row = {"resource": r, "cells": []}
         for d in days:
             sec = busy.get((r["venue_id"], r["venue_unit_id"], d), 0)
             pct = 0.0 if cap_day <= 0 else round(100.0 * sec / cap_day, 1)
-            row["cells"].append({
-                "date": d,
-                "weekday": weekdays_ru[d.weekday()],
-                "busy_sec": sec,
-                "pct": pct,
-                "link": f"/schedule?org_id={org_id}&day={d.isoformat()}&view=grid&period=day&show_cancelled={'true' if show_cancelled else 'false'}",
-            })
+
+            row["cells"].append(
+                {
+                    "date": d,
+                    "weekday": weekdays_ru[d.weekday()],
+                    "busy_sec": sec,
+                    "pct": pct,
+                    "link": (
+                        f"/schedule?org_id={org_id}"
+                        f"&day={d.isoformat()}"
+                        f"&view=grid&period=day"
+                        f"&show_cancelled={'true' if show_cancelled else 'false'}"
+                    ),
+                }
+            )
         grid.append(row)
 
-    return templates.TemplateResponse("load.html", {
-        "request": request,
-        "user": user,
-        "orgs": orgs,
-        "selected_org": selected_org,
-        "org_id": org_id,
-        "anchor": anchor,
-        "week_start": week_start,
-        "week_end": week_end,
-        "prev_week": prev_week,
-        "next_week": next_week,
-        "days": days,
-        "weekdays_ru": weekdays_ru,
-        "resources": resources,
-        "grid": grid,
-        "show_cancelled": show_cancelled,
-        "ws": ws,
-        "we": we,
-    })
+    return templates.TemplateResponse(
+        "load.html",
+        {
+            "request": request,
+            "user": user,
+            "orgs": orgs,
+            "selected_org": selected_org,
+            "org_id": org_id,
+            "anchor": anchor,
+            "week_start": week_start,
+            "week_end": week_end,
+            "prev_week": prev_week,
+            "next_week": next_week,
+            "days": days,
+            "weekdays_ru": weekdays_ru,
+            "resources": resources,
+            "grid": grid,
+            "show_cancelled": show_cancelled,
+            "ws": ws,
+            "we": we,
+            "has_analytics": has_analytics,
+        },
+    )
