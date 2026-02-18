@@ -175,6 +175,9 @@ def load_page(
         anchor = date.today()
 
     week_start, week_end = _week_range(anchor)
+
+    prev_week = week_start - timedelta(days=7)
+    next_week = week_start + timedelta(days=7)
     days = [week_start + timedelta(days=i) for i in range(7)]
     weekdays_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
@@ -218,6 +221,8 @@ def load_page(
         "anchor": anchor,
         "week_start": week_start,
         "week_end": week_end,
+        "prev_week": prev_week,
+        "next_week": next_week,
         "days": days,
         "weekdays_ru": weekdays_ru,
         "resources": resources,
