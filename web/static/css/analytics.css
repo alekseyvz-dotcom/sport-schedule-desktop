@@ -582,3 +582,120 @@
         padding: 10px;
     }
 }
+
+/* Десктоп/планшет: чуть компактнее числовые колонки */
+.analytics-table th.col-num,
+.analytics-table td.col-num {
+    min-width: 68px;
+}
+
+/* Новые колонки ПД%/ГЗ% делаем уже */
+.analytics-table th.col-num.pct-col,
+.analytics-table td.col-num.pct-col {
+    min-width: 64px;
+}
+
+/* На очень широких экранах можно дать больше места бару */
+@media (min-width: 1100px) {
+    .analytics-table th.col-bar,
+    .analytics-table td.col-bar {
+        width: 32%;
+        min-width: 220px;
+    }
+}
+
+/* ===== Mobile карточки (у вас уже включены display:block для table/tr/td) ===== */
+
+/* Мобилка: в карточке прячем org_name для обычных строк (оставляем для ИТОГО),
+   чтобы не было дубля и не раздувало карточку. */
+@media (max-width: 768px) {
+    /* 1-я "ячейка" (org) — показываем только для total */
+    .analytics-table tr.row-venue td:nth-child(1) {
+        display: none;
+    }
+    .analytics-table tr.row-total td:nth-child(1) {
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    /* 2-я "ячейка" (venue/ИТОГО) — главный заголовок карточки */
+    .analytics-table td:nth-child(2) {
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 8px;
+    }
+
+    /* 3-я "ячейка" (bar) — оставляем */
+    .analytics-table td:nth-child(3) {
+        margin-bottom: 8px;
+    }
+
+    /* Скрываем дублирующую колонку Total% (она уже есть в баре) */
+    .analytics-table td:nth-child(4) {
+        display: none;
+    }
+
+    /* ПД% и ГЗ% показываем как маленькие бейджи */
+    .analytics-table td:nth-child(5),
+    .analytics-table td:nth-child(6) {
+        display: inline-block;
+        width: auto;
+        padding: 0 10px 0 0;
+        margin-top: 2px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.65);
+        white-space: nowrap;
+    }
+    .analytics-table td:nth-child(5)::before {
+        content: "ПД% ";
+        color: rgba(255, 255, 255, 0.35);
+    }
+    .analytics-table td:nth-child(6)::before {
+        content: "ГЗ% ";
+        color: rgba(255, 255, 255, 0.35);
+    }
+
+    /* Часы: ПД/ГЗ/Всего — в одну строку */
+    .analytics-table td:nth-child(7),
+    .analytics-table td:nth-child(8),
+    .analytics-table td:nth-child(9) {
+        display: inline-block;
+        width: auto;
+        padding: 0 10px 0 0;
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.55);
+        white-space: nowrap;
+    }
+
+    .analytics-table td:nth-child(7)::before { content: "ПД "; color: rgba(255, 255, 255, 0.35); }
+    .analytics-table td:nth-child(8)::before { content: "ГЗ "; color: rgba(255, 255, 255, 0.35); }
+    .analytics-table td:nth-child(9)::before { content: "Итого "; color: rgba(255, 255, 255, 0.35); }
+
+    /* Всего выделим */
+    .analytics-table td:nth-child(9) {
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.85);
+    }
+
+    /* Бар чуть выше и с центровкой процента внутри */
+    .analytics-table td:nth-child(3) .bar-bg {
+        height: 26px;
+    }
+    .analytics-table td:nth-child(3) .bar-label {
+        display: none;
+    }
+    .analytics-table td:nth-child(3) .bar-pct-inside {
+        font-size: 12px;
+        font-weight: 800;
+    }
+}
+
+/* Самые маленькие экраны: прячем ПД%/ГЗ% (остаётся бар + часы) */
+@media (max-width: 420px) {
+    .analytics-table td:nth-child(5),
+    .analytics-table td:nth-child(6) {
+        display: none;
+    }
+}
