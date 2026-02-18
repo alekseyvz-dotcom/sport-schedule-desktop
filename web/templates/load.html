@@ -26,12 +26,12 @@
 
   <div class="load-controls">
     <div class="week-nav">
-      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ (week_start - timedelta(days=7)).isoformat() }}&show_cancelled={{ show_cancelled }}">◀</a>
+      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ prev_week.isoformat() }}&show_cancelled={{ show_cancelled }}">◀</a>
       <div class="week-title">
         {{ week_start.strftime('%d.%m.%Y') }} – {{ week_end.strftime('%d.%m.%Y') }}
         <div class="week-sub">Рабочее время: {{ ws.strftime('%H:%M') }}–{{ we.strftime('%H:%M') }}</div>
       </div>
-      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ (week_start + timedelta(days=7)).isoformat() }}&show_cancelled={{ show_cancelled }}">▶</a>
+      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ next_week.isoformat() }}&show_cancelled={{ show_cancelled }}">▶</a>
     </div>
 
     <label class="toggle-cancelled">
