@@ -39,6 +39,23 @@ from app.services.venue_units_manage_service import apply_units_scheme
 from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
+from app.ui.closures_manage_dialog import ClosuresManageDialog
+from app.ui.venue_seasons_manage_dialog import VenueSeasonsManageDialog
+
+from app.services.org_closures_service import (
+    list_org_closures,
+    create_org_closure,
+    update_org_closure,
+    set_org_closure_active,
+)
+
+from app.services.venue_closures_service import (
+    list_venue_closures,
+    create_venue_closure,
+    update_venue_closure,
+    set_venue_closure_active,
+)
+
 
 class OrgsVenuesPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
@@ -61,16 +78,20 @@ class OrgsVenuesPage(QWidget):
         self.btn_org_add = QPushButton("Создать")
         self.btn_org_edit = QPushButton("Редактировать")
         self.btn_org_archive = QPushButton("Архивировать/восстановить")
-
+        
+        self.btn_org_closures = QPushButton("Закрытия…")
+        self.btn_org_closures.setMinimumHeight(34)
+        self.btn_org_closures.clicked.connect(self._org_closures)
+        
         self.btn_org_add.clicked.connect(self._org_add)
         self.btn_org_edit.clicked.connect(self._org_edit)
         self.btn_org_archive.clicked.connect(self._org_toggle)
-
-        for b in (self.btn_org_add, self.btn_org_edit, self.btn_org_archive):
+        
+        for b in (self.btn_org_add, self.btn_org_edit, self.btn_org_archive, self.btn_org_closures):
             b.setMinimumHeight(34)
-
+        
         org_top = QHBoxLayout()
-        org_top.setContentsMargins(0, 0, 0, 0)  # root уже даёт отступы
+        org_top.setContentsMargins(0, 0, 0, 0)
         org_top.setSpacing(10)
         org_top.addWidget(self.lbl_orgs)
         org_top.addWidget(self.ed_org_search, 1)
@@ -78,6 +99,7 @@ class OrgsVenuesPage(QWidget):
         org_top.addWidget(self.btn_org_add)
         org_top.addWidget(self.btn_org_edit)
         org_top.addWidget(self.btn_org_archive)
+        org_top.addWidget(self.btn_org_closures)
 
         self.tbl_orgs = QTableWidget(0, 5)
         self.tbl_orgs.setObjectName("orgsTable")
@@ -111,22 +133,30 @@ class OrgsVenuesPage(QWidget):
         self.btn_venue_add = QPushButton("Создать")
         self.btn_venue_edit = QPushButton("Редактировать")
         self.btn_venue_archive = QPushButton("Архивировать/восстановить")
-
+        
+        self.btn_venue_closures = QPushButton("Закрытия…")
+        self.btn_venue_seasons = QPushButton("Сезонность…")
+        
+        self.btn_venue_closures.clicked.connect(self._venue_closures)
+        self.btn_venue_seasons.clicked.connect(self._venue_seasons)
+        
         self.btn_venue_add.clicked.connect(self._venue_add)
         self.btn_venue_edit.clicked.connect(self._venue_edit)
         self.btn_venue_archive.clicked.connect(self._venue_toggle)
-
-        for b in (self.btn_venue_add, self.btn_venue_edit, self.btn_venue_archive):
+        
+        for b in (self.btn_venue_add, self.btn_venue_edit, self.btn_venue_archive, self.btn_venue_closures, self.btn_venue_seasons):
             b.setMinimumHeight(34)
-
+        
         venue_top = QHBoxLayout()
-        venue_top.setContentsMargins(0, 0, 0, 0)  # root уже даёт отступы
+        venue_top.setContentsMargins(0, 0, 0, 0)
         venue_top.setSpacing(10)
         venue_top.addWidget(self.lbl_venues, 1)
         venue_top.addWidget(self.cb_venue_inactive)
         venue_top.addWidget(self.btn_venue_add)
         venue_top.addWidget(self.btn_venue_edit)
         venue_top.addWidget(self.btn_venue_archive)
+        venue_top.addWidget(self.btn_venue_closures) 
+        venue_top.addWidget(self.btn_venue_seasons)  
 
         self.tbl_venues = QTableWidget(0, 6)
         self.tbl_venues.setObjectName("venuesTable")
@@ -175,6 +205,9 @@ class OrgsVenuesPage(QWidget):
             self.btn_venue_add.setEnabled(False)
             self.btn_venue_edit.setEnabled(False)
             self.btn_venue_archive.setEnabled(False)
+            self.btn_org_closures.setEnabled(False)
+            self.btn_venue_closures.setEnabled(False)
+            self.btn_venue_seasons.setEnabled(False)
             return
 
         acc = self._org_access(org.id)
@@ -184,6 +217,10 @@ class OrgsVenuesPage(QWidget):
         self.btn_venue_add.setEnabled(acc.can_edit)
         self.btn_venue_edit.setEnabled(acc.can_edit)
         self.btn_venue_archive.setEnabled(acc.can_edit)
+
+        self.btn_org_closures.setEnabled(bool(org and acc.can_edit))
+        self.btn_venue_closures.setEnabled(bool(org and acc.can_edit))
+        self.btn_venue_seasons.setEnabled(bool(org and acc.can_edit))
 
     def _on_org_selected(self):
         self._apply_ui_access()
@@ -608,3 +645,130 @@ class OrgsVenuesPage(QWidget):
                 self.tbl_venues.setCurrentCell(r, 0)
                 self.tbl_venues.scrollToItem(item)
                 return
+
+    def _org_closures(self):
+        org = self._selected_org()
+        if not org:
+            QMessageBox.information(self, "Закрытия", "Выберите учреждение.")
+            return
+    
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование этого учреждения.")
+            return
+    
+        dlg = ClosuresManageDialog(
+            self,
+            title=f"Закрытия учреждения — {org.name}",
+            list_fn=lambda include_inactive=False: list_org_closures(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                include_inactive=include_inactive,
+            ),
+            create_fn=lambda date_from, date_to, reason: create_org_closure(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                date_from=date_from,
+                date_to=date_to,
+                reason=reason,
+            ),
+            update_fn=lambda closure_id, date_from, date_to, reason, is_active: update_org_closure(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                closure_id=closure_id,
+                date_from=date_from,
+                date_to=date_to,
+                reason=reason,
+                is_active=is_active,
+            ),
+            set_active_fn=lambda closure_id, is_active: set_org_closure_active(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                org_id=org.id,
+                closure_id=closure_id,
+                is_active=is_active,
+            ),
+        )
+        dlg.exec()
+    
+    
+    def _venue_closures(self):
+        v = self._selected_venue()
+        if not v:
+            QMessageBox.information(self, "Закрытия", "Выберите площадку.")
+            return
+    
+        org = self._selected_org()
+        if not org:
+            QMessageBox.information(self, "Закрытия", "Сначала выберите учреждение слева.")
+            return
+    
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование площадок этого учреждения.")
+            return
+    
+        dlg = ClosuresManageDialog(
+            self,
+            title=f"Закрытия площадки — {v.name}",
+            list_fn=lambda include_inactive=False: list_venue_closures(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                venue_id=v.id,
+                include_inactive=include_inactive,
+            ),
+            create_fn=lambda date_from, date_to, reason: create_venue_closure(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                venue_id=v.id,
+                date_from=date_from,
+                date_to=date_to,
+                reason=reason,
+            ),
+            update_fn=lambda closure_id, date_from, date_to, reason, is_active: update_venue_closure(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                venue_id=v.id,
+                closure_id=closure_id,
+                date_from=date_from,
+                date_to=date_to,
+                reason=reason,
+                is_active=is_active,
+            ),
+            set_active_fn=lambda closure_id, is_active: set_venue_closure_active(
+                user_id=self.user.id,
+                role_code=self.user.role_code,
+                venue_id=v.id,
+                closure_id=closure_id,
+                is_active=is_active,
+            ),
+        )
+        dlg.exec()
+    
+    
+    def _venue_seasons(self):
+        v = self._selected_venue()
+        if not v:
+            QMessageBox.information(self, "Сезонность", "Выберите площадку.")
+            return
+    
+        org = self._selected_org()
+        if not org:
+            QMessageBox.information(self, "Сезонность", "Сначала выберите учреждение слева.")
+            return
+    
+        acc = self._org_access(org.id)
+        if not acc.can_edit:
+            QMessageBox.warning(self, "Доступ запрещён", "У вас нет прав на редактирование площадок этого учреждения.")
+            return
+    
+        dlg = VenueSeasonsManageDialog(
+            self,
+            user_id=self.user.id,
+            role_code=self.user.role_code,
+            venue_id=v.id,
+        )
+        dlg.exec()
