@@ -1,7 +1,8 @@
+# web/routes/analytics.py
 from __future__ import annotations
 
-from datetime import date, time, timedelta, timezone
-from typing import Optional, List, Dict, Tuple
+from datetime import date, time, timedelta, timezone, datetime
+from typing import Optional, Tuple, Dict
 from collections import defaultdict
 
 from fastapi import APIRouter, Request, Depends, Query, HTTPException
@@ -37,8 +38,7 @@ def _hours(sec: int) -> float:
 
 
 def _sec_between(t0: time, t1: time) -> int:
-    from datetime import datetime, date as d
-    return int((datetime.combine(d.today(), t1) - datetime.combine(d.today(), t0)).total_seconds())
+    return int((datetime.combine(date.today(), t1) - datetime.combine(date.today(), t0)).total_seconds())
 
 
 def _clip(a: Tuple[time, time], b: Tuple[time, time]):
@@ -57,7 +57,6 @@ def _unit_fraction(code: Optional[str]) -> float:
 
 
 def _weighted_busy_seconds(intervals) -> int:
-    from datetime import datetime
     events = []
     for s, e, f in intervals:
         if e <= s or f <= 0:
@@ -184,33 +183,96 @@ def _load_bookings(conn, start_dt, end_dt, org_id, user, include_cancelled):
         return cur.fetchall()
 
 
-def _calc_usage(venues, bookings, start_day, end_day):
-    from datetime import datetime
+def _load_open_days_map(conn, venues, start_day: date, end_day: date) -> Dict[Tuple[int, date], bool]:
+    """
+    Возвращает (venue_id, day) -> открыто ли в этот день, учитывая:
+      - public.is_venue_in_season(venue_id, day)
+      - закрытия учреждения (org_closures)
+      - закрытия площадки (venue_closures)
+    """
+    if not venues:
+        return {}
 
+    venue_ids = [int(v["venue_id"]) for v in venues]
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH vs AS (
+              SELECT v.id AS venue_id, v.org_id
+              FROM public.venues v
+              WHERE v.id = ANY(%(venue_ids)s)
+            ),
+            days AS (
+              SELECT d::date AS day
+              FROM generate_series(%(d0)s::date, %(d1)s::date, interval '1 day') d
+            )
+            SELECT
+              vs.venue_id,
+              days.day,
+              (
+                public.is_venue_in_season(vs.venue_id, days.day)
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.org_closures oc
+                  WHERE oc.is_active = true
+                    AND oc.org_id = vs.org_id
+                    AND days.day BETWEEN oc.date_from AND oc.date_to
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.venue_closures vc
+                  WHERE vc.is_active = true
+                    AND vc.venue_id = vs.venue_id
+                    AND days.day BETWEEN vc.date_from AND vc.date_to
+                )
+              ) AS is_open
+            FROM vs
+            CROSS JOIN days
+            """,
+            {"venue_ids": venue_ids, "d0": start_day, "d1": end_day},
+        )
+        rows = cur.fetchall()
+
+    out: Dict[Tuple[int, date], bool] = {}
+    for r in rows:
+        out[(int(r["venue_id"]), r["day"])] = bool(r["is_open"])
+    return out
+
+
+def _calc_usage(venues, bookings, start_day, end_day, open_days_map):
     SHIFT_M = (time(8, 0), time(12, 0))
     SHIFT_D = (time(12, 0), time(18, 0))
     SHIFT_E = (time(18, 0), time(22, 0))
 
-    days_count = (end_day - start_day).days + 1
+    days = list(_iter_days(start_day, end_day))
 
     agg = {}
     for v in venues:
         vid = int(v["venue_id"])
         ws = time(0, 0) if v["is_24h"] else v["work_start"]
         we = time(23, 59, 59) if v["is_24h"] else v["work_end"]
+
         cap_day = _sec_between(ws, we)
         sm = _clip(SHIFT_M, (ws, we))
         sd = _clip(SHIFT_D, (ws, we))
         se = _clip(SHIFT_E, (ws, we))
 
+        cap_m_day = _sec_between(*sm) if sm else 0
+        cap_d_day = _sec_between(*sd) if sd else 0
+        cap_e_day = _sec_between(*se) if se else 0
+
+        open_days_count = sum(1 for d in days if open_days_map.get((vid, d), True))
+
         agg[vid] = {
             "org_id": int(v["org_id"]), "org_name": v["org_name"],
             "venue_id": vid, "venue_name": v["venue_name"],
             "ws": ws, "we": we, "sm": sm, "sd": sd, "se": se,
-            "capacity_sec": days_count * cap_day,
-            "m_cap": days_count * (_sec_between(*sm) if sm else 0),
-            "d_cap": days_count * (_sec_between(*sd) if sd else 0),
-            "e_cap": days_count * (_sec_between(*se) if se else 0),
+            # capacity только по открытым дням:
+            "capacity_sec": open_days_count * cap_day,
+            "m_cap": open_days_count * cap_m_day,
+            "d_cap": open_days_count * cap_d_day,
+            "e_cap": open_days_count * cap_e_day,
             "pd_sec": 0, "gz_sec": 0,
             "m_pd": 0, "m_gz": 0, "d_pd": 0, "d_gz": 0, "e_pd": 0, "e_gz": 0,
         }
@@ -230,7 +292,11 @@ def _calc_usage(venues, bookings, start_day, end_day):
         frac = _unit_fraction(b.get("unit_code"))
         a = agg[vid]
 
-        for d in _iter_days(start_day, end_day):
+        for d in days:
+            # не учитываем закрытые/внесезонные дни
+            if not open_days_map.get((vid, d), True):
+                continue
+
             w0 = datetime.combine(d, a["ws"], tzinfo=TZ)
             w1 = datetime.combine(d, a["we"], tzinfo=TZ)
             s = max(b["starts_at"], w0)
@@ -256,7 +322,9 @@ def _calc_usage(venues, bookings, start_day, end_day):
                     ie[(vid, d, act)].append((es, ee, frac))
 
     for vid in agg:
-        for d in _iter_days(start_day, end_day):
+        for d in days:
+            if not open_days_map.get((vid, d), True):
+                continue
             agg[vid]["pd_sec"] += _weighted_busy_seconds(iw.get((vid, d, "PD"), []))
             agg[vid]["gz_sec"] += _weighted_busy_seconds(iw.get((vid, d, "GZ"), []))
             agg[vid]["m_pd"] += _weighted_busy_seconds(im.get((vid, d, "PD"), []))
@@ -272,6 +340,9 @@ def _calc_usage(venues, bookings, start_day, end_day):
 def _build_result(agg):
     by_org = defaultdict(list)
     for a in agg.values():
+        # пропускаем площадки, которые весь период "закрыты" => capacity_sec=0
+        if int(a.get("capacity_sec") or 0) <= 0:
+            continue
         by_org[(a["org_id"], a["org_name"])].append(a)
 
     result = []
@@ -360,15 +431,14 @@ def analytics_page(
         raise HTTPException(403, "Нет доступа к аналитике")
 
     # org_id: "" → None, "5" → 5
+    org_id_int: Optional[int] = None
     if org_id is not None:
-        org_id = org_id.strip()
-        if org_id == "" or org_id.lower() == "none":
-            org_id = None
-        else:
+        s = org_id.strip()
+        if s and s.lower() != "none":
             try:
-                org_id = int(org_id)
+                org_id_int = int(s)
             except ValueError:
-                org_id = None
+                org_id_int = None
 
     orgs = _load_orgs(conn, user)
 
@@ -380,19 +450,20 @@ def analytics_page(
     period = period if period in ("day", "week", "month", "quarter", "year") else "month"
     d0, d1 = _period_range(anchor, period)
 
-    from datetime import datetime
     start_dt = datetime.combine(d0, time(0, 0), tzinfo=TZ)
     end_dt = datetime.combine(d1 + timedelta(days=1), time(0, 0), tzinfo=TZ)
 
-    venues = _load_venues(conn, org_id, user)
-    bookings = _load_bookings(conn, start_dt, end_dt, org_id, user, show_cancelled)
-    agg = _calc_usage(venues, bookings, d0, d1)
+    venues = _load_venues(conn, org_id_int, user)
+    open_days_map = _load_open_days_map(conn, venues, d0, d1)
+
+    bookings = _load_bookings(conn, start_dt, end_dt, org_id_int, user, show_cancelled)
+    agg = _calc_usage(venues, bookings, d0, d1, open_days_map)
     rows = _build_result(agg)
 
-    # Общие итоги
-    total_cap = sum(a["capacity_sec"] for a in agg.values())
-    total_pd = sum(a["pd_sec"] for a in agg.values())
-    total_gz = sum(a["gz_sec"] for a in agg.values())
+    # Общие итоги (учитываем только площадки с capacity_sec > 0)
+    total_cap = sum(int(a["capacity_sec"]) for a in agg.values() if int(a.get("capacity_sec") or 0) > 0)
+    total_pd = sum(int(a["pd_sec"]) for a in agg.values() if int(a.get("capacity_sec") or 0) > 0)
+    total_gz = sum(int(a["gz_sec"]) for a in agg.values() if int(a.get("capacity_sec") or 0) > 0)
     total_busy = total_pd + total_gz
 
     period_label = f"{d0:%d.%m.%Y} – {d1:%d.%m.%Y}"
@@ -401,7 +472,7 @@ def analytics_page(
         "request": request,
         "user": user,
         "orgs": orgs,
-        "org_id": org_id,
+        "org_id": org_id_int,
         "anchor": anchor.isoformat(),
         "period": period,
         "show_cancelled": show_cancelled,
