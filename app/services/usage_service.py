@@ -1,3 +1,4 @@
+# app/services/usage_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -197,6 +198,74 @@ def _load_venues(org_id: Optional[int]) -> List[Dict]:
             put_conn(conn)
 
 
+def _load_open_days_map(
+    *,
+    start_day: date,
+    end_day: date,
+    org_id: Optional[int],
+) -> Dict[Tuple[int, date], bool]:
+    """
+    (venue_id, day) -> открыто ли в этот день
+
+    Открыто = в сезоне AND нет закрытия учреждения AND нет закрытия площадки.
+    Если сезон не задан (и нет шаблонов) - is_venue_in_season вернёт true -> круглый год.
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            org_filter = ""
+            params = {"d0": start_day, "d1": end_day}
+            if org_id is not None:
+                org_filter = " AND v.org_id = %(org_id)s"
+                params["org_id"] = int(org_id)
+
+            sql = f"""
+                WITH vs AS (
+                    SELECT v.id AS venue_id, v.org_id
+                    FROM public.venues v
+                    WHERE v.is_active = true
+                    {org_filter}
+                ),
+                days AS (
+                    SELECT d::date AS day
+                    FROM generate_series(%(d0)s::date, %(d1)s::date, interval '1 day') d
+                )
+                SELECT
+                    vs.venue_id,
+                    days.day,
+                    (
+                      public.is_venue_in_season(vs.venue_id, days.day)
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM public.org_closures oc
+                        WHERE oc.is_active = true
+                          AND oc.org_id = vs.org_id
+                          AND days.day BETWEEN oc.date_from AND oc.date_to
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM public.venue_closures vc
+                        WHERE vc.is_active = true
+                          AND vc.venue_id = vs.venue_id
+                          AND days.day BETWEEN vc.date_from AND vc.date_to
+                      )
+                    ) AS is_open
+                FROM vs
+                CROSS JOIN days
+            """
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+            out: Dict[Tuple[int, date], bool] = {}
+            for r in rows:
+                out[(int(r["venue_id"]), r["day"])] = bool(r["is_open"])
+            return out
+    finally:
+        if conn:
+            put_conn(conn)
+
+
 def calc_usage_by_venues(
     *,
     start_day: date,
@@ -218,6 +287,9 @@ def calc_usage_by_venues(
 
     Если в один и тот же интервал занято несколько юнитов, доли суммируются и клипаются до 1.0,
     поэтому процент не завышается.
+
+    ВАЖНО: capacity считается только по дням, когда площадка ОТКРЫТА
+    (учитывается сезонность + закрытия org/venue).
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
@@ -226,14 +298,14 @@ def calc_usage_by_venues(
     range_end_dt = datetime.combine(end_day + timedelta(days=1), time(0, 0), tzinfo=tz)
 
     venues = _load_venues(org_id)
+    open_days_map = _load_open_days_map(start_day=start_day, end_day=end_day, org_id=org_id)
+
     bookings = _load_bookings_for_range(
         start_dt=range_start_dt,
         end_dt=range_end_dt,
         org_id=org_id,
         include_cancelled=include_cancelled,
     )
-
-    days_count = (end_day - start_day).days + 1
 
     agg: Dict[int, Dict] = {}
 
@@ -252,6 +324,11 @@ def calc_usage_by_venues(
         cap_d = _sec_between(*sd) if sd else 0
         cap_e = _sec_between(*se) if se else 0
 
+        open_days_count = 0
+        for d in _iter_days(start_day, end_day):
+            if open_days_map.get((vid, d), True):
+                open_days_count += 1
+
         agg[vid] = {
             "org_id": int(v["org_id"]),
             "org_name": str(v["org_name"]),
@@ -262,10 +339,11 @@ def calc_usage_by_venues(
             "shift_m": sm,
             "shift_d": sd,
             "shift_e": se,
-            "capacity_sec": days_count * cap_day,
-            "morning_capacity_sec": days_count * cap_m,
-            "day_capacity_sec": days_count * cap_d,
-            "evening_capacity_sec": days_count * cap_e,
+            # capacity только по открытым дням:
+            "capacity_sec": open_days_count * cap_day,
+            "morning_capacity_sec": open_days_count * cap_m,
+            "day_capacity_sec": open_days_count * cap_d,
+            "evening_capacity_sec": open_days_count * cap_e,
             "pd_sec": 0,
             "gz_sec": 0,
             "morning_pd_sec": 0,
@@ -302,6 +380,10 @@ def calc_usage_by_venues(
         se = agg[vid]["shift_e"]
 
         for d in _iter_days(start_day, end_day):
+            # НЕ считаем закрытые/внесезонные дни
+            if not open_days_map.get((vid, d), True):
+                continue
+
             # рабочее окно
             work0 = datetime.combine(d, work_start, tzinfo=tz)
             work1 = datetime.combine(d, work_end, tzinfo=tz)
@@ -337,8 +419,11 @@ def calc_usage_by_venues(
                     intervals_e[(vid, d, activity)].append((es, ee, frac))
 
     # 2) Начисляем занятость (взвешенную и клипнутую до 1.0)
-    for vid in agg.keys():
+    for vid in list(agg.keys()):
         for d in _iter_days(start_day, end_day):
+            if not open_days_map.get((vid, d), True):
+                continue
+
             agg[vid]["pd_sec"] += _weighted_busy_seconds(intervals_work.get((vid, d, "PD"), []))
             agg[vid]["gz_sec"] += _weighted_busy_seconds(intervals_work.get((vid, d, "GZ"), []))
 
@@ -388,6 +473,10 @@ def calc_usage_by_venues(
                 evening_total_sec=evening_pd + evening_gz,
             )
         )
+
+    # Если площадка была закрыта/внесезонна весь период => capacity_sec=0.
+    # Можно скрывать такие строки:
+    out = [r for r in out if r.capacity_sec > 0]
 
     out.sort(key=lambda r: (r.total_sec / r.capacity_sec) if r.capacity_sec else 0.0, reverse=True)
     return out
