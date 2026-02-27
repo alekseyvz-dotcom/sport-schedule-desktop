@@ -155,8 +155,15 @@ QHeaderView::section {
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     font-weight: 800;
 }
-QTableView::item { padding: 6px 10px; border: none; }
-QTableView::item:selected { background: rgba(99, 102, 241, 0.28); }
+QTableView::item {
+    padding: 6px 10px;
+    border: none;
+    color: rgba(255, 255, 255, 0.88);   /* <- добавить */
+}
+QTableView::item:selected {
+    background: rgba(99, 102, 241, 0.28);
+    color: rgba(255, 255, 255, 0.92);   /* <- добавить */
+}
 
 /* ---- Scrollbar ---- */
 QScrollBar:vertical {
