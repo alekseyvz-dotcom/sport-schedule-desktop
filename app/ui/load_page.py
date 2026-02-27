@@ -23,6 +23,7 @@ from app.services.users_service import AuthUser
 from app.services.access_service import list_allowed_org_ids, get_org_access
 from app.services.ref_service import list_active_orgs_by_ids, list_active_venues
 from app.services.venue_units_service import list_venue_units
+from app.services.venue_status_service import get_available_venue_ids_for_week
 from app.ui.schedule_page import _style_calendar_widget
 
 
@@ -59,138 +60,6 @@ def _load_org_work_window(org_id: int) -> tuple[time, time, bool]:
     finally:
         if conn:
             put_conn(conn)
-
-
-def _load_available_venue_ids(
-    venue_ids: list[int],
-    week_start: date,
-    week_end: date,
-) -> set[int]:
-    """
-    Возвращает venue_id, у которых хотя бы один день недели:
-      - не закрыт (org_closures / venue_closures)
-      - в сезоне (is_venue_in_season)
-    Площадки, у которых ВСЕ 7 дней закрыты/вне сезона, исключаются.
-    """
-    if not venue_ids:
-        return set()
-
-    ids = list(venue_ids)
-    days = [week_start + timedelta(days=i) for i in range(7)]
-
-    conn = None
-    try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-
-            # org_id для каждой площадки
-            cur.execute(
-                "SELECT id, org_id FROM public.venues WHERE id = ANY(%s)",
-                (ids,),
-            )
-            venue_org: dict[int, int] = {row[0]: row[1] for row in cur.fetchall()}
-            org_ids = list(set(venue_org.values()))
-
-            # Закрытые дни учреждений
-            cur.execute(
-                """
-                SELECT org_id, date_from, date_to
-                FROM public.org_closures
-                WHERE org_id = ANY(%s)
-                  AND is_active = true
-                  AND date_to >= %s AND date_from <= %s
-                """,
-                (org_ids, week_start, week_end),
-            )
-            org_closed: dict[int, list] = {}
-            for org_id, df, dt_ in cur.fetchall():
-                org_closed.setdefault(org_id, []).append((df, dt_))
-
-            # Закрытые дни площадок
-            cur.execute(
-                """
-                SELECT venue_id, date_from, date_to
-                FROM public.venue_closures
-                WHERE venue_id = ANY(%s)
-                  AND is_active = true
-                  AND date_to >= %s AND date_from <= %s
-                """,
-                (ids, week_start, week_end),
-            )
-            venue_closed: dict[int, list] = {}
-            for vid, df, dt_ in cur.fetchall():
-                venue_closed.setdefault(vid, []).append((df, dt_))
-
-            # Площадки с сезонными настройками
-            cur.execute(
-                """
-                SELECT DISTINCT venue_id FROM public.venue_season_templates
-                WHERE venue_id = ANY(%s) AND is_active = true
-                UNION
-                SELECT DISTINCT venue_id FROM public.venue_season_overrides
-                WHERE venue_id = ANY(%s) AND is_active = true
-                """,
-                (ids, ids),
-            )
-            seasonal_ids = {row[0] for row in cur.fetchall()}
-
-            # Проверяем сезонность пакетно через is_venue_in_season
-            seasonal_list = [vid for vid in ids if vid in seasonal_ids]
-            season_ok: dict[tuple[int, date], bool] = {}
-            if seasonal_list:
-                cur.execute(
-                    """
-                    SELECT v_id, d, public.is_venue_in_season(v_id, d)
-                    FROM (
-                        SELECT unnest(%s::bigint[]) AS v_id,
-                               unnest(%s::date[])   AS d
-                    ) t
-                    """,
-                    (
-                        [vid for vid in seasonal_list for _ in days],
-                        [d   for _   in seasonal_list for d in days],
-                    ),
-                )
-                for vid, d, ok in cur.fetchall():
-                    season_ok[(int(vid), d)] = bool(ok)
-
-    finally:
-        if conn:
-            put_conn(conn)
-
-    # Для каждой площадки проверяем: есть ли хоть один доступный день
-    available: set[int] = set()
-    for vid in ids:
-        org_id = venue_org.get(vid)
-
-        for d in days:
-            # Проверка закрытий учреждения
-            org_blocked = any(
-                df <= d <= dt_
-                for df, dt_ in org_closed.get(org_id or -1, [])
-            )
-            if org_blocked:
-                continue
-
-            # Проверка закрытий площадки
-            venue_blocked = any(
-                df <= d <= dt_
-                for df, dt_ in venue_closed.get(vid, [])
-            )
-            if venue_blocked:
-                continue
-
-            # Проверка сезонности
-            if vid in seasonal_ids:
-                if not season_ok.get((vid, d), False):
-                    continue
-
-            # Нашли хотя бы один доступный день — площадка включается
-            available.add(vid)
-            break
-
-    return available
-
 
 def _load_bookings_for_week(
     org_id: int,
@@ -843,7 +712,7 @@ class LoadPage(QWidget):
         # ── Фильтрация: убираем площадки закрытые/вне сезона всю неделю ──
         all_venue_ids = list({r.venue_id for r in all_resources})
         try:
-            available_venue_ids = _load_available_venue_ids(
+            available_venue_ids = get_available_venue_ids_for_week(
                 all_venue_ids, week_start, week_end
             )
         except Exception:
