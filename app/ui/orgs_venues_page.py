@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
+from app.ui.badge_delegate import BadgeDelegate, BADGE_BG_ROLE
 from app.services.users_service import AuthUser
 from app.services.access_service import get_org_access
 
@@ -70,20 +71,16 @@ _COLOR_SEASON  = QColor("#4ECDC4")       # бирюзовый — есть се�
 _COLOR_BOTH    = QColor("#FF8C42")       # оранжевый — и закрытия, и сезонность
 _COLOR_INACTIVE = QColor("#AAAAAA")      # серый — неактивная запись
 
-
 def _make_badge_item(text: str, bg: QColor | None = None) -> QTableWidgetItem:
-    """Создаёт ячейку с цветным фоном для индикатора."""
+    """
+    Создаёт ячейку. Цвет бейджа кладём в BADGE_BG_ROLE —
+    BadgeDelegate сам нарисует бейдж поверх QSS.
+    """
     item = QTableWidgetItem(text)
     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    if bg:
-        item.setBackground(bg)
-        # Подбираем контрастный цвет текста
-        luminance = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
-        item.setForeground(
-            QColor("white") if luminance < 140 else QColor("#222222")
-        )
+    if bg is not None:
+        item.setData(BADGE_BG_ROLE, bg)
     return item
-
 
 class OrgsVenuesPage(QWidget):
     def __init__(self, user: AuthUser, parent=None):
@@ -142,7 +139,6 @@ class OrgsVenuesPage(QWidget):
         org_row2.addWidget(self.btn_org_closures)
         org_row2.addStretch(1)   # прижимаем кнопки влево
 
-        # Таблица учреждений: добавляем колонку "Закрытия"
         # Колонки: ID | Название | Адрес | Режим | Активен | Закрытия
         self.tbl_orgs = QTableWidget(0, 6)
         self.tbl_orgs.setObjectName("orgsTable")
@@ -152,6 +148,8 @@ class OrgsVenuesPage(QWidget):
         self._style_table(self.tbl_orgs)
         self.tbl_orgs.itemSelectionChanged.connect(self._on_org_selected)
         self.tbl_orgs.doubleClicked.connect(self._org_edit)
+        self._org_delegate = BadgeDelegate(self.tbl_orgs)
+        self.tbl_orgs.setItemDelegate(self._org_delegate)
 
         # Легенда для таблицы учреждений
         org_legend = self._make_legend([
@@ -232,6 +230,8 @@ class OrgsVenuesPage(QWidget):
         ])
         self._style_table(self.tbl_venues)
         self.tbl_venues.doubleClicked.connect(self._venue_edit)
+        self._venue_delegate = BadgeDelegate(self.tbl_venues)
+        self.tbl_venues.setItemDelegate(self._venue_delegate)
 
         # Легенда для таблицы площадок
         venue_legend = self._make_legend([
