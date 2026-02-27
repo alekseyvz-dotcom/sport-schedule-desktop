@@ -72,7 +72,14 @@
       </tr>
       {% endfor %}
       {% if not grid %}
-      <tr><td colspan="8" class="empty-row">Нет ресурсов</td></tr>
+      <tr>
+        <td colspan="8" class="empty-row">
+          Нет доступных ресурсов на эту неделю
+          <div style="font-size:12px; opacity:0.6; margin-top:4px;">
+            Все площадки закрыты или вне сезона
+          </div>
+        </td>
+      </tr>
       {% endif %}
     </tbody>
   </table>
