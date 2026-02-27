@@ -1,7 +1,7 @@
 # app/services/venue_status_service.py
 from __future__ import annotations
 import datetime
-from app.db import get_connection  # адаптируйте под ваш модуль подключения
+from app.db import get_conn, put_conn
 
 
 def has_active_org_closures(org_id: int) -> bool:
