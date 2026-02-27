@@ -1,60 +1,9 @@
 # app/services/venue_status_service.py
 from __future__ import annotations
+
 import datetime
+
 from app.db import get_conn, put_conn
-
-
-def has_active_org_closures(org_id: int) -> bool:
-    """Есть ли активные (будущие или текущие) закрытия учреждения."""
-    today = datetime.date.today()
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM org_closures
-                    WHERE org_id = %s AND is_active = true AND date_to >= %s
-                )
-                """,
-                (org_id, today),
-            )
-            return cur.fetchone()[0]
-
-
-def has_active_venue_closures(venue_id: int) -> bool:
-    """Есть ли активные (будущие или текущие) закрытия площадки."""
-    today = datetime.date.today()
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM venue_closures
-                    WHERE venue_id = %s AND is_active = true AND date_to >= %s
-                )
-                """,
-                (venue_id, today),
-            )
-            return cur.fetchone()[0]
-
-
-def has_venue_seasons(venue_id: int) -> bool:
-    """Есть ли настроенная сезонность у площадки."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM venue_season_templates
-                    WHERE venue_id = %s AND is_active = true
-                    UNION ALL
-                    SELECT 1 FROM venue_season_overrides
-                    WHERE venue_id = %s AND is_active = true
-                )
-                """,
-                (venue_id, venue_id),
-            )
-            return cur.fetchone()[0]
 
 
 def get_venue_statuses(venue_ids: list[int]) -> dict[int, dict]:
@@ -64,44 +13,61 @@ def get_venue_statuses(venue_ids: list[int]) -> dict[int, dict]:
     """
     if not venue_ids:
         return {}
-    
+
     today = datetime.date.today()
-    with get_connection() as conn:
+    # psycopg2 принимает list[int] как массив через ANY
+    ids = list(venue_ids)
+
+    conn = None
+    try:
+        conn = get_conn()
         with conn.cursor() as cur:
-            # Закрытия площадок
+
+            # --- Закрытия площадок (текущие и будущие) ---
             cur.execute(
                 """
-                SELECT DISTINCT venue_id FROM venue_closures
-                WHERE venue_id = ANY(%s) AND is_active = true AND date_to >= %s
+                SELECT DISTINCT venue_id
+                FROM public.venue_closures
+                WHERE venue_id = ANY(%s)
+                  AND is_active = true
+                  AND date_to >= %s
                 """,
-                (venue_ids, today),
+                (ids, today),
             )
             closed_venue_ids = {row[0] for row in cur.fetchall()}
-            
-            # Сезонность (шаблоны)
+
+            # --- Сезонность: шаблоны ---
             cur.execute(
                 """
-                SELECT DISTINCT venue_id FROM venue_season_templates
-                WHERE venue_id = ANY(%s) AND is_active = true
+                SELECT DISTINCT venue_id
+                FROM public.venue_season_templates
+                WHERE venue_id = ANY(%s)
+                  AND is_active = true
                 """,
-                (venue_ids,),
+                (ids,),
             )
             seasonal_venue_ids = {row[0] for row in cur.fetchall()}
-            
-            # Сезонность (переопределения)
+
+            # --- Сезонность: переопределения по годам ---
             cur.execute(
                 """
-                SELECT DISTINCT venue_id FROM venue_season_overrides
-                WHERE venue_id = ANY(%s) AND is_active = true
+                SELECT DISTINCT venue_id
+                FROM public.venue_season_overrides
+                WHERE venue_id = ANY(%s)
+                  AND is_active = true
                 """,
-                (venue_ids,),
+                (ids,),
             )
             seasonal_venue_ids |= {row[0] for row in cur.fetchall()}
+
+    finally:
+        if conn:
+            put_conn(conn)
 
     return {
         vid: {
             "has_closures": vid in closed_venue_ids,
-            "has_seasons": vid in seasonal_venue_ids,
+            "has_seasons":  vid in seasonal_venue_ids,
         }
         for vid in venue_ids
     }
@@ -109,21 +75,50 @@ def get_venue_statuses(venue_ids: list[int]) -> dict[int, dict]:
 
 def get_org_closure_statuses(org_ids: list[int]) -> dict[int, bool]:
     """
-    Пакетный запрос: есть ли активные закрытия у учреждений.
+    Пакетный запрос: есть ли активные (текущие/будущие) закрытия у учреждений.
     Возвращает {org_id: has_closures}
     """
     if not org_ids:
         return {}
+
     today = datetime.date.today()
-    with get_connection() as conn:
+    ids = list(org_ids)
+
+    conn = None
+    try:
+        conn = get_conn()
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT org_id FROM org_closures
-                WHERE org_id = ANY(%s) AND is_active = true AND date_to >= %s
+                SELECT DISTINCT org_id
+                FROM public.org_closures
+                WHERE org_id = ANY(%s)
+                  AND is_active = true
+                  AND date_to >= %s
                 """,
-                (org_ids, today),
+                (ids, today),
             )
             closed_org_ids = {row[0] for row in cur.fetchall()}
-    
+    finally:
+        if conn:
+            put_conn(conn)
+
     return {oid: oid in closed_org_ids for oid in org_ids}
+
+
+def has_active_org_closures(org_id: int) -> bool:
+    """Есть ли активные (текущие/будущие) закрытия учреждения."""
+    result = get_org_closure_statuses([org_id])
+    return result.get(org_id, False)
+
+
+def has_active_venue_closures(venue_id: int) -> bool:
+    """Есть ли активные (текущие/будущие) закрытия площадки."""
+    result = get_venue_statuses([venue_id])
+    return result.get(venue_id, {}).get("has_closures", False)
+
+
+def has_venue_seasons(venue_id: int) -> bool:
+    """Есть ли настроенная сезонность у площадки."""
+    result = get_venue_statuses([venue_id])
+    return result.get(venue_id, {}).get("has_seasons", False)
