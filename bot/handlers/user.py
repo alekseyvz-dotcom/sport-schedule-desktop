@@ -37,7 +37,7 @@ def resource_keyboard(resources):
         )]
         for r in resources
     ]
-    buttons.append([InlineKeyboardButton(text="\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434", callback_data="back:org")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:org")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -48,7 +48,7 @@ def date_keyboard():
     for i in range(settings.MAX_DAYS_AHEAD):
         d = today + timedelta(days=i)
         if i == 0:
-            label = "\u0421\u0435\u0433\u043e\u0434\u043d\u044f"
+            label = "Сегодня"
         else:
             label = "{} ({})".format(d.strftime("%d.%m"), WEEKDAYS[d.weekday()])
         row.append(InlineKeyboardButton(
@@ -59,7 +59,7 @@ def date_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434", callback_data="back:resource")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:resource")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -67,7 +67,7 @@ def slots_keyboard(slots, mode="start"):
     free_slots = [s for s in slots if s["free"]]
     if not free_slots:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u25c0\ufe0f \u0414\u0440\u0443\u0433\u0430\u044f \u0434\u0430\u0442\u0430", callback_data="back:date")]
+            [InlineKeyboardButton(text="◀️ Другая дата", callback_data="back:date")]
         ])
 
     cb_prefix = "sstart" if mode == "start" else "send"
@@ -90,23 +90,23 @@ def slots_keyboard(slots, mode="start"):
         back_cb = "back:date"
     else:
         back_cb = "back:slot_start"
-    buttons.append([InlineKeyboardButton(text="\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434", callback_data=back_cb)])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def confirm_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="\u2705 \u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c", callback_data="confirm:yes"),
-            InlineKeyboardButton(text="\u274c \u041e\u0442\u043c\u0435\u043d\u0430", callback_data="confirm:no"),
+            InlineKeyboardButton(text="✅ Отправить", callback_data="confirm:yes"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="confirm:no"),
         ],
-        [InlineKeyboardButton(text="\u25c0\ufe0f \u041d\u0430\u0447\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e", callback_data="restart")],
+        [InlineKeyboardButton(text="◀️ Начать заново", callback_data="restart")],
     ])
 
 
 def skip_keyboard(field):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="\u041f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u25b6\ufe0f", callback_data="skip:{}".format(field))]
+        [InlineKeyboardButton(text="Пропустить ▶️", callback_data="skip:{}".format(field))]
     ])
 
 
@@ -114,12 +114,12 @@ def skip_keyboard(field):
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     text = (
-        "\ud83c\udfdf <b>\u0411\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u043e\u043a</b>\n\n"
-        "\u042f \u043f\u043e\u043c\u043e\u0433\u0443 \u0437\u0430\u0431\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u043f\u043e\u0440\u0442\u0438\u0432\u043d\u0443\u044e \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443.\n\n"
-        "\ud83d\udccc \u041a\u043e\u043c\u0430\u043d\u0434\u044b:\n"
-        "/book \u2014 \u0437\u0430\u0431\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u0442\u044c\n"
-        "/my \u2014 \u043c\u043e\u0438 \u0437\u0430\u044f\u0432\u043a\u0438\n"
-        "/help \u2014 \u043f\u043e\u043c\u043e\u0449\u044c"
+        "🏟 <b>Бронирование площадок</b>\n\n"
+        "Я помогу забронировать спортивную площадку.\n\n"
+        "📌 Команды:\n"
+        "/book — забронировать\n"
+        "/my — мои заявки\n"
+        "/help — помощь"
     )
     await message.answer(text, reply_markup=ReplyKeyboardRemove())
 
@@ -127,14 +127,14 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     text = (
-        "\ud83d\udcd6 <b>\u041a\u0430\u043a \u044d\u0442\u043e \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442:</b>\n\n"
-        "1\ufe0f\u20e3 \u041d\u0430\u0436\u043c\u0438\u0442\u0435 /book\n"
-        "2\ufe0f\u20e3 \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435 \u0438 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443\n"
-        "3\ufe0f\u20e3 \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0430\u0442\u0443 \u0438 \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f\n"
-        "4\ufe0f\u20e3 \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435\n"
-        "5\ufe0f\u20e3 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0437\u0430\u044f\u0432\u043a\u0443\n\n"
-        "\u0421\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a \u043f\u043e\u043b\u0443\u0447\u0438\u0442 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435 \u0438 \u0441\u0432\u044f\u0436\u0435\u0442\u0441\u044f \u0441 \u0432\u0430\u043c\u0438.\n"
-        "\u0421\u0442\u0430\u0442\u0443\u0441 \u0437\u0430\u044f\u0432\u043a\u0438 \u043c\u043e\u0436\u043d\u043e \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c: /my"
+        "📖 <b>Как это работает:</b>\n\n"
+        "1️⃣ Нажмите /book\n"
+        "2️⃣ Выберите учреждение и площадку\n"
+        "3️⃣ Выберите дату и свободное время\n"
+        "4️⃣ Введите контактные данные\n"
+        "5️⃣ Подтвердите заявку\n\n"
+        "Сотрудник получит уведомление и свяжется с вами.\n"
+        "Статус заявки можно проверить: /my"
     )
     await message.answer(text)
 
@@ -144,7 +144,7 @@ async def cmd_book(message: Message, state: FSMContext):
     await state.clear()
     orgs = db.load_orgs()
     if not orgs:
-        await message.answer("\ud83d\ude14 \u041d\u0435\u0442 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0445 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0439.")
+        await message.answer("😔 Нет доступных учреждений.")
         return
 
     if len(orgs) == 1:
@@ -152,44 +152,44 @@ async def cmd_book(message: Message, state: FSMContext):
         await state.update_data(org_id=org["id"], org_name=org["name"])
         resources = db.load_resources(org["id"])
         if not resources:
-            await message.answer("\ud83d\ude14 \u041d\u0435\u0442 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0445 \u043f\u043b\u043e\u0449\u0430\u0434\u043e\u043a.")
+            await message.answer("😔 Нет доступных площадок.")
             return
         await state.set_state(BookingFlow.choose_resource)
-        text = "\ud83c\udfe2 <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443:".format(org["name"])
+        text = "🏢 <b>{}</b>\n\nВыберите площадку:".format(org["name"])
         await message.answer(text, reply_markup=resource_keyboard(resources))
         return
 
     await state.set_state(BookingFlow.choose_org)
-    await message.answer("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435:", reply_markup=org_keyboard(orgs))
+    await message.answer("Выберите учреждение:", reply_markup=org_keyboard(orgs))
 
 
 @router.message(Command("my"))
 async def cmd_my(message: Message):
     rows = db.get_user_requests(message.from_user.id)
     if not rows:
-        await message.answer("\u0423 \u0432\u0430\u0441 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0437\u0430\u044f\u0432\u043e\u043a. \u041d\u0430\u0436\u043c\u0438\u0442\u0435 /book")
+        await message.answer("У вас пока нет заявок. Нажмите /book")
         return
 
     status_emoji = {
-        "new": "\ud83c\udd95",
-        "confirmed": "\u2705",
-        "rejected": "\u274c",
-        "cancelled": "\ud83d\udeab",
+        "new": "🆕",
+        "confirmed": "✅",
+        "rejected": "❌",
+        "cancelled": "🚫",
     }
 
-    lines = ["\ud83d\udccb <b>\u0412\u0430\u0448\u0438 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 \u0437\u0430\u044f\u0432\u043a\u0438:</b>\n"]
+    lines = ["📋 <b>Ваши последние заявки:</b>\n"]
     for r in rows:
         venue = r["venue_name"]
         if r["unit_name"]:
-            venue = venue + " \u2014 " + r["unit_name"]
-        emoji = status_emoji.get(r["status"], "\u2753")
+            venue = venue + " — " + r["unit_name"]
+        emoji = status_emoji.get(r["status"], "❓")
         comment = ""
         if r["staff_comment"]:
-            comment = "\n   \ud83d\udcac " + r["staff_comment"]
+            comment = "\n   💬 " + r["staff_comment"]
         date_str = r["desired_date"].strftime("%d.%m.%Y")
         start_str = r["desired_start"].strftime("%H:%M")
         end_str = r["desired_end"].strftime("%H:%M")
-        line = "{} <b>#{}</b>  {} {}\u2013{}\n   \ud83d\udccd {}{}".format(
+        line = "{} <b>#{}</b>  {} {}–{}\n   📍 {}{}".format(
             emoji, r["id"], date_str, start_str, end_str, venue, comment
         )
         lines.append(line)
@@ -202,17 +202,17 @@ async def on_org(cb: CallbackQuery, state: FSMContext):
     org_id = int(cb.data.split(":")[1])
     org = db.get_org(org_id)
     if not org:
-        await cb.answer("\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e", show_alert=True)
+        await cb.answer("Не найдено", show_alert=True)
         return
 
     await state.update_data(org_id=org_id, org_name=org["name"])
     resources = db.load_resources(org_id)
     if not resources:
-        await cb.answer("\u041d\u0435\u0442 \u043f\u043b\u043e\u0449\u0430\u0434\u043e\u043a", show_alert=True)
+        await cb.answer("Нет площадок", show_alert=True)
         return
 
     await state.set_state(BookingFlow.choose_resource)
-    text = "\ud83c\udfe2 <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443:".format(org["name"])
+    text = "🏢 <b>{}</b>\n\nВыберите площадку:".format(org["name"])
     await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
     await cb.answer()
 
@@ -232,7 +232,7 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         None,
     )
     if not resource:
-        await cb.answer("\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e", show_alert=True)
+        await cb.answer("Не найдено", show_alert=True)
         return
 
     await state.update_data(
@@ -241,7 +241,7 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         resource_name=resource["name"],
     )
     await state.set_state(BookingFlow.choose_date)
-    text = "\ud83d\udccd <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0430\u0442\u0443:".format(resource["name"])
+    text = "📍 <b>{}</b>\n\nВыберите дату:".format(resource["name"])
     await cb.message.edit_text(text, reply_markup=date_keyboard())
     await cb.answer()
 
@@ -252,7 +252,7 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if not db.is_venue_available(data["venue_id"], data["org_id"], d):
-        await cb.answer("\u274c \u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0430 \u0437\u0430\u043a\u0440\u044b\u0442\u0430 \u0432 \u044d\u0442\u043e\u0442 \u0434\u0435\u043d\u044c", show_alert=True)
+        await cb.answer("❌ Площадка закрыта в этот день", show_alert=True)
         return
 
     slots = db.compute_free_slots(
@@ -261,7 +261,7 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
     free_count = sum(1 for s in slots if s["free"])
 
     if free_count == 0:
-        await cb.answer("\ud83d\ude14 \u041d\u0435\u0442 \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u0445 \u0441\u043b\u043e\u0442\u043e\u0432", show_alert=True)
+        await cb.answer("😔 Нет свободных слотов", show_alert=True)
         return
 
     date_label = "{} ({})".format(d.strftime("%d.%m.%Y"), WEEKDAYS[d.weekday()])
@@ -276,7 +276,7 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
         ],
     )
     await state.set_state(BookingFlow.choose_slot_start)
-    text = "\ud83d\udccd {}\n\ud83d\udcc5 {}\n\n\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u0445 \u0441\u043b\u043e\u0442\u043e\u0432: {}\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 <b>\u043d\u0430\u0447\u0430\u043b\u043e</b>:".format(
+    text = "📍 {}\n📅 {}\n\nСвободных слотов: {}\nВыберите <b>начало</b>:".format(
         data["resource_name"], date_label, free_count
     )
     await cb.message.edit_text(text, reply_markup=slots_keyboard(slots, mode="start"))
@@ -300,14 +300,14 @@ async def on_slot_start(cb: CallbackQuery, state: FSMContext):
         end_options.append(all_slots[i])
 
     if not end_options:
-        await cb.answer("\u041d\u0435\u0442 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u043e\u0432", show_alert=True)
+        await cb.answer("Нет вариантов", show_alert=True)
         return
 
     buttons = []
     row = []
     for s in end_options:
         row.append(InlineKeyboardButton(
-            text="\u0434\u043e {}".format(s["end"]),
+            text="до {}".format(s["end"]),
             callback_data="send:{}".format(s["end"]),
         ))
         if len(row) == 3:
@@ -315,11 +315,11 @@ async def on_slot_start(cb: CallbackQuery, state: FSMContext):
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434", callback_data="back:slot_start")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")])
 
     await state.update_data(slot_start=start_str)
     await state.set_state(BookingFlow.choose_slot_end)
-    text = "\ud83d\udccd {}\n\ud83d\udcc5 {}\n\ud83d\udd50 \u041d\u0430\u0447\u0430\u043b\u043e: <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 <b>\u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u0435</b>:".format(
+    text = "📍 {}\n📅 {}\n🕐 Начало: <b>{}</b>\n\nВыберите <b>окончание</b>:".format(
         data["resource_name"], data["date_label"], start_str
     )
     await cb.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -333,7 +333,7 @@ async def on_slot_end(cb: CallbackQuery, state: FSMContext):
 
     await state.update_data(slot_end=end_str)
     await state.set_state(BookingFlow.enter_name)
-    text = "\ud83d\udccd {}\n\ud83d\udcc5 {}\n\ud83d\udd50 {} \u2013 {}\n\n\u0412\u0432\u0435\u0434\u0438\u0442\u0435 <b>\u0432\u0430\u0448\u0435 \u0438\u043c\u044f</b> (\u0424\u0418\u041e):".format(
+    text = "📍 {}\n📅 {}\n🕐 {} – {}\n\nВведите <b>ваше имя</b> (ФИО):".format(
         data["resource_name"], data["date_label"], data["slot_start"], end_str
     )
     await cb.message.edit_text(text)
@@ -344,12 +344,12 @@ async def on_slot_end(cb: CallbackQuery, state: FSMContext):
 async def on_name(message: Message, state: FSMContext):
     name = message.text.strip()
     if len(name) < 2:
-        await message.answer("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e\u0435 \u0438\u043c\u044f (\u043c\u0438\u043d\u0438\u043c\u0443\u043c 2 \u0441\u0438\u043c\u0432\u043e\u043b\u0430):")
+        await message.answer("Введите корректное имя (минимум 2 символа):")
         return
 
     await state.update_data(contact_name=name)
     await state.set_state(BookingFlow.enter_phone)
-    text = "\ud83d\udc64 {}\n\n\u0412\u0432\u0435\u0434\u0438\u0442\u0435 <b>\u043d\u043e\u043c\u0435\u0440 \u0442\u0435\u043b\u0435\u0444\u043e\u043d\u0430</b> \u0434\u043b\u044f \u0441\u0432\u044f\u0437\u0438:".format(name)
+    text = "👤 {}\n\nВведите <b>номер телефона</b> для связи:".format(name)
     await message.answer(text, reply_markup=skip_keyboard("phone"))
 
 
@@ -358,7 +358,7 @@ async def skip_phone(cb: CallbackQuery, state: FSMContext):
     await state.update_data(contact_phone=None)
     await state.set_state(BookingFlow.enter_comment)
     await cb.message.edit_text(
-        "\u0425\u043e\u0442\u0438\u0442\u0435 \u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c <b>\u043a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439</b>?\n(\u0446\u0435\u043b\u044c \u0430\u0440\u0435\u043d\u0434\u044b, \u043f\u043e\u0436\u0435\u043b\u0430\u043d\u0438\u044f)",
+        "Хотите оставить <b>комментарий</b>?\n(цель аренды, пожелания)",
         reply_markup=skip_keyboard("comment"),
     )
     await cb.answer()
@@ -369,7 +369,7 @@ async def on_phone(message: Message, state: FSMContext):
     await state.update_data(contact_phone=message.text.strip())
     await state.set_state(BookingFlow.enter_comment)
     await message.answer(
-        "\u0425\u043e\u0442\u0438\u0442\u0435 \u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c <b>\u043a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439</b>?\n(\u0446\u0435\u043b\u044c \u0430\u0440\u0435\u043d\u0434\u044b, \u043f\u043e\u0436\u0435\u043b\u0430\u043d\u0438\u044f)",
+        "Хотите оставить <b>комментарий</b>?\n(цель аренды, пожелания)",
         reply_markup=skip_keyboard("comment"),
     )
 
@@ -397,20 +397,20 @@ async def _show_confirm(msg, state, edit):
     slot_start = data["slot_start"]
     slot_end = data["slot_end"]
     name = data["contact_name"]
-    phone = data.get("contact_phone") or "\u2014"
-    comment = data.get("message") or "\u2014"
+    phone = data.get("contact_phone") or "—"
+    comment = data.get("message") or "—"
 
     text = (
-        "\ud83d\udccb <b>\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0437\u0430\u044f\u0432\u043a\u0443:</b>\n\n"
-        + "\ud83c\udfe2 " + org_name + "\n"
-        + "\ud83d\udccd " + resource + "\n"
-        + "\ud83d\udcc5 " + date_label + "\n"
-        + "\ud83d\udd50 " + slot_start + " \u2013 " + slot_end + "\n\n"
-        + "\ud83d\udc64 " + name + "\n"
-        + "\ud83d\udcde " + phone + "\n"
-        + "\ud83d\udcac " + comment + "\n\n"
-        + "\u0412\u0441\u0451 \u0432\u0435\u0440\u043d\u043e?"
-    )
+        "📋 <b>Проверьте заявку:</b>\n\n"
+        "🏢 {}\n"
+        "📍 {}\n"
+        "📅 {}\n"
+        "🕐 {} – {}\n\n"
+        "👤 {}\n"
+        "📞 {}\n"
+        "💬 {}\n\n"
+        "Всё верно?"
+    ).format(org_name, resource, date_label, slot_start, slot_end, name, phone, comment)
 
     if edit:
         await msg.edit_text(text, reply_markup=confirm_keyboard())
@@ -445,20 +445,20 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
     except Exception:
         log.exception("Failed to save request")
         await cb.message.edit_text(
-            "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435.\n/book"
+            "❌ Ошибка сохранения. Попробуйте позже.\n/book"
         )
         await state.clear()
         await cb.answer()
         return
 
     ok_text = (
-        "\u2705 <b>\u0417\u0430\u044f\u0432\u043a\u0430 #{} \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430!</b>\n\n"
-        + "\ud83d\udccd " + data["resource_name"] + "\n"
-        + "\ud83d\udcc5 " + data["date_label"] + "\n"
-        + "\ud83d\udd50 " + data["slot_start"] + " \u2013 " + data["slot_end"] + "\n\n"
-        + "\u0421\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a \u0441\u0432\u044f\u0436\u0435\u0442\u0441\u044f \u0441 \u0432\u0430\u043c\u0438.\n"
-        + "\u0421\u0442\u0430\u0442\u0443\u0441 \u0437\u0430\u044f\u0432\u043a\u0438: /my"
-    ).format(req_id)
+        "✅ <b>Заявка #{} отправлена!</b>\n\n"
+        "📍 {}\n"
+        "📅 {}\n"
+        "🕐 {} – {}\n\n"
+        "Сотрудник свяжется с вами.\n"
+        "Статус заявки: /my"
+    ).format(req_id, data["resource_name"], data["date_label"], data["slot_start"], data["slot_end"])
 
     await cb.message.edit_text(ok_text)
     await state.clear()
@@ -466,31 +466,35 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
 
     staff_ids = db.get_staff_chat_ids(data["org_id"])
     if staff_ids:
-        username = cb.from_user.username or "\u2014"
-        phone = data.get("contact_phone") or "\u2014"
-        comment = data.get("message") or "\u2014"
+        username = cb.from_user.username or "—"
+        phone = data.get("contact_phone") or "—"
+        comment = data.get("message") or "—"
         org_name = data.get("org_name", "")
 
         staff_text = (
-            "\ud83d\udccb <b>\u041d\u043e\u0432\u0430\u044f \u0437\u0430\u044f\u0432\u043a\u0430 #{}</b>\n\n"
-            + "\ud83c\udfe2 " + org_name + "\n"
-            + "\ud83d\udccd " + data["resource_name"] + "\n"
-            + "\ud83d\udcc5 " + data["date_label"] + "\n"
-            + "\ud83d\udd50 " + data["slot_start"] + " \u2013 " + data["slot_end"] + "\n\n"
-            + "\ud83d\udc64 " + data["contact_name"] + "\n"
-            + "\ud83d\udcde " + phone + "\n"
-            + "\ud83d\udcac " + comment + "\n"
-            + "\ud83c\udd94 @" + username
-        ).format(req_id)
+            "📋 <b>Новая заявка #{}</b>\n\n"
+            "🏢 {}\n"
+            "📍 {}\n"
+            "📅 {}\n"
+            "🕐 {} – {}\n\n"
+            "👤 {}\n"
+            "📞 {}\n"
+            "💬 {}\n"
+            "🆔 @{}"
+        ).format(
+            req_id, org_name, data["resource_name"], data["date_label"],
+            data["slot_start"], data["slot_end"], data["contact_name"],
+            phone, comment, username
+        )
 
         staff_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="\u2705 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c",
+                    text="✅ Подтвердить",
                     callback_data="staff:confirm:{}".format(req_id),
                 ),
                 InlineKeyboardButton(
-                    text="\u274c \u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c",
+                    text="❌ Отклонить",
                     callback_data="staff:reject:{}".format(req_id),
                 ),
             ],
@@ -505,7 +509,7 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
 @router.callback_query(BookingFlow.confirm, F.data == "confirm:no")
 async def on_cancel(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text("\ud83d\udeab \u041e\u0442\u043c\u0435\u043d\u0435\u043d\u043e.\n\n/book \u2014 \u043d\u0430\u0447\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e")
+    await cb.message.edit_text("🚫 Отменено.\n\n/book — начать заново")
     await cb.answer()
 
 
@@ -518,15 +522,15 @@ async def on_restart(cb: CallbackQuery, state: FSMContext):
         await state.update_data(org_id=org["id"], org_name=org["name"])
         resources = db.load_resources(org["id"])
         await state.set_state(BookingFlow.choose_resource)
-        text = "\ud83c\udfe2 <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443:".format(org["name"])
+        text = "🏢 <b>{}</b>\n\nВыберите площадку:".format(org["name"])
         await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
     elif orgs:
         await state.set_state(BookingFlow.choose_org)
         await cb.message.edit_text(
-            "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435:", reply_markup=org_keyboard(orgs)
+            "Выберите учреждение:", reply_markup=org_keyboard(orgs)
         )
     else:
-        await cb.message.edit_text("\ud83d\ude14 \u041d\u0435\u0442 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0439.")
+        await cb.message.edit_text("😔 Нет учреждений.")
     await cb.answer()
 
 
@@ -535,7 +539,7 @@ async def back_org(cb: CallbackQuery, state: FSMContext):
     orgs = db.load_orgs()
     await state.set_state(BookingFlow.choose_org)
     await cb.message.edit_text(
-        "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0443\u0447\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435:", reply_markup=org_keyboard(orgs)
+        "Выберите учреждение:", reply_markup=org_keyboard(orgs)
     )
     await cb.answer()
 
@@ -545,7 +549,7 @@ async def back_resource(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     resources = db.load_resources(data["org_id"])
     await state.set_state(BookingFlow.choose_resource)
-    text = "\ud83c\udfe2 <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443:".format(data.get("org_name", ""))
+    text = "🏢 <b>{}</b>\n\nВыберите площадку:".format(data.get("org_name", ""))
     await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
     await cb.answer()
 
@@ -554,7 +558,7 @@ async def back_resource(cb: CallbackQuery, state: FSMContext):
 async def back_date(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await state.set_state(BookingFlow.choose_date)
-    text = "\ud83d\udccd <b>{}</b>\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0430\u0442\u0443:".format(data["resource_name"])
+    text = "📍 <b>{}</b>\n\nВыберите дату:".format(data["resource_name"])
     await cb.message.edit_text(text, reply_markup=date_keyboard())
     await cb.answer()
 
@@ -564,7 +568,7 @@ async def back_slot_start(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     slots = data.get("slots_cache", [])
     await state.set_state(BookingFlow.choose_slot_start)
-    text = "\ud83d\udccd {}\n\ud83d\udcc5 {}\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 <b>\u043d\u0430\u0447\u0430\u043b\u043e</b>:".format(
+    text = "📍 {}\n📅 {}\n\nВыберите <b>начало</b>:".format(
         data["resource_name"], data["date_label"]
     )
     await cb.message.edit_text(text, reply_markup=slots_keyboard(slots, mode="start"))
