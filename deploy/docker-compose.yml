@@ -16,6 +16,17 @@ services:
     networks:
       - sport-net
 
+  bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.bot
+    container_name: sport-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - sport-net
+
   nginx:
     image: nginx:alpine
     container_name: sport-nginx
