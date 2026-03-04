@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta, time
+from datetime import date, timedelta, time, datetime
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
@@ -21,26 +21,67 @@ log = logging.getLogger(__name__)
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
-# Варианты длительности бронирования (в минутах)
+# Варианты длительности бронирования (минуты)
 DURATION_OPTIONS = [30, 60, 90, 120, 150, 180]
+
+ORG_BRAND = "Московская футбольная академия"
+
+
+# ───────────────────────── UI helpers ─────────────────────────
+
+def _fmt_hhmm(t: time) -> str:
+    return t.strftime("%H:%M")
+
+
+def _org_hours(org: dict) -> str:
+    if org.get("is_24h"):
+        return "круглосуточно"
+    ws = org.get("work_start")
+    we = org.get("work_end")
+    if ws and we:
+        return f"{_fmt_hhmm(ws)}–{_fmt_hhmm(we)}"
+    return "—"
+
+
+def org_card(org: dict, with_title: bool = True) -> str:
+    name = org.get("name") or "—"
+    addr = org.get("address") or "—"
+    hours = _org_hours(org)
+    if with_title:
+        return (
+            f"⚽ <b>{ORG_BRAND}</b>\n"
+            f"🏢 <b>{name}</b>\n"
+            f"📍 <i>{addr}</i>\n"
+            f"🕒 Часы работы: <b>{hours}</b>"
+        )
+    return (
+        f"🏢 <b>{name}</b>\n"
+        f"📍 <i>{addr}</i>\n"
+        f"🕒 Часы работы: <b>{hours}</b>"
+    )
+
+
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Создать заявку", callback_data="menu:book")],
+        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="menu:my")],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu:help")],
+    ])
 
 
 def org_keyboard(orgs):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=o["name"], callback_data="org:{}".format(o["id"]))]
+        [InlineKeyboardButton(text=o["name"], callback_data=f"org:{o['id']}")]
         for o in orgs
     ])
 
 
 def resource_keyboard(resources):
     buttons = [
-        [InlineKeyboardButton(
-            text=r["name"],
-            callback_data="res:{}".format(r["venue_id"]),
-        )]
+        [InlineKeyboardButton(text=r["name"], callback_data=f"res:{r['venue_id']}")]
         for r in resources
     ]
-    buttons.append([InlineKeyboardButton(text="< Назад", callback_data="back:org")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:org")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -52,181 +93,295 @@ def date_keyboard():
         d = today + timedelta(days=i)
         if i == 0:
             label = "Сегодня"
+        elif i == 1:
+            label = "Завтра"
         else:
-            label = "{} ({})".format(d.strftime("%d.%m"), WEEKDAYS[d.weekday()])
-        row.append(InlineKeyboardButton(
-            text=label, callback_data="date_{}".format(d.isoformat())
-        ))
+            label = f"{d.strftime('%d.%m')} ({WEEKDAYS[d.weekday()]})"
+
+        row.append(InlineKeyboardButton(text=label, callback_data=f"date_{d.isoformat()}"))
         if len(row) == 3:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="< Назад", callback_data="back:resource")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:resource")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def slots_keyboard(slots):
-    """Клавиатура выбора времени НАЧАЛА"""
-    free_slots = [s for s in slots if s["free"]]
+def slots_keyboard(slots_cache):
+    """Выбор времени начала."""
+    free_slots = [s for s in slots_cache if s["free"]]
     if not free_slots:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="< Другая дата", callback_data="back:date")]
+            [InlineKeyboardButton(text="◀️ Другая дата", callback_data="back:date")]
         ])
 
     buttons = []
     row = []
-    for s in free_slots:
-        if hasattr(s["start"], "strftime"):
-            label = s["start"].strftime("%H-%M")
-        else:
-            label = s["start"].replace(":", "-")
-        row.append(InlineKeyboardButton(
-            text=label.replace("-", ":"),
-            callback_data="sstart_{}".format(label),
-        ))
+   :MM
+        label = _time_display(s["start"])
+        row.append(InlineKeyboardButton(text=label, callback_data=f"slot_{s['start']}"))
         if len(row) == 4:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="< Назад", callback_data="back:date")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:date")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def duration_keyboard(available_minutes: list[int]):
-    """Клавиатура выбора длительности"""
+def duration_keyboard(slot_start_str, slots_cache, org_work_end):
+    """Выбор длительности (мин/ч), чтобы не показывать странные end-времена."""
+    sh, sm = map(int, slot_start_str.split("-"))
+    start_minutes = sh * 60 + sm
+
+    if org_work_end:
+        work_end_minutes = org_work_end.hour * 60 + org_work_end.minute
+    else:
+        work_end_minutes = 24 * 60
+
+    start_idx = next((i for i, s in enumerate(slots_cache) if s["start"] == slot_start_str), None)
+
+    max_free_minutes = 0
+    if start_idx is not None:
+        # сколько подряд free слотов доступно
+        for i in range(start_idx, len(slots_cache)):
+            if not slots_cache[i]["free"]:
+                break
+            max_free_minutes += settings.SLOT_MINUTES
+
+        max_slots = min(settings.MAX_BOOKING_SLOTS, len(slots_cache) - start_idx)
+        max_free_minutes = min(max_free_minutes, max_slots * settings.SLOT_MINUTES)
+
+    # ограничим по work_end
+    if work_end_minutes > start_minutes:
+        max_free_minutes = min(max_free_minutes, work_end_minutes - start_minutes)
+
     buttons = []
     row = []
-    for mins in available_minutes:
-        if mins < 60:
-            label = "{} мин".format(mins)
-        elif mins % 60 == 0:
-            label = "{} ч".format(mins // 60)
-        else:
-            label = "{}:{:02d}".format(mins // 60, mins % 60)
+    for dur in DURATION_OPTIONS:
+        if dur > max_free_minutes:
+            break
+
+        end_total = start_minutes + dur
+        end_h = end_total // 60
+        end_m = end_total % 60
+        if end_h >= 24:
+            break
+
+        end_str = f"{end_h:02d}-{end_m:02d}"
         row.append(InlineKeyboardButton(
-            text=label,
-            callback_data="dur_{}".format(mins),
+            text=_format_duration(dur),
+            callback_data=f"dur_{end_str}",
         ))
         if len(row) == 3:
             buttons.append(row)
             row = []
+
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="< Назад", callback_data="back:slot_start")])
+
+    if not buttons:
+        # минимальный вариант — 1 слот
+        end_total = start_minutes + settings.SLOT_MINUTES
+        end_str = f"{end_total // 60:02d}-{end_total % 60:02d}"
+        buttons = [[InlineKeyboardButton(text=_format_duration(settings.SLOT_MINUTES), callback_data=f"dur_{end_str}")]]
+
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _format_duration(minutes):
+    if minutes < 60:
+        return f"{minutes} мин"
+    h = minutes // 60
+    m = minutes % 60
+    if m == 0:
+        return f"{h} ч"
+    return f"{h} ч {m} мин"
 
 
 def confirm_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Отправить", callback_data="confirm:yes"),
-            InlineKeyboardButton(text="Отмена", callback_data="confirm:no"),
+            InlineKeyboardButton(text="✅ Отправить", callback_data="confirm:yes"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="confirm:no"),
         ],
-        [InlineKeyboardButton(text="< Начать заново", callback_data="restart")],
+        [InlineKeyboardButton(text="🔄 Начать заново", callback_data="restart")],
+    ])
+
+
+def after_success_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Новая заявка", callback_data="restart")],
+        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="menu:my")],
     ])
 
 
 def skip_keyboard(field):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пропустить >", callback_data="skip:{}".format(field))]
+        [InlineKeyboardButton(text="Пропустить ▶️", callback_data=f"skip:{field}")]
     ])
 
 
-# ---------- /start ----------
+# ─── Time encoding helpers (callback_data safe: HH-MM) ───
+
+def _time_display(hhmm_str):
+    return hhmm_str.replace("-", ":")
+
+
+def _parse_time(hhmm_str):
+    h, m = map(int, hhmm_str.split("-"))
+    return time(h, m)
+
+
+# ───────────────────────── Commands / Menu ─────────────────────────
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     text = (
-        "Бронирование площадок\n\n"
-        "Я помогу забронировать спортивную площадку.\n\n"
-        "Команды:\n"
-        "/book - забронировать\n"
-        "/my - мои заявки\n"
-        "/help - помощь"
+        f"⚽ <b>{ORG_BRAND}</b>\n"
+        f"<b>Бронирование залов и площадок</b>\n\n"
+        "Выберите действие:"
+    )
+    await message.answer(text, reply_markup=main_menu_keyboard())
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    text = (
+        "ℹ️ <b>Как работает бронирование</b>\n\n"
+        "1) Выберите учреждение и площадку\n"
+        "2) Выберите дату и время начала\n"
+        "3) Укажите длительность\n"
+        "4) Оставьте контакты\n"
+        "5) Подтвердите отправку заявки\n\n"
+        "После отправки заявка поступает администратору.\n"
+        "Статусы и история: /my"
     )
     await message.answer(text, reply_markup=ReplyKeyboardRemove())
 
 
-# ---------- /help ----------
-@router.message(Command("help"))
-async def cmd_help(message: Message):
-    text = (
-        "<b>Как это работает:</b>\n\n"
-        "1. Нажмите /book\n"
-        "2. Выберите учреждение и площадку\n"
-        "3. Выберите дату и свободное время\n"
-        "4. Выберите длительность\n"
-        "5. Введите контактные данные\n"
-        "6. Подтвердите заявку\n\n"
-        "Сотрудник получит уведомление и свяжется с вами.\n"
-        "Статус заявки: /my"
-    )
-    await message.answer(text)
-
-
-# ---------- /book ----------
 @router.message(Command("book"))
 async def cmd_book(message: Message, state: FSMContext):
-    await state.clear()
-    orgs = db.load_orgs()
-    if not orgs:
-        await message.answer("Нет доступных учреждений.")
-        return
-
-    if len(orgs) == 1:
-        org = orgs[0]
-        await state.update_data(org_id=org["id"], org_name=org["name"])
-        resources = db.load_resources(org["id"])
-        if not resources:
-            await message.answer("Нет доступных площадок.")
-            return
-        await state.set_state(BookingFlow.choose_resource)
-        text = "<b>{}</b>\n\nВыберите площадку:".format(org["name"])
-        await message.answer(text, reply_markup=resource_keyboard(resources))
-        return
-
-    await state.set_state(BookingFlow.choose_org)
-    await message.answer("Выберите учреждение:", reply_markup=org_keyboard(orgs))
+    await _start_booking(message, state)
 
 
-# ---------- /my ----------
 @router.message(Command("my"))
 async def cmd_my(message: Message):
-    rows = db.get_user_requests(message.from_user.id)
+    await _send_my_requests(message.from_user.id, message)
+
+
+@router.callback_query(F.data == "menu:book")
+async def menu_book(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await _start_booking(cb.message, state, edit=True)
+
+
+@router.callback_query(F.data == "menu:help")
+async def menu_help(cb: CallbackQuery):
+    await cb.answer()
+    text = (
+        "ℹ️ <b>Как работает бронирование</b>\n\n"
+        "1) Выберите учреждение и площадку\n"
+        "2) Выберите дату и время начала\n"
+        "3) Укажите длительность\n"
+        "4) Оставьте контакты\n"
+        "5) Подтвердите отправку заявки\n\n"
+        "После отправки заявка поступает администратору.\n"
+        "Статусы и история: /my"
+    )
+    await cb.message.edit_text(text)
+
+
+@router.callback_query(F.data == "menu:my")
+async def menu_my(cb: CallbackQuery):
+    await cb.answer()
+    await _send_my_requests(cb.from_user.id, cb.message, edit=True)
+
+
+async def _send_my_requests(telegram_user_id: int, msg: Message, edit: bool = False):
+    rows = db.get_user_requests(telegram_user_id)
     if not rows:
-        await message.answer("У вас пока нет заявок. Нажмите /book")
+        text = "📋 <b>Мои заявки</b>\n\nПока заявок нет.\nНажмите /book или кнопку «Создать заявку»."
+        if edit:
+            await msg.edit_text(text)
+        else:
+            await msg.answer(text)
         return
 
     status_emoji = {
-        "new": "NEW",
-        "confirmed": "OK",
-        "rejected": "X",
-        "cancelled": "---",
+        "new": "🆕",
+        "confirmed": "✅",
+        "rejected": "❌",
+        "cancelled": "🚫",
     }
 
-    lines = ["<b>Ваши последние заявки:</b>\n"]
+    lines = ["📋 <b>Мои последние заявки</b>\n"]
     for r in rows:
-        venue = r["venue_name"]
-        emoji = status_emoji.get(r["status"], "?")
-        comment = ""
-        if r["staff_comment"]:
-            comment = "\n   Комментарий: " + r["staff_comment"]
+        emoji = status_emoji.get(r["status"], "❓")
         date_str = r["desired_date"].strftime("%d.%m.%Y")
         start_str = r["desired_start"].strftime("%H:%M")
         end_str = r["desired_end"].strftime("%H:%M")
-        line = "[{}] <b>#{}</b>  {} {}--{}\n   {}{}".format(
-            emoji, r["id"], date_str, start_str, end_str, venue, comment
-        )
-        lines.append(line)
+        venue = r["venue_name"]
+        comment = f"\n   💬 {r['staff_comment']}" if r.get("staff_comment") else ""
+        lines.append(f"{emoji} <b>#{r['id']}</b>  {date_str} {start_str}–{end_str}\n   📍 {venue}{comment}")
 
-    await message.answer("\n".join(lines))
+    text = "\n".join(lines)
+    if edit:
+        await msg.edit_text(text)
+    else:
+        await msg.answer(text)
 
 
-# ---------- choose org ----------
+async def _start_booking(msg: Message, state: FSMContext, edit: bool = False):
+    await state.clear()
+    orgs = db.load_orgs()
+    if not orgs:
+        text = "😔 Сейчас нет доступных учреждений."
+        if edit:
+            await msg.edit_text(text)
+        else:
+            await msg.answer(text)
+        return
+
+    if len(orgs) == 1:
+        org = db.get_org(orgs[0]["id"]) or orgs[0]
+        await state.update_data(org_id=org["id"], org_name=org["name"])
+        resources = db.load_resources(org["id"])
+        if not resources:
+            text = org_card(org) + "\n\n😔 Нет доступных площадок."
+            if edit:
+                await msg.edit_text(text)
+            else:
+                await msg.answer(text)
+            return
+
+        await state.set_state(BookingFlow.choose_resource)
+        text = org_card(org) + "\n\n<b>Шаг 1/4.</b> Выберите площадку:"
+        if edit:
+            await msg.edit_text(text, reply_markup=resource_keyboard(resources))
+        else:
+            await msg.answer(text, reply_markup=resource_keyboard(resources))
+        return
+
+    await state.set_state(BookingFlow.choose_org)
+    text = (
+        f"⚽ <b>{ORG_BRAND}</b>\n"
+        "<b>Шаг 1/4.</b> Выберите учреждение:"
+    )
+    if edit:
+        await msg.edit_text(text, reply_markup=org_keyboard(orgs))
+    else:
+        await msg.answer(text, reply_markup=org_keyboard(orgs))
+
+
+# ───────────────────────── Booking flow ─────────────────────────
+
 @router.callback_query(BookingFlow.choose_org, F.data.startswith("org:"))
 async def on_org(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     org_id = int(cb.data.split(":")[1])
     org = db.get_org(org_id)
     if not org:
@@ -236,28 +391,24 @@ async def on_org(cb: CallbackQuery, state: FSMContext):
     await state.update_data(org_id=org_id, org_name=org["name"])
     resources = db.load_resources(org_id)
     if not resources:
-        await cb.answer("Нет площадок", show_alert=True)
+        await cb.message.edit_text(org_card(org) + "\n\n😔 Нет доступных площадок.")
         return
 
     await state.set_state(BookingFlow.choose_resource)
-    text = "<b>{}</b>\n\nВыберите площадку:".format(org["name"])
+    text = org_card(org) + "\n\n<b>Шаг 2/4.</b> Выберите площадку:"
     await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
-    await cb.answer()
 
 
-# ---------- choose resource ----------
 @router.callback_query(BookingFlow.choose_resource, F.data.startswith("res:"))
 async def on_resource(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     venue_id = int(cb.data.split(":")[1])
 
     data = await state.get_data()
     resources = db.load_resources(data["org_id"])
-    resource = next(
-        (r for r in resources if r["venue_id"] == venue_id),
-        None,
-    )
+    resource = next((r for r in resources if r["venue_id"] == venue_id), None)
     if not resource:
-        await cb.answer("Не найдено", show_alert=True)
+        await cb.answer("Площадка не найдена", show_alert=True)
         return
 
     await state.update_data(
@@ -266,124 +417,105 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         resource_name=resource["name"],
     )
     await state.set_state(BookingFlow.choose_date)
-    text = "<b>{}</b>\n\nВыберите дату:".format(resource["name"])
+    text = (
+        f"📍 <b>{resource['name']}</b>\n\n"
+        "<b>Шаг 3/4.</b> Выберите дату:"
+    )
     await cb.message.edit_text(text, reply_markup=date_keyboard())
-    await cb.answer()
 
 
-# ---------- choose date ----------
 @router.callback_query(BookingFlow.choose_date, F.data.startswith("date_"))
 async def on_date(cb: CallbackQuery, state: FSMContext):
-    d = date.fromisoformat(cb.data.replace("date_", ""))
+    await cb.answer()
+    d = date.fromisoformat(cb.data[5:])
     data = await state.get_data()
 
     if not db.is_venue_available(data["venue_id"], data["org_id"], d):
-        await cb.answer("Площадка закрыта в этот день", show_alert=True)
+        await cb.answer("❌ Площадка закрыта в этот день", show_alert=True)
         return
 
-    slots = db.compute_free_slots(
-        data["venue_id"], data.get("venue_unit_id"), data["org_id"], d
-    )
+    slots = db.compute_free_slots(data["venue_id"], None, data["org_id"], d)
     free_count = sum(1 for s in slots if s["free"])
-
     if free_count == 0:
-        await cb.answer("Нет свободных слотов", show_alert=True)
+        await cb.answer("😔 Нет свободного времени", show_alert=True)
         return
 
-    date_label = "{} ({})".format(d.strftime("%d.%m.%Y"), WEEKDAYS[d.weekday()])
+    date_label = f"{d.strftime('%d.%m.%Y')} ({WEEKDAYS[d.weekday()]})"
+
+    # slots_cache в HH-MM
+    slots_cache = []
+    for s in slots:
+        start_str = s["start"]. = s["end"].strftime("%H-%M") if hasattr(s["end"], "strftime") else str(s["end"]).replace(":", "-")
+        slots_cache.append({"start": start_str, "end": end_str, "free": s["free"]})
+
+    org = db.get_org(data["org_id"])
+    org_work_end = None
+    if org and not org.get("is_24h"):
+        org_work_end = org.get("work_end")
+
     await state.update_data(
         desired_date=d.isoformat(),
         date_label=date_label,
-        slots_cache=[
-            {"start": s["start"].strftime("%H:%M"),
-             "end": s["end"].strftime("%H:%M"),
-             "free": s["free"]}
-            for s in slots
-        ],
+        slots_cache=slots_cache,
     )
     await state.set_state(BookingFlow.choose_slot_start)
-    text = "{}\n{}\n\nСвободных слотов: {}\nВыберите <b>время начала</b>:".format(
-        data["resource_name"], date_label, free_count
+
+    text = (
+        f"📍 <b>{data['resource_name']}</b>\n"
+        f"📅 <b>{date_label}</b>\n\n"
+        f"Свободных интервалов: <b>{free_count}</b>\n"
+        "<b>Шаг 4/4.</b> Выберите время начала:"
     )
-    await cb.message.edit_text(text, reply_markup=slots_keyboard(slots))
-    await cb.answer()
+    await cb.message.edit_text(text, reply_markup=slots_keyboard(slots_cache))
 
 
-# ---------- choose slot start ----------
-@router.callback_query(BookingFlow.choose_slot_start, F.data.startswith("sstart_"))
+@router.callback_query(BookingFlow.choose_slot_start, F.data.startswith("slot_"))
 async def on_slot_start(cb: CallbackQuery, state: FSMContext):
-    # callback: sstart_HH-MM
-    time_str = cb.data.replace("sstart_", "").replace("-", ":")
-    data = await state.get_data()
-    all_slots = data["slots_cache"]
-
-    start_idx = next(
-        (i for i, s in enumerate(all_slots) if s["start"] == time_str), None
-    )
-    if start_idx is None:
-        await cb.answer("Слот не найден", show_alert=True)
-        return
-
-    # Считаем сколько подряд свободных слотов от start_idx
-    max_consecutive = 0
-    for i in range(start_idx, len(all_slots)):
-        if not all_slots[i]["free"]:
-            break
-        max_consecutive += 1
-
-    max_minutes = max_consecutive * settings.SLOT_MINUTES
-
-    # Формируем доступные длительности
-    available = [d for d in DURATION_OPTIONS if d <= max_minutes]
-    if not available:
-        await cb.answer("Минимум {} мин, но свободно меньше".format(DURATION_OPTIONS[0]), show_alert=True)
-        return
-
-    await state.update_data(slot_start=time_str)
-    await state.set_state(BookingFlow.choose_slot_end)
-    text = "{}\n{}\nНачало: <b>{}</b>\n\nВыберите <b>длительность</b>:".format(
-        data["resource_name"], data["date_label"], time_str
-    )
-    await cb.message.edit_text(text, reply_markup=duration_keyboard(available))
     await cb.answer()
+    start_str = cb.data[5:]  # HH-MM
+    data = await state.get_data()
+
+    org = db.get_org(data["org_id"])
+    org_work_end = None
+    if org and not org.get("is_24h"):
+        org_work_end = org.get("work_end")
+
+    await state.update_data(slot_start=start_str)
+    await state.set_state(BookingFlow.choose_slot_end)
+
+    text = (
+        f"📍 <b>{data['resource_name']}</b>\n"
+        f"📅 <b>{data['date_label']}</b>\n"
+        f"🕐 Начало: <b>{_time_display(start_str)}</b>\n\n"
+        "Выберите длительность:"
+    )
+    await cb.message.edit_text(
+        text,
+        reply_markup=duration_keyboard(start_str, data["slots_cache"], org_work_end),
+    )
 
 
-# ---------- choose duration ----------
 @router.callback_query(BookingFlow.choose_slot_end, F.data.startswith("dur_"))
 async def on_duration(cb: CallbackQuery, state: FSMContext):
-    minutes = int(cb.data.replace("dur_", ""))
+    await cb.answer()
+    end_str = cb.data[4:]  # HH-MM
     data = await state.get_data()
 
-    # Вычисляем время окончания
-    sh, sm = map(int, data["slot_start"].split(":"))
-    start_total = sh * 60 + sm
-    end_total = start_total + minutes
-    end_h = end_total // 60
-    end_m = end_total % 60
-    slot_end = "{:02d}:{:02d}".format(end_h, end_m)
-
-    # Формируем читаемую длительность
-    if minutes < 60:
-        dur_label = "{} мин".format(minutes)
-    elif minutes % 60 == 0:
-        dur_label = "{} ч".format(minutes // 60)
-    else:
-        dur_label = "{}:{:02d}".format(minutes // 60, minutes % 60)
-
-    await state.update_data(slot_end=slot_end, duration_label=dur_label)
+    await state.update_data(slot_end=end_str)
     await state.set_state(BookingFlow.enter_name)
-    text = "{}\n{}\n{} -- {} ({})\n\nВведите <b>ваше имя</b> (ФИО):".format(
-        data["resource_name"], data["date_label"],
-        data["slot_start"], slot_end, dur_label
+
+    text = (
+        f"📍 <b>{data['resource_name']}</b>\n"
+        f"📅 <b>{data['date_label']}</b>\n"
+        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(end_str)}</b>\n\n"
+        "Введите <b>ваше имя</b> (ФИО):"
     )
     await cb.message.edit_text(text)
-    await cb.answer()
 
 
-# ---------- enter name ----------
 @router.message(BookingFlow.enter_name)
 async def on_name(message: Message, state: FSMContext):
-    name = message.text.strip()
+    name = (message.text or "").strip()
     if len(name) < 2:
         await message.answer("Введите корректное имя (минимум 2 символа):")
         return
@@ -391,73 +523,71 @@ async def on_name(message: Message, state: FSMContext):
     await state.update_data(contact_name=name)
     await state.set_state(BookingFlow.enter_phone)
     await message.answer(
-        "{}\n\nВведите <b>номер телефона</b> для связи:".format(name),
+        "📞 Введите <b>номер телефона</b> для связи:",
         reply_markup=skip_keyboard("phone"),
     )
 
 
-# ---------- phone ----------
 @router.callback_query(BookingFlow.enter_phone, F.data == "skip:phone")
 async def skip_phone(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.update_data(contact_phone=None)
     await state.set_state(BookingFlow.enter_comment)
     await cb.message.edit_text(
-        "Хотите оставить <b>комментарий</b>?\n(цель аренды, пожелания)",
+        "💬 Хотите оставить <b>комментарий</b>?\n<i>(цель аренды, пожелания)</i>",
         reply_markup=skip_keyboard("comment"),
     )
-    await cb.answer()
 
 
 @router.message(BookingFlow.enter_phone)
 async def on_phone(message: Message, state: FSMContext):
-    await state.update_data(contact_phone=message.text.strip())
+    await state.update_data(contact_phone=(message.text or "").strip())
     await state.set_state(BookingFlow.enter_comment)
     await message.answer(
-        "Хотите оставить <b>комментарий</b>?\n(цель аренды, пожелания)",
+        "💬 Хотите оставить <b>комментарий</b>?\n<i>(цель аренды, пожелания)</i>",
         reply_markup=skip_keyboard("comment"),
     )
 
 
-# ---------- comment ----------
 @router.callback_query(BookingFlow.enter_comment, F.data == "skip:comment")
 async def skip_comment(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.update_data(message=None)
     await _show_confirm(cb.message, state, edit=True)
-    await cb.answer()
 
 
 @router.message(BookingFlow.enter_comment)
 async def on_comment(message: Message, state: FSMContext):
-    await state.update_data(message=message.text.strip())
+    await state.update_data(message=(message.text or "").strip())
     await _show_confirm(message, state, edit=False)
 
 
-# ---------- confirm ----------
-async def _show_confirm(msg, state, edit):
+async def _show_confirm(msg: Message, state: FSMContext, edit: bool):
     data = await state.get_data()
     await state.set_state(BookingFlow.confirm)
 
-    org_name = data.get("org_name", "")
-    resource = data["resource_name"]
-    date_label = data["date_label"]
-    slot_start = data["slot_start"]
-    slot_end = data["slot_end"]
-    dur_label = data.get("duration_label", "")
-    name = data["contact_name"]
-    phone = data.get("contact_phone") or "---"
-    comment = data.get("message") or "---"
+    org_name = data.get("org_name", "—")
+    resource = data.get("resource_name", "—")
+    date_label = data.get("date_label", "—")
+    slot_start = _time_display(data["slot_start"])
+    slot_end = _time_display(data["slot_end"])
+    name = data.get("contact_name", "—")
+    phone = data.get("contact_phone") or "—"
+    comment = data.get("message") or "—"
 
     text = (
-        "<b>Проверьте заявку:</b>\n\n"
-        "Учреждение: {}\n"
-        "Площадка: {}\n"
-        "Дата: {}\n"
-        "Время: {} -- {} ({})\n\n"
-        "Имя: {}\n"
-        "Телефон: {}\n"
-        "Комментарий: {}\n\n"
-        "Всё верно?"
-    ).format(org_name, resource, date_label, slot_start, slot_end, dur_label, name, phone, comment)
+        "✅ <b>Проверка заявки</b>\n\n"
+        "<b>Детали бронирования</b>\n"
+        f"🏢 {org_name}\n"
+        f"📍 {resource}\n"
+        f"📅 {date_label}\n"
+        f"🕐 {slot_start} – {slot_end}\n\n"
+        "<b>Контакты</b>\n"
+        f"👤 {name}\n"
+        f"📞 {phone}\n"
+        f"💬 {comment}\n\n"
+        "Отправить заявку администратору?"
+    )
 
     if edit:
         await msg.edit_text(text, reply_markup=confirm_keyboard())
@@ -467,19 +597,20 @@ async def _show_confirm(msg, state, edit):
 
 @router.callback_query(BookingFlow.confirm, F.data == "confirm:yes")
 async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
+    await cb.answer()
     data = await state.get_data()
-    d = date.fromisoformat(data["desired_date"])
 
-    sh, sm = map(int, data["slot_start"].split(":"))
-    eh, em = map(int, data["slot_end"].split(":"))
+    d = date.fromisoformat(data["desired_date"])
+    start_time = _parse_time(data["slot_start"])
+    end_time = _parse_time(data["slot_end"])
 
     req_data = {
         "org_id":           data["org_id"],
         "venue_id":         data["venue_id"],
-        "venue_unit_id":    data.get("venue_unit_id"),
+        "venue_unit_id":    None,
         "desired_date":     d,
-        "desired_start":    time(sh, sm),
-        "desired_end":      time(eh, em),
+        "desired_start":    start_time,
+        "desired_end":      end_time,
         "contact_name":     data["contact_name"],
         "contact_phone":    data.get("contact_phone"),
         "contact_email":    None,
@@ -492,62 +623,49 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
         req_id = db.save_request(req_data)
     except Exception:
         log.exception("Failed to save request")
-        await cb.message.edit_text(
-            "Ошибка сохранения. Попробуйте позже.\n/book"
-        )
+        await cb.message.edit_text("❌ Не удалось сохранить заявку. Попробуйте позже.\n\n/book")
         await state.clear()
-        await cb.answer()
         return
 
     ok_text = (
-        "<b>Заявка #{} отправлена!</b>\n\n"
-        "Площадка: {}\n"
-        "Дата: {}\n"
-        "Время: {} -- {}\n\n"
-        "Сотрудник свяжется с вами.\n"
+        f"✅ <b>Заявка #{req_id} отправлена!</b>\n\n"
+        f"📍 <b>{data['resource_name']}</b>\n"
+        f"📅 <b>{data['date_label']}</b>\n"
+        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}</b>\n\n"
+        "Администратор получит уведомление и свяжется с вами.\n"
         "Статус заявки: /my"
-    ).format(req_id, data["resource_name"], data["date_label"], data["slot_start"], data["slot_end"])
+    )
 
-    await cb.message.edit_text(ok_text)
+    await cb.message.edit_text(ok_text, reply_markup=after_success_keyboard())
     await state.clear()
-    await cb.answer()
 
-    # Уведомляем сотрудников
+    # Notify staff
     staff_ids = db.get_staff_chat_ids(data["org_id"])
     if staff_ids:
-        username = cb.from_user.username or "---"
-        phone = data.get("contact_phone") or "---"
-        comment = data.get("message") or "---"
+        username = cb.from_user.username or "—"
+        phone = data.get("contact_phone") or "—"
+        comment = data.get("message") or "—"
         org_name = data.get("org_name", "")
 
         staff_text = (
-            "<b>Новая заявка #{}</b>\n\n"
-            "Учреждение: {}\n"
-            "Площадка: {}\n"
-            "Дата: {}\n"
-            "Время: {} -- {}\n\n"
-            "Имя: {}\n"
-            "Телефон: {}\n"
-            "Комментарий: {}\n"
-            "Telegram: @{}"
-        ).format(
-            req_id, org_name, data["resource_name"], data["date_label"],
-            data["slot_start"], data["slot_end"], data["contact_name"],
-            phone, comment, username
+            f"📩 <b>Новая заявка #{req_id}</b>\n\n"
+            f"🏢 {org_name}\n"
+            f"📍 {data['resource_name']}\n"
+            f"📅 {data['date_label']}\n"
+            f"🕐 {_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}\n\n"
+            f"👤 {data['contact_name']}\n"
+            f"📞 {phone}\n"
+            f"💬 {comment}\n"
+            f"🆔 @{username}"
         )
 
         staff_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(
-                    text="Подтвердить",
-                    callback_data="staff:confirm:{}".format(req_id),
-                ),
-                InlineKeyboardButton(
-                    text="Отклонить",
-                    callback_data="staff:reject:{}".format(req_id),
-                ),
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"staff:confirm:{req_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"staff:reject:{req_id}"),
             ],
         ])
+
         for chat_id in staff_ids:
             try:
                 await bot.send_message(chat_id, staff_text, reply_markup=staff_kb)
@@ -557,70 +675,78 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
 
 @router.callback_query(BookingFlow.confirm, F.data == "confirm:no")
 async def on_cancel(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.message.edit_text("Отменено.\n\n/book -- начать заново")
     await cb.answer()
+    await state.clear()
+    await cb.message.edit_text(
+        "🚫 Заявка отменена.\n\n"
+        "Хотите создать новую?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Создать заявку", callback_data="menu:book")],
+            [InlineKeyboardButton(text="🏠 В меню", callback_data="restart")],
+        ]),
+    )
 
 
-# ---------- restart ----------
+# ───────────────────────── Navigation ─────────────────────────
+
 @router.callback_query(F.data == "restart")
 async def on_restart(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    orgs = db.load_orgs()
-    if len(orgs) == 1:
-        org = orgs[0]
-        await state.update_data(org_id=org["id"], org_name=org["name"])
-        resources = db.load_resources(org["id"])
-        await state.set_state(BookingFlow.choose_resource)
-        text = "<b>{}</b>\n\nВыберите площадку:".format(org["name"])
-        await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
-    elif orgs:
-        await state.set_state(BookingFlow.choose_org)
-        await cb.message.edit_text(
-            "Выберите учреждение:", reply_markup=org_keyboard(orgs)
-        )
-    else:
-        await cb.message.edit_text("Нет учреждений.")
     await cb.answer()
+    await state.clear()
+    text = (
+        f"⚽ <b>{ORG_BRAND}</b>\n"
+        "<b>Бронирование залов и площадок</b>\n\n"
+        "Выберите действие:"
+    )
+    await cb.message.edit_text(text, reply_markup=main_menu_keyboard())
 
 
-# ---------- back buttons ----------
 @router.callback_query(F.data == "back:org")
 async def back_org(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     orgs = db.load_orgs()
     await state.set_state(BookingFlow.choose_org)
     await cb.message.edit_text(
-        "Выберите учреждение:", reply_markup=org_keyboard(orgs)
+        f"⚽ <b>{ORG_BRAND}</b>\n<b>Шаг 1/4.</b> Выберите учреждение:",
+        reply_markup=org_keyboard(orgs),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "back:resource")
 async def back_resource(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     data = await state.get_data()
+    org = db.get_org(data["org_id"]) if data.get("org_id") else None
+
     resources = db.load_resources(data["org_id"])
     await state.set_state(BookingFlow.choose_resource)
-    text = "<b>{}</b>\n\nВыберите площадку:".format(data.get("org_name", ""))
-    await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
-    await cb.answer()
+    header = org_card(org, with_title=True) if org else f"⚽ <b>{ORG_BRAND}</b>"
+    await cb.message.edit_text(
+        header + "\n\n<b>Шаг 2/4.</b> Выберите площадку:",
+        reply_markup=resource_keyboard(resources),
+    )
 
 
 @router.callback_query(F.data == "back:date")
 async def back_date(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     data = await state.get_data()
     await state.set_state(BookingFlow.choose_date)
-    text = "<b>{}</b>\n\nВыберите дату:".format(data["resource_name"])
-    await cb.message.edit_text(text, reply_markup=date_keyboard())
-    await cb.answer()
+    await cb.message.edit_text(
+        f"📍 <b>{data.get('resource_name','—')}</b>\n\n<b>Шаг 3/4.</b> Выберите дату:",
+        reply_markup=date_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "back:slot_start")
 async def back_slot_start(cb: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    slots = data.get("slots_cache", [])
-    await state.set_state(BookingFlow.choose_slot_start)
-    text = "{}\n{}\n\nВыберите <b>время начала</b>:".format(
-        data["resource_name"], data["date_label"]
-    )
-    await cb.message.edit_text(text, reply_markup=slots_keyboard(slots))
     await cb.answer()
+    data = await state.get_data()
+    slots_cache = data.get("slots_cache", [])
+    await state.set_state(BookingFlow.choose_slot_start)
+    await cb.message.edit_text(
+        f"📍 <b>{data.get('resource_name','—')}</b>\n"
+        f"📅 <b>{data.get('date_label','—')}</b>\n\n"
+        "<b>Шаг 4/4.</b> Выберите время начала:",
+        reply_markup=slots_keyboard(slots_cache),
+    )
