@@ -118,14 +118,17 @@ def slots_keyboard(slots_cache):
 
     buttons = []
     row = []
-   :MM
+    for s in free_slots:
+        # HH-MM -> HH:MM
         label = _time_display(s["start"])
         row.append(InlineKeyboardButton(text=label, callback_data=f"slot_{s['start']}"))
         if len(row) == 4:
             buttons.append(row)
             row = []
+
     if row:
         buttons.append(row)
+
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:date")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -445,7 +448,8 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
     # slots_cache в HH-MM
     slots_cache = []
     for s in slots:
-        start_str = s["start"]. = s["end"].strftime("%H-%M") if hasattr(s["end"], "strftime") else str(s["end"]).replace(":", "-")
+        start_str = s["start"].strftime("%H-%M") if hasattr(s["start"], "strftime") else str(s["start"]).replace(":", "-")
+        end_str = s["end"].strftime("%H-%M") if hasattr(s["end"], "strftime") else str(s["end"]).replace(":", "-")
         slots_cache.append({"start": start_str, "end": end_str, "free": s["free"]})
 
     org = db.get_org(data["org_id"])
