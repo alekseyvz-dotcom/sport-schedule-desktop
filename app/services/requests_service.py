@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, time, datetime
 from typing import Literal, Optional
 
-from app.services.db import get_conn, put_conn
+from app.db import get_conn, put_conn
 
 
 RequestStatus = Literal["new", "confirmed", "rejected", "cancelled"]
