@@ -134,7 +134,7 @@ def slots_keyboard(slots_cache):
 
 
 def duration_keyboard(slot_start_str, slots_cache, org_work_end):
-    """Выбор длительности (мин/ч), чтобы не показывать странные end-времена."""
+    """Выбор длительности. Разрешены только 60/90 минут."""
     sh, sm = map(int, slot_start_str.split("-"))
     start_minutes = sh * 60 + sm
 
@@ -143,7 +143,10 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
     else:
         work_end_minutes = 24 * 60
 
-    start_idx = next((i for i, s in enumerate(slots_cache) if s["start"] == slot_start_str), None)
+    start_idx = next(
+        (i for i, s in enumerate(slots_cache) if s["start"] == slot_start_str),
+        None,
+    )
 
     max_free_minutes = 0
     if start_idx is not None:
@@ -153,6 +156,7 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
                 break
             max_free_minutes += settings.SLOT_MINUTES
 
+        # ограничиваем настройкой MAX_BOOKING_SLOTS
         max_slots = min(settings.MAX_BOOKING_SLOTS, len(slots_cache) - start_idx)
         max_free_minutes = min(max_free_minutes, max_slots * settings.SLOT_MINUTES)
 
@@ -160,24 +164,27 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
     if work_end_minutes > start_minutes:
         max_free_minutes = min(max_free_minutes, work_end_minutes - start_minutes)
 
+    # показываем только допустимые длительности
+    allowed = []
+    for dur in DURATION_OPTIONS:
+        if dur <= max_free_minutes and dur % settings.SLOT_MINUTES == 0:
+            allowed.append(dur)
+
     buttons = []
     row = []
-    for dur in DURATION_OPTIONS:
-        if dur > max_free_minutes:
-            break
-
+    for dur in allowed:
         end_total = start_minutes + dur
         end_h = end_total // 60
         end_m = end_total % 60
         if end_h >= 24:
-            break
+            continue
 
         end_str = f"{end_h:02d}-{end_m:02d}"
         row.append(InlineKeyboardButton(
             text=_format_duration(dur),
             callback_data=f"dur_{end_str}",
         ))
-        if len(row) == 3:
+        if len(row) == 2:
             buttons.append(row)
             row = []
 
@@ -185,12 +192,12 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
         buttons.append(row)
 
     if not buttons:
-        # минимальный вариант — 1 слот
-        end_total = start_minutes + settings.SLOT_MINUTES
-        end_str = f"{end_total // 60:02d}-{end_total % 60:02d}"
-        buttons = [[InlineKeyboardButton(text=_format_duration(settings.SLOT_MINUTES), callback_data=f"dur_{end_str}")]]
+        # Если на выбранное время нет возможных 60/90 — покажем понятное сообщение кнопкой назад
+        buttons = [[InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")]]
 
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")])
+    else:
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
