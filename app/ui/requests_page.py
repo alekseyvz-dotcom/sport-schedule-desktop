@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout,
-    QLineEdit, QPushButton, QCheckBox, QComboBox,
+    QLineEdit, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QMessageBox, QLabel,
     QHeaderView, QAbstractItemView, QSizePolicy, QDateEdit,
     QDialog, QTextEdit, QDialogButtonBox,
@@ -39,7 +39,7 @@ class _CommentDialog(QDialog):
     def __init__(self, parent=None, title: str = "Комментарий", placeholder: str = ""):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
 
         self.ed = QTextEdit(self)
         self.ed.setPlaceholderText(placeholder)
@@ -52,6 +52,8 @@ class _CommentDialog(QDialog):
         bb.rejected.connect(self.reject)
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
         lay.addWidget(self.ed, 1)
         lay.addWidget(bb)
 
@@ -213,8 +215,6 @@ class RequestsPage(QWidget):
         header.setSectionResizeMode(tbl.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
 
     def _load_orgs(self):
-        # В идеале: только доступные пользователю орг.
-        # Здесь берём list_orgs как в вашей странице учреждений.
         try:
             orgs = list_orgs(
                 user_id=self.user.id,
@@ -250,14 +250,11 @@ class RequestsPage(QWidget):
                 b.setEnabled(False)
             return
 
-        # Право определяется по org_id заявки
         acc = self._org_access(req.org_id)
-        can_edit = bool(acc.can_edit) or self._is_admin()
+        can_edit = bool(getattr(acc, "can_edit", False)) or self._is_admin()
 
-        # Подтверждать/отклонять логично только "new"
         self.btn_confirm.setEnabled(can_edit and req.status == "new")
         self.btn_reject.setEnabled(can_edit and req.status == "new")
-        # Отменять можно new/confirmed (по вашему регламенту можно иначе)
         self.btn_cancel.setEnabled(can_edit and req.status in ("new", "confirmed"))
 
     # ───────────────────────── data ─────────────────────────
@@ -267,7 +264,7 @@ class RequestsPage(QWidget):
         org_id = org_obj.id if isinstance(org_obj, SportOrg) else None
 
         status = self.cb_status.currentData()
-        search = self.ed_search.text().strip()
+        search = self.ed_search.text().strip() or None
 
         date_from = self.dt_from.date().toPython()
         date_to = self.dt_to.date().toPython()
@@ -281,7 +278,7 @@ class RequestsPage(QWidget):
                 search=search,
                 date_from=date_from,
                 date_to=date_to,
-                limit=1000,
+                limit=2000,
             )
         except Exception as e:
             QMessageBox.critical(self, "Заявки", f"Ошибка загрузки:\n{e}")
@@ -298,7 +295,6 @@ class RequestsPage(QWidget):
             it_id.setData(Qt.ItemDataRole.UserRole, r)
             it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            # Статус как бейдж
             if r.status == "new":
                 it_status = _badge("🆕 Новая", _COLOR_NEW)
             elif r.status == "confirmed":
@@ -356,7 +352,7 @@ class RequestsPage(QWidget):
         dlg = _CommentDialog(
             self,
             title=f"Отклонить заявку #{req.id}",
-            placeholder="Причина отклонения (необязательно, но желательно)…",
+            placeholder="Причина отклонения (будет видна пользователю, если вы её отправляете в боте)…",
         )
         if dlg.exec() != QDialog.Accepted:
             return
@@ -399,7 +395,6 @@ class RequestsPage(QWidget):
         self.reload()
 
     def _open_details(self):
-        # Быстрый просмотр: пока просто показывает message/staff_comment
         req = self._selected_request()
         if not req:
             return
