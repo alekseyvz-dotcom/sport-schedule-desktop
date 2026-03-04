@@ -67,11 +67,9 @@ class RequestsPage(QWidget):
         self.setObjectName("page")
         self.user = user
 
-        # Заголовок
         self.lbl_title = QLabel("Заявки")
         self.lbl_title.setObjectName("sectionTitle")
 
-        # Фильтры
         self.cb_org = QComboBox()
         self.cb_org.setMinimumWidth(260)
         self.cb_org.currentIndexChanged.connect(lambda *_: self.reload())
@@ -85,7 +83,7 @@ class RequestsPage(QWidget):
         self.cb_status.currentIndexChanged.connect(lambda *_: self.reload())
 
         self.ed_search = QLineEdit()
-        self.ed_search.setPlaceholderText("Поиск: ФИО / телефон / площадка")
+        self.ed_search.setPlaceholderText("Поиск: ФИО / телефон / email / площадка")
         self.ed_search.setClearButtonEnabled(True)
         self.ed_search.returnPressed.connect(self.reload)
 
@@ -104,7 +102,6 @@ class RequestsPage(QWidget):
         self.btn_reload = QPushButton("🔄 Обновить")
         self.btn_reload.clicked.connect(self.reload)
 
-        # Действия
         self.btn_confirm = QPushButton("✅ Подтвердить")
         self.btn_reject = QPushButton("❌ Отклонить…")
         self.btn_cancel = QPushButton("🚫 Отменить")
@@ -116,7 +113,7 @@ class RequestsPage(QWidget):
         self.btn_reject.clicked.connect(self._reject)
         self.btn_cancel.clicked.connect(self._cancel)
 
-        # Таблица
+        # Таблица (оставил 10 колонок как ранее, чтобы не менять верстку)
         self.tbl = QTableWidget(0, 10)
         self.tbl.setObjectName("requestsTable")
         self.tbl.setHorizontalHeaderLabels([
@@ -138,7 +135,6 @@ class RequestsPage(QWidget):
         self._delegate = BadgeDelegate(self.tbl)
         self.tbl.setItemDelegate(self._delegate)
 
-        # Верхняя панель
         row_filters = QHBoxLayout()
         row_filters.setContentsMargins(0, 0, 0, 0)
         row_filters.setSpacing(8)
@@ -179,8 +175,6 @@ class RequestsPage(QWidget):
 
         self._load_orgs()
         self.reload()
-
-    # ───────────────────────── helpers ─────────────────────────
 
     def _is_admin(self) -> bool:
         return (self.user.role_code or "").lower() == "admin"
@@ -257,15 +251,12 @@ class RequestsPage(QWidget):
         self.btn_reject.setEnabled(can_edit and req.status == "new")
         self.btn_cancel.setEnabled(can_edit and req.status in ("new", "confirmed"))
 
-    # ───────────────────────── data ─────────────────────────
-
     def reload(self):
         org_obj = self.cb_org.currentData()
         org_id = org_obj.id if isinstance(org_obj, SportOrg) else None
 
         status = self.cb_status.currentData()
         search = self.ed_search.text().strip() or None
-
         date_from = self.dt_from.date().toPython()
         date_to = self.dt_to.date().toPython()
 
@@ -321,8 +312,6 @@ class RequestsPage(QWidget):
         self.tbl.setSortingEnabled(True)
         self._apply_ui_access()
 
-    # ───────────────────────── actions ─────────────────────────
-
     def _confirm(self):
         req = self._selected_request()
         if not req:
@@ -352,7 +341,7 @@ class RequestsPage(QWidget):
         dlg = _CommentDialog(
             self,
             title=f"Отклонить заявку #{req.id}",
-            placeholder="Причина отклонения (будет видна пользователю, если вы её отправляете в боте)…",
+            placeholder="Причина отклонения (сохранится в staff_comment)…",
         )
         if dlg.exec() != QDialog.Accepted:
             return
@@ -399,16 +388,24 @@ class RequestsPage(QWidget):
         if not req:
             return
 
+        processed = "—"
+        if req.processed_at:
+            processed = f"{req.processed_at:%d.%m.%Y %H:%M}"
+
         text = (
             f"Заявка #{req.id}\n\n"
             f"Статус: {req.status}\n"
             f"Учреждение: {req.org_name}\n"
             f"Площадка: {req.venue_name}\n"
             f"Дата: {req.desired_date:%d.%m.%Y}\n"
-            f"Время: {req.desired_start:%H:%M}–{req.desired_end:%H:%M}\n\n"
+            f"Время: {req.desired_start:%H:%M}–{req.desired_end:%H:%M}\n"
+            f"Зона (venue_unit_id): {req.venue_unit_id or '—'}\n\n"
             f"Клиент: {req.contact_name}\n"
-            f"Телефон: {req.contact_phone or '—'}\n\n"
+            f"Телефон: {req.contact_phone or '—'}\n"
+            f"Email: {req.contact_email or '—'}\n"
+            f"Telegram user_id: {req.telegram_user_id or '—'}\n\n"
             f"Комментарий клиента:\n{req.message or '—'}\n\n"
-            f"Комментарий сотрудника:\n{req.staff_comment or '—'}\n"
+            f"Комментарий сотрудника:\n{req.staff_comment or '—'}\n\n"
+            f"Обработано: {processed}\n"
         )
         QMessageBox.information(self, "Заявка", text)
