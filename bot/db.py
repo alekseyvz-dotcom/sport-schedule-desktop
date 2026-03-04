@@ -35,7 +35,7 @@ def load_orgs() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, work_start, work_end, is_24h "
+                "SELECT id, name, address, work_start, work_end, is_24h "
                 "FROM sport_orgs WHERE is_active = true ORDER BY name"
             )
             return cur.fetchall()
@@ -45,7 +45,7 @@ def get_org(org_id: int) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, work_start, work_end, is_24h "
+                "SELECT id, name, address, work_start, work_end, is_24h "
                 "FROM sport_orgs WHERE id = %s",
                 (org_id,),
             )
