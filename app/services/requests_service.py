@@ -3,15 +3,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time, datetime
-from typing import Iterable, Literal, Optional
+from typing import Literal, Optional
 
-from app.services.db import get_conn  # <-- поправь импорт под ваш проект
+from app.services.db import get_conn, put_conn
 
 
 RequestStatus = Literal["new", "confirmed", "rejected", "cancelled"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class BookingRequest:
     id: int
     org_id: int
@@ -39,11 +39,15 @@ def list_requests(
     search: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    limit: int = 500,
+    limit: int = 1000,
 ) -> list[BookingRequest]:
     """
-    Список заявок (для админки/десктопа).
-    Фильтры: org_id, status, поиск (ФИО/тел/площадка), диапазон дат.
+    Возвращает список заявок для экрана администрирования.
+    Фильтры:
+      - org_id (если выбран конкретный)
+      - status (new/confirmed/rejected/cancelled)
+      - search (ФИО/телефон/площадка)
+      - date_from/date_to по desired_date
     """
     q = """
         SELECT
@@ -86,48 +90,48 @@ def list_requests(
         params.append(date_to)
 
     if search:
-        q += " AND (r.contact_name ILIKE %s OR r.contact_phone ILIKE %s OR v.name ILIKE %s)"
         s = f"%{search.strip()}%"
+        q += " AND (r.contact_name ILIKE %s OR r.contact_phone ILIKE %s OR v.name ILIKE %s)"
         params.extend([s, s, s])
 
-    q += " ORDER BY r.created_at DESC"
-    q += " LIMIT %s"
-    params.append(limit)
+    q += " ORDER BY r.created_at DESC LIMIT %s"
+    params.append(int(limit))
 
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         with conn.cursor() as cur:
             cur.execute(q, params)
             rows = cur.fetchall()
 
-    out: list[BookingRequest] = []
-    for row in rows:
-        # cursor без RealDictCursor: row — tuple.
-        # Если у вас dict cursor — адаптируй ниже (row["id"], ...)
-        (
-            rid, roid, org_name, vid, venue_name,
-            desired_date, desired_start, desired_end,
-            rstatus, contact_name, contact_phone,
-            message, staff_comment, created_at, telegram_user_id
-        ) = row
+        out: list[BookingRequest] = []
+        for row in rows:
+            (
+                rid, roid, org_name, vid, venue_name,
+                desired_date, desired_start, desired_end,
+                rstatus, contact_name, contact_phone,
+                message, staff_comment, created_at, telegram_user_id
+            ) = row
 
-        out.append(BookingRequest(
-            id=rid,
-            org_id=roid,
-            org_name=org_name,
-            venue_id=vid,
-            venue_name=venue_name,
-            desired_date=desired_date,
-            desired_start=desired_start,
-            desired_end=desired_end,
-            status=rstatus,
-            contact_name=contact_name,
-            contact_phone=contact_phone,
-            message=message,
-            staff_comment=staff_comment,
-            created_at=created_at,
-            telegram_user_id=telegram_user_id,
-        ))
-    return out
+            out.append(BookingRequest(
+                id=rid,
+                org_id=roid,
+                org_name=org_name,
+                venue_id=vid,
+                venue_name=venue_name,
+                desired_date=desired_date,
+                desired_start=desired_start,
+                desired_end=desired_end,
+                status=rstatus,
+                contact_name=contact_name or "",
+                contact_phone=contact_phone,
+                message=message,
+                staff_comment=staff_comment,
+                created_at=created_at,
+                telegram_user_id=telegram_user_id,
+            ))
+        return out
+    finally:
+        put_conn(conn)
 
 
 def set_request_status(
@@ -139,11 +143,24 @@ def set_request_status(
     staff_comment: str | None = None,
 ) -> None:
     """
-    Обновить статус заявки (confirmed/rejected/cancelled).
-    staff_comment сохраняем, если передан.
+    Меняет статус заявки и (опционально) записывает staff_comment.
     """
-    q = "UPDATE sport_requests SET status = %s, staff_comment = COALESCE(%s, staff_comment) WHERE id = %s"
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         with conn.cursor() as cur:
-            cur.execute(q, (status, staff_comment, request_id))
+            if staff_comment is None:
+                cur.execute(
+                    "UPDATE sport_requests SET status = %s WHERE id = %s",
+                    (status, request_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE sport_requests SET status = %s, staff_comment = %s WHERE id = %s",
+                    (status, staff_comment, request_id),
+                )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
