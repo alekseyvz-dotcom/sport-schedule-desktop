@@ -11,6 +11,7 @@ from app.ui.welcome_login_page import WelcomeLoginPage
 from app.ui.settings_page import SettingsPage
 from app.ui.gz_page import GzPage
 from app.ui.load_page import LoadPage
+from app.ui.requests_page import RequestsPage
 
 
 class MainWindow(QMainWindow):
@@ -38,7 +39,8 @@ class MainWindow(QMainWindow):
                 self.tabs.addTab(GzPage(user), "Гос. задание")
             if self._can_tab("tab.orgs"):
                 self.tabs.addTab(OrgsVenuesPage(user), "Учреждения и площадки")
-    
+            if self._can_tab("tab.requests"):
+                self.tabs.addTab(RequestsPage(user), "Заявки")
             if self._can_tab("tab.schedule"):
                 self.page_schedule = SchedulePage(user)
                 self.tabs.addTab(self.page_schedule, "Расписание")
