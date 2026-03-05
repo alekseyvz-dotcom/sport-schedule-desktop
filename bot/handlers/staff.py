@@ -28,7 +28,7 @@ async def staff_reject(cb: CallbackQuery, bot: Bot):
     await _process(cb, bot, req_id, "rejected")
 
 
-async def _process(cb, bot, req_id, new_status):
+async def _process(cb: CallbackQuery, bot: Bot, req_id: int, new_status: str):
     req = db.get_request_by_id(req_id)
     if not req:
         await cb.answer("Заявка не найдена", show_alert=True)
@@ -39,20 +39,44 @@ async def _process(cb, bot, req_id, new_status):
         await cb.answer(msg, show_alert=True)
         return
 
-    db.update_request_status(req_id, new_status)
+    # Обновляем статус всей группы (или одной заявки)
+    updated = db.update_group_status(req_id, new_status)
+    updated_count = len(updated)
+
+    # Получаем информацию о части площадки
+    portion_info = db.get_request_portion_info(req_id)
 
     staff_name = cb.from_user.full_name
-    status_line = "\n\n{} — {}".format(STATUS_TEXT[new_status], staff_name)
+
+    # Формируем строку статуса для сообщения администратору
+    status_suffix = f"\n\n{STATUS_TEXT[new_status]} — {staff_name}"
+    if updated_count > 1:
+        status_suffix += f"\n📋 Обработано заявок: {updated_count} (групповое бронирование)"
+
     await cb.message.edit_text(
-        cb.message.text + status_line,
+        cb.message.text + status_suffix,
         reply_markup=None,
     )
     await cb.answer("Заявка #{} {}".format(req_id, STATUS_TEXT[new_status]))
 
+    # Уведомляем пользователя
     if req.get("telegram_chat_id"):
         venue = req["venue_name"]
-        if req.get("unit_name"):
-            venue = venue + " — " + req["unit_name"]
+
+        # Формируем строку с частью площадки
+        portion_label = portion_info.get("portion_label", "")
+        unit_names = portion_info.get("unit_names", [])
+
+        portion_line = ""
+        if portion_label:
+            portion_line = f"🏟 {portion_label}\n"
+        if unit_names:
+            units_str = ", ".join(unit_names)
+            portion_line += f"📐 Зоны: {units_str}\n"
+
+        # Если есть unit_name в самой заявке (одиночная)
+        if not portion_line and req.get("unit_name"):
+            venue = f"{venue} — {req['unit_name']}"
 
         date_str = req["desired_date"].strftime("%d.%m.%Y")
         start_str = req["desired_start"].strftime("%H:%M")
@@ -60,20 +84,22 @@ async def _process(cb, bot, req_id, new_status):
 
         if new_status == "confirmed":
             text = (
-                "✅ <b>Заявка #{} подтверждена!</b>\n\n"
-                "📍 {}\n"
-                "📅 {}\n"
-                "🕐 {}–{}\n\n"
-                "С вами свяжутся для уточнения деталей."
-            ).format(req_id, venue, date_str, start_str, end_str)
+                f"✅ <b>Заявка #{req_id} подтверждена!</b>\n\n"
+                f"📍 {venue}\n"
+                f"{portion_line}"
+                f"📅 {date_str}\n"
+                f"🕐 {start_str}–{end_str}\n\n"
+                f"С вами свяжутся для уточнения деталей."
+            )
         else:
             text = (
-                "❌ <b>Заявка #{} отклонена</b>\n\n"
-                "📍 {}\n"
-                "📅 {}\n"
-                "🕐 {}–{}\n\n"
-                "Попробуйте другое время: /book"
-            ).format(req_id, venue, date_str, start_str, end_str)
+                f"❌ <b>Заявка #{req_id} отклонена</b>\n\n"
+                f"📍 {venue}\n"
+                f"{portion_line}"
+                f"📅 {date_str}\n"
+                f"🕐 {start_str}–{end_str}\n\n"
+                f"Попробуйте другое время: /book"
+            )
 
         try:
             await bot.send_message(req["telegram_chat_id"], text)
