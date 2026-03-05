@@ -1,4 +1,3 @@
-# app/ui/requests_page.py
 from __future__ import annotations
 
 import datetime as dt
@@ -25,6 +24,7 @@ _COLOR_NEW = QColor("#4ECDC4")
 _COLOR_CONFIRMED = QColor("#6BCB77")
 _COLOR_REJECTED = QColor("#FF6B6B")
 _COLOR_CANCELLED = QColor("#AAAAAA")
+_COLOR_GROUP = QColor("#F0F0FF")  # подсветка строк из одной группы
 
 
 def _badge(text: str, bg: QColor | None) -> QTableWidgetItem:
@@ -62,6 +62,21 @@ class _CommentDialog(QDialog):
 
 
 class RequestsPage(QWidget):
+    # Индексы колонок
+    COL_ID = 0
+    COL_STATUS = 1
+    COL_DATE = 2
+    COL_TIME = 3
+    COL_ORG = 4
+    COL_VENUE = 5
+    COL_PORTION = 6
+    COL_ZONE = 7
+    COL_CLIENT = 8
+    COL_PHONE = 9
+    COL_MSG = 10
+    COL_STAFF = 11
+    NUM_COLS = 12
+
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
         self.setObjectName("page")
@@ -83,7 +98,7 @@ class RequestsPage(QWidget):
         self.cb_status.currentIndexChanged.connect(lambda *_: self.reload())
 
         self.ed_search = QLineEdit()
-        self.ed_search.setPlaceholderText("Поиск: ФИО / телефон / email / площадка")
+        self.ed_search.setPlaceholderText("Поиск: ФИО / телефон / email / площадка / зона")
         self.ed_search.setClearButtonEnabled(True)
         self.ed_search.returnPressed.connect(self.reload)
 
@@ -113,8 +128,7 @@ class RequestsPage(QWidget):
         self.btn_reject.clicked.connect(self._reject)
         self.btn_cancel.clicked.connect(self._cancel)
 
-        # Таблица (оставил 10 колонок как ранее, чтобы не менять верстку)
-        self.tbl = QTableWidget(0, 10)
+        self.tbl = QTableWidget(0, self.NUM_COLS)
         self.tbl.setObjectName("requestsTable")
         self.tbl.setHorizontalHeaderLabels([
             "ID",
@@ -123,6 +137,8 @@ class RequestsPage(QWidget):
             "Время",
             "Учреждение",
             "Площадка",
+            "Часть",
+            "Зоны",
             "Клиент",
             "Телефон",
             "Комментарий клиента",
@@ -231,7 +247,7 @@ class RequestsPage(QWidget):
         row = self.tbl.currentRow()
         if row < 0:
             return None
-        item = self.tbl.item(row, 0)
+        item = self.tbl.item(row, self.COL_ID)
         if not item:
             return None
         obj = item.data(Qt.ItemDataRole.UserRole)
@@ -278,11 +294,25 @@ class RequestsPage(QWidget):
         self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(0)
 
+        # Отслеживаем показанные group_id чтобы не дублировать групповые
+        seen_groups: set[str] = set()
+
         for r in reqs:
+            # Если заявка с group_id и мы уже показали строку для этой группы — пропускаем
+            if r.group_id:
+                if r.group_id in seen_groups:
+                    continue
+                seen_groups.add(r.group_id)
+
             row = self.tbl.rowCount()
             self.tbl.insertRow(row)
 
-            it_id = QTableWidgetItem(str(r.id))
+            # ID — показываем id первой заявки, для групповых добавляем маркер
+            id_text = str(r.id)
+            if r.group_id:
+                id_text = f"{r.id} 🔗"
+
+            it_id = QTableWidgetItem(id_text)
             it_id.setData(Qt.ItemDataRole.UserRole, r)
             it_id.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -298,16 +328,26 @@ class RequestsPage(QWidget):
             it_date = QTableWidgetItem(r.desired_date.strftime("%d.%m.%Y"))
             it_time = QTableWidgetItem(f"{r.desired_start:%H:%M}–{r.desired_end:%H:%M}")
 
-            self.tbl.setItem(row, 0, it_id)
-            self.tbl.setItem(row, 1, it_status)
-            self.tbl.setItem(row, 2, it_date)
-            self.tbl.setItem(row, 3, it_time)
-            self.tbl.setItem(row, 4, QTableWidgetItem(r.org_name))
-            self.tbl.setItem(row, 5, QTableWidgetItem(r.venue_name))
-            self.tbl.setItem(row, 6, QTableWidgetItem(r.contact_name or ""))
-            self.tbl.setItem(row, 7, QTableWidgetItem(r.contact_phone or ""))
-            self.tbl.setItem(row, 8, QTableWidgetItem(r.message or ""))
-            self.tbl.setItem(row, 9, QTableWidgetItem(r.staff_comment or ""))
+            # Часть площадки
+            it_portion = QTableWidgetItem(r.portion_label or "—")
+            it_portion.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Зоны
+            zone_text = r.group_unit_names or r.unit_name or "—"
+            it_zone = QTableWidgetItem(zone_text)
+
+            self.tbl.setItem(row, self.COL_ID, it_id)
+            self.tbl.setItem(row, self.COL_STATUS, it_status)
+            self.tbl.setItem(row, self.COL_DATE, it_date)
+            self.tbl.setItem(row, self.COL_TIME, it_time)
+            self.tbl.setItem(row, self.COL_ORG, QTableWidgetItem(r.org_name))
+            self.tbl.setItem(row, self.COL_VENUE, QTableWidgetItem(r.venue_name))
+            self.tbl.setItem(row, self.COL_PORTION, it_portion)
+            self.tbl.setItem(row, self.COL_ZONE, it_zone)
+            self.tbl.setItem(row, self.COL_CLIENT, QTableWidgetItem(r.contact_name or ""))
+            self.tbl.setItem(row, self.COL_PHONE, QTableWidgetItem(r.contact_phone or ""))
+            self.tbl.setItem(row, self.COL_MSG, QTableWidgetItem(r.message or ""))
+            self.tbl.setItem(row, self.COL_STAFF, QTableWidgetItem(r.staff_comment or ""))
 
         self.tbl.setSortingEnabled(True)
         self._apply_ui_access()
@@ -317,11 +357,18 @@ class RequestsPage(QWidget):
         if not req:
             return
 
-        if QMessageBox.question(self, "Подтверждение", f"Подтвердить заявку #{req.id}?") != QMessageBox.StandardButton.Yes:
+        group_note = ""
+        if req.group_id:
+            group_note = f"\n\n⚠️ Это групповое бронирование ({req.portion_label}).\nБудут подтверждены все связанные зоны."
+
+        if QMessageBox.question(
+            self, "Подтверждение",
+            f"Подтвердить заявку #{req.id}?{group_note}",
+        ) != QMessageBox.StandardButton.Yes:
             return
 
         try:
-            set_request_status(
+            count = set_request_status(
                 user_id=self.user.id,
                 role_code=self.user.role_code,
                 request_id=req.id,
@@ -331,6 +378,10 @@ class RequestsPage(QWidget):
             QMessageBox.critical(self, "Заявки", f"Ошибка:\n{e}")
             return
 
+        info = f"Заявка #{req.id} подтверждена."
+        if count > 1:
+            info += f"\nОбновлено заявок: {count}"
+        QMessageBox.information(self, "Подтверждение", info)
         self.reload()
 
     def _reject(self):
@@ -338,18 +389,22 @@ class RequestsPage(QWidget):
         if not req:
             return
 
+        group_note = ""
+        if req.group_id:
+            group_note = f"\n\n⚠️ Групповое бронирование — будут отклонены все связанные зоны."
+
         dlg = _CommentDialog(
             self,
             title=f"Отклонить заявку #{req.id}",
-            placeholder="Причина отклонения (сохранится в staff_comment)…",
+            placeholder=f"Причина отклонения (сохранится в staff_comment)…{group_note}",
         )
-        if dlg.exec() != QDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         comment = dlg.text() or None
 
         try:
-            set_request_status(
+            count = set_request_status(
                 user_id=self.user.id,
                 role_code=self.user.role_code,
                 request_id=req.id,
@@ -360,6 +415,10 @@ class RequestsPage(QWidget):
             QMessageBox.critical(self, "Заявки", f"Ошибка:\n{e}")
             return
 
+        info = f"Заявка #{req.id} отклонена."
+        if count > 1:
+            info += f"\nОбновлено заявок: {count}"
+        QMessageBox.information(self, "Отклонение", info)
         self.reload()
 
     def _cancel(self):
@@ -367,11 +426,18 @@ class RequestsPage(QWidget):
         if not req:
             return
 
-        if QMessageBox.question(self, "Отмена", f"Отменить заявку #{req.id}?") != QMessageBox.StandardButton.Yes:
+        group_note = ""
+        if req.group_id:
+            group_note = f"\n\n⚠️ Групповое бронирование — будут отменены все связанные зоны."
+
+        if QMessageBox.question(
+            self, "Отмена",
+            f"Отменить заявку #{req.id}?{group_note}",
+        ) != QMessageBox.StandardButton.Yes:
             return
 
         try:
-            set_request_status(
+            count = set_request_status(
                 user_id=self.user.id,
                 role_code=self.user.role_code,
                 request_id=req.id,
@@ -381,6 +447,10 @@ class RequestsPage(QWidget):
             QMessageBox.critical(self, "Заявки", f"Ошибка:\n{e}")
             return
 
+        info = f"Заявка #{req.id} отменена."
+        if count > 1:
+            info += f"\nОбновлено заявок: {count}"
+        QMessageBox.information(self, "Отмена", info)
         self.reload()
 
     def _open_details(self):
@@ -392,14 +462,30 @@ class RequestsPage(QWidget):
         if req.processed_at:
             processed = f"{req.processed_at:%d.%m.%Y %H:%M}"
 
+        portion_line = ""
+        if req.portion_label:
+            portion_line = f"Часть площадки: {req.portion_label}\n"
+
+        zone_line = ""
+        if req.group_unit_names:
+            zone_line = f"Зоны: {req.group_unit_names}\n"
+        elif req.unit_name:
+            zone_line = f"Зона: {req.unit_name}\n"
+
+        group_line = ""
+        if req.group_id:
+            group_line = f"Групповое бронирование: да (group_id: {req.group_id[:8]}…)\n"
+
         text = (
             f"Заявка #{req.id}\n\n"
             f"Статус: {req.status}\n"
             f"Учреждение: {req.org_name}\n"
             f"Площадка: {req.venue_name}\n"
+            f"{portion_line}"
+            f"{zone_line}"
+            f"{group_line}"
             f"Дата: {req.desired_date:%d.%m.%Y}\n"
-            f"Время: {req.desired_start:%H:%M}–{req.desired_end:%H:%M}\n"
-            f"Зона (venue_unit_id): {req.venue_unit_id or '—'}\n\n"
+            f"Время: {req.desired_start:%H:%M}–{req.desired_end:%H:%M}\n\n"
             f"Клиент: {req.contact_name}\n"
             f"Телефон: {req.contact_phone or '—'}\n"
             f"Email: {req.contact_email or '—'}\n"
