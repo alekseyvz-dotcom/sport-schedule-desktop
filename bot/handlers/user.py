@@ -452,17 +452,17 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         resource_name=resource["name"],
     )
 
-    # ─── НОВОЕ: проверяем есть ли варианты разбиения ───
+    # Проверяем варианты разбиения
     portion_options = db.get_portion_options(venue_id)
 
     if not portion_options:
-        # Площадка не делится — пропускаем шаг, бронируем целиком
+        # Площадка не делится — пропускаем шаг
         units = db.load_venue_units(venue_id)
         total_units = len(units)
         await state.update_data(
             units_needed=0,
             total_units=total_units,
-            portion_label="Целое поле",
+            portion_label="",
         )
         await state.set_state(BookingFlow.choose_date)
         text = (
@@ -471,8 +471,10 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         )
         await cb.message.edit_text(text, reply_markup=date_keyboard())
     else:
-        # Показываем выбор части
+        # Показываем выбор части + прайс-лист
         total_units = len(db.load_venue_units(venue_id))
+        price_text = db.format_price_list(venue_id, total_units)
+
         await state.update_data(
             total_units=total_units,
             portion_options=[
@@ -481,12 +483,15 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
             ],
         )
         await state.set_state(BookingFlow.choose_portion)
+
+        price_block = f"\n\n{price_text}" if price_text else ""
+
         text = (
             f"📍 <b>{resource['name']}</b>\n\n"
-            "🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+            f"🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+            f"{price_block}"
         )
         await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
-
 
 # ─── НОВЫЙ ШАГ: выбор части площадки ───
 
@@ -610,17 +615,35 @@ async def on_duration(cb: CallbackQuery, state: FSMContext):
     end_str = cb.data[4:]  # HH-MM
     data = await state.get_data()
 
-    await state.update_data(slot_end=end_str)
+    # Вычисляем длительность в минутах
+    sh, sm = map(int, data['slot_start'].split("-"))
+    eh, em = map(int, end_str.split("-"))
+    duration_minutes = (eh * 60 + em) - (sh * 60 + sm)
+
+    # Вычисляем цену
+    units_needed = data.get("units_needed", 0)
+    total_units = data.get("total_units", 0)
+    price = db.compute_booking_price(
+        data["venue_id"], units_needed, total_units, duration_minutes
+    )
+
+    price_str = str(price) if price is not None else None
+    await state.update_data(slot_end=end_str, booking_price=price_str)
     await state.set_state(BookingFlow.enter_name)
 
     portion_label = data.get("portion_label", "")
     portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
 
+    price_line = ""
+    if price is not None:
+        price_line = f"\n💰 Расчётная стоимость составит от <b>{int(price)} ₽</b>"
+
     text = (
         f"📍 <b>{data['resource_name']}</b>\n"
         f"{portion_line}"
         f"📅 <b>{data['date_label']}</b>\n"
-        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(end_str)}</b>\n\n"
+        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(end_str)}</b>"
+        f"{price_line}\n\n"
         "Введите <b>ваше имя</b> (ФИО):"
     )
     await cb.message.edit_text(text)
@@ -688,8 +711,13 @@ async def _show_confirm(msg: Message, state: FSMContext, edit: bool):
     name = data.get("contact_name", "—")
     phone = data.get("contact_phone") or "—"
     comment = data.get("message") or "—"
+    booking_price = data.get("booking_price")
 
     portion_line = f"🏟 {portion_label}\n" if portion_label else ""
+
+    price_line = ""
+    if booking_price:
+        price_line = f"💰 Расчётная стоимость составит от <b>{int(float(booking_price))} ₽</b>\n"
 
     text = (
         "✅ <b>Проверка заявки</b>\n\n"
@@ -698,7 +726,8 @@ async def _show_confirm(msg: Message, state: FSMContext, edit: bool):
         f"📍 {resource}\n"
         f"{portion_line}"
         f"📅 {date_label}\n"
-        f"🕐 {slot_start} – {slot_end}\n\n"
+        f"🕐 {slot_start} – {slot_end}\n"
+        f"{price_line}\n"
         "<b>Контакты</b>\n"
         f"👤 {name}\n"
         f"📞 {phone}\n"
@@ -721,7 +750,7 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
     start_time = _parse_time(data["slot_start"])
     end_time = _parse_time(data["slot_end"])
 
-    # ─── НОВОЕ: определяем конкретные свободные unit_id ───
+    # Определяем конкретные свободные unit_id
     units_needed = data.get("units_needed", 0)
     venue_unit_ids = None
 
@@ -742,7 +771,7 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
     req_data = {
         "org_id":           data["org_id"],
         "venue_id":         data["venue_id"],
-        "venue_unit_id":    None,  # будет проигнорировано если есть venue_unit_ids
+        "venue_unit_id":    None,
         "venue_unit_ids":   venue_unit_ids,
         "desired_date":     d,
         "desired_start":    start_time,
@@ -765,13 +794,18 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
 
     portion_label = data.get("portion_label", "")
     portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+    booking_price = data.get("booking_price")
+    price_line = ""
+    if booking_price:
+        price_line = f"💰 Расчётная стоимость составит от <b>{int(float(booking_price))} ₽</b>\n"
 
     ok_text = (
         f"✅ <b>Заявка #{req_id} отправлена!</b>\n\n"
         f"📍 <b>{data['resource_name']}</b>\n"
         f"{portion_line}"
         f"📅 <b>{data['date_label']}</b>\n"
-        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}</b>\n\n"
+        f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}</b>\n"
+        f"{price_line}\n"
         "Администратор получит уведомление и свяжется с вами.\n"
         "Статус заявки: /my"
     )
@@ -787,13 +821,18 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
         comment = data.get("message") or "—"
         org_name = data.get("org_name", "")
 
+        staff_price_line = ""
+        if booking_price:
+            staff_price_line = f"💰 Расч. стоимость: от {int(float(booking_price))} ₽\n"
+
         staff_text = (
             f"📩 <b>Новая заявка #{req_id}</b>\n\n"
             f"🏢 {org_name}\n"
             f"📍 {data['resource_name']}\n"
             f"{portion_line}"
             f"📅 {data['date_label']}\n"
-            f"🕐 {_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}\n\n"
+            f"🕐 {_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}\n"
+            f"{staff_price_line}\n"
             f"👤 {data['contact_name']}\n"
             f"📞 {phone}\n"
             f"💬 {comment}\n"
