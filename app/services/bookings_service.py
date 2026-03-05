@@ -281,7 +281,6 @@ def get_booking(booking_id: int) -> Booking:
         if conn:
             put_conn(conn)
 
-
 def update_booking(
     booking_id: int,
     *,
@@ -290,6 +289,8 @@ def update_booking(
     title: str,
     kind: str,
     venue_unit_id: int | None,
+    starts_at: datetime | None = None,
+    ends_at: datetime | None = None,
 ) -> None:
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
@@ -309,29 +310,84 @@ def update_booking(
         if tenant_id is not None:
             raise ValueError("Для ГЗ tenant_id должен быть пустым")
 
+    if starts_at is not None:
+        starts_at = _ensure_aware(starts_at)
+    if ends_at is not None:
+        ends_at = _ensure_aware(ends_at)
+
+    if starts_at is not None and ends_at is not None and ends_at <= starts_at:
+        raise ValueError("Окончание должно быть позже начала")
+
     conn = None
     try:
         conn = get_conn()
+
+        # Валидация: unit должен принадлежать venue
+        if venue_unit_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT venue_id FROM public.bookings WHERE id=%s",
+                    (int(booking_id),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError("Бронирование не найдено")
+                venue_id = row[0]
+
+                cur.execute(
+                    "SELECT 1 FROM public.venue_units WHERE id=%s AND venue_id=%s",
+                    (int(venue_unit_id), int(venue_id)),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError("Выбранная зона не принадлежит площадке этого бронирования")
+
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE public.bookings
-                SET tenant_id=%s,
-                    gz_group_id=%s,
-                    title=%s,
-                    activity=%s,
-                    venue_unit_id=%s
-                WHERE id=%s
-                """,
-                (
-                    int(tenant_id) if tenant_id is not None else None,
-                    int(gz_group_id) if gz_group_id is not None else None,
-                    title,
-                    kind,
-                    int(venue_unit_id) if venue_unit_id is not None else None,
-                    int(booking_id),
-                ),
-            )
+            if starts_at is not None and ends_at is not None:
+                # Обновляем всё включая время
+                cur.execute(
+                    """
+                    UPDATE public.bookings
+                    SET tenant_id=%s,
+                        gz_group_id=%s,
+                        title=%s,
+                        activity=%s,
+                        venue_unit_id=%s,
+                        starts_at=%s,
+                        ends_at=%s
+                    WHERE id=%s
+                    """,
+                    (
+                        int(tenant_id) if tenant_id is not None else None,
+                        int(gz_group_id) if gz_group_id is not None else None,
+                        title,
+                        kind,
+                        int(venue_unit_id) if venue_unit_id is not None else None,
+                        starts_at,
+                        ends_at,
+                        int(booking_id),
+                    ),
+                )
+            else:
+                # Обновляем без времени (старое поведение)
+                cur.execute(
+                    """
+                    UPDATE public.bookings
+                    SET tenant_id=%s,
+                        gz_group_id=%s,
+                        title=%s,
+                        activity=%s,
+                        venue_unit_id=%s
+                    WHERE id=%s
+                    """,
+                    (
+                        int(tenant_id) if tenant_id is not None else None,
+                        int(gz_group_id) if gz_group_id is not None else None,
+                        title,
+                        kind,
+                        int(venue_unit_id) if venue_unit_id is not None else None,
+                        int(booking_id),
+                    ),
+                )
             if cur.rowcount != 1:
                 raise ValueError("Бронирование не найдено")
         conn.commit()
@@ -347,7 +403,6 @@ def update_booking(
     finally:
         if conn:
             put_conn(conn)
-
 
 def cancel_booking(booking_id: int) -> None:
     conn = None
