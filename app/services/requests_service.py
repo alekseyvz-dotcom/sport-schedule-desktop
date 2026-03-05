@@ -142,12 +142,15 @@ def list_requests(
             cur.execute(q, params)
             rows = cur.fetchall()
 
+        # Инициализируем out сразу
+        out: list[BookingRequest] = []
+
         # Собираем все group_id для обогащения данных
         group_ids = set()
         for row in rows:
-            gid = row[7]  # group_id
+            gid = row[7]  # group_id — 8-я колонка (индекс 7)
             if gid:
-                group_ids.add(gid)
+                group_ids.add(str(gid))
 
         # Для каждого group_id собираем unit_names и считаем units_booked
         group_info: dict[str, dict] = {}
@@ -157,7 +160,7 @@ def list_requests(
                 cur.execute(
                     f"""
                     SELECT
-                        br.group_id,
+                        br.group_id::text,
                         array_agg(DISTINCT vu2.name ORDER BY vu2.name) AS unit_names,
                         COUNT(DISTINCT br.venue_unit_id) AS units_booked,
                         (
@@ -167,25 +170,38 @@ def list_requests(
                         ) AS total_units
                     FROM booking_requests br
                     LEFT JOIN venue_units vu2 ON vu2.id = br.venue_unit_id
-                    WHERE br.group_id IN ({placeholders})
+                    WHERE br.group_id::text IN ({placeholders})
                     GROUP BY br.group_id, br.venue_id
                     """,
                     list(group_ids),
                 )
                 for grow in cur.fetchall():
-                    gid, unit_names_arr, units_booked, total_units = grow
+                    gid_str, unit_names_arr, units_booked, total_units = grow
                     unit_names_arr = unit_names_arr or []
-                    # Убираем None из list[BookingRequest] = []
+                    # Убираем None из массива
+                    unit_names_arr = [n for n in unit_names_arr if n]
+                    group_info[str(gid_str)] = {
+                        "unit_names": ", ".join(unit_names_arr),
+                        "portion_label": _compute_portion_label(
+                            int(units_booked), int(total_units)
+                        ),
+                    }
+
+        # Кэш для подсчёта total_units одиночных заявок
+        venue_total_cache: dict[int, int] = {}
+
         for row in rows:
             (
                 rid, roid, org_name, vid, venue_name, venue_unit_id,
-                unit_name, group_id,
+                unit_name, group_id_raw,
                 desired_date, desired_start, desired_end,
                 rstatus, contact_name, contact_phone, contact_email,
                 telegram_user_id, telegram_chat_id,
                 message, staff_comment, processed_by, processed_at,
                 created_at, updated_at
             ) = row
+
+            group_id = str(group_id_raw) if group_id_raw else None
 
             portion_label = ""
             group_unit_names = ""
@@ -198,7 +214,8 @@ def list_requests(
                 if vid not in venue_total_cache:
                     with conn.cursor() as cur2:
                         cur2.execute(
-                            "SELECT COUNT(*) FROM venue_units WHERE venue_id=%s AND is_active=true",
+                            "SELECT COUNT(*) FROM venue_units "
+                            "WHERE venue_id=%s AND is_active=true",
                             (vid,),
                         )
                         venue_total_cache[vid] = cur2.fetchone()[0]
@@ -236,7 +253,6 @@ def list_requests(
         return out
     finally:
         put_conn(conn)
-
 
 def set_request_status(
     *,
