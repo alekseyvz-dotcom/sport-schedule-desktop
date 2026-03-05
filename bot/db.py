@@ -797,13 +797,11 @@ def get_user_requests(telegram_user_id: int, limit: int = 10) -> list[dict]:
             )
             return cur.fetchall()
 
-def get_booking_price(
-    venue_id: int,
-    units_needed: int,
-    total_units: int,
-    duration_minutes: int,
-) -> Optional[Decimal]:
-    """Вычисляет цену бронирования для бота."""
+def get_venue_prices(venue_id: int) -> dict:
+    """
+    Возвращает все цены площадки как dict.
+    Ключи: price_q_60, price_q_90, price_h_60, price_h_90, price_f_60, price_f_90
+    """
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -817,8 +815,73 @@ def get_booking_price(
                 (venue_id,),
             )
             row = cur.fetchone()
+    return dict(row) if row else {}
 
-    if not row:
+
+def format_price_list(venue_id: int, total_units: int) -> str:
+    """
+    Формирует текстовый прайс-лист для показа при выборе зоны.
+    Возвращает строку или "" если цен нет.
+    """
+    prices = get_venue_prices(venue_id)
+    if not prices:
+        return ""
+
+    lines = []
+
+    # 1/4 поля — только если 4 зоны
+    if total_units == 4:
+        p60 = prices.get("price_q_60")
+        p90 = prices.get("price_q_90")
+        if p60 or p90:
+            parts = []
+            if p60:
+                parts.append(f"60 мин — {int(p60)} ₽")
+            if p90:
+                parts.append(f"90 мин — {int(p90)} ₽")
+            lines.append(f"  • 1/4 поля: {' | '.join(parts)}")
+
+    # 1/2 поля — если 2 или 4 зоны
+    if total_units in (2, 4):
+        p60 = prices.get("price_h_60")
+        p90 = prices.get("price_h_90")
+        if p60 or p90:
+            parts = []
+            if p60:
+                parts.append(f"60 мин — {int(p60)} ₽")
+            if p90:
+                parts.append(f"90 мин — {int(p90)} ₽")
+            lines.append(f"  • 1/2 поля: {' | '.join(parts)}")
+
+    # Целое поле — всегда
+    p60 = prices.get("price_f_60")
+    p90 = prices.get("price_f_90")
+    if p60 or p90:
+        parts = []
+        if p60:
+            parts.append(f"60 мин — {int(p60)} ₽")
+        if p90:
+            parts.append(f"90 мин — {int(p90)} ₽")
+        lines.append(f"  • Целое поле: {' | '.join(parts)}")
+
+    if not lines:
+        return ""
+
+    return "💰 <b>Стоимость аренды:</b>\n" + "\n".join(lines)
+
+
+def compute_booking_price(
+    venue_id: int,
+    units_needed: int,
+    total_units: int,
+    duration_minutes: int,
+) -> Optional[Decimal]:
+    """
+    Вычисляет цену конкретного бронирования.
+    Возвращает Decimal или None если цена не задана.
+    """
+    prices = get_venue_prices(venue_id)
+    if not prices:
         return None
 
     # Определяем часть
@@ -839,8 +902,11 @@ def get_booking_price(
     elif duration_minutes <= 90:
         dur = "90"
     else:
-        # 120 мин = 2 × 60
-        price_60 = row.get(f"price_{portion}_60")
-        return Decimal(price_60) * 2 if price_60 is not None else None
+        # 120 мин = 2 × цена за 60
+        price_60 = prices.get(f"price_{portion}_60")
+        if price_60 is not None:
+            return Decimal(str(price_60)) * 2
+        return None
 
-    return row.get(f"price_{portion}_{dur}")
+    val = prices.get(f"price_{portion}_{dur}")
+    return Decimal(str(val)) if val is not None else None
