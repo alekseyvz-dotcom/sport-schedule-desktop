@@ -85,6 +85,16 @@ def resource_keyboard(resources):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def portion_keyboard(portion_options: list[dict]):
+    """Клавиатура выбора части площадки (1/4, 1/2, целая)."""
+    buttons = [
+        [InlineKeyboardButton(text=opt["label"], callback_data=opt["callback"])]
+        for opt in portion_options
+    ]
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:resource")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def date_keyboard():
     today = date.today()
     buttons = []
@@ -104,7 +114,7 @@ def date_keyboard():
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:resource")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:portion")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -119,7 +129,6 @@ def slots_keyboard(slots_cache):
     buttons = []
     row = []
     for s in free_slots:
-        # HH-MM -> HH:MM
         label = _time_display(s["start"])
         row.append(InlineKeyboardButton(text=label, callback_data=f"slot_{s['start']}"))
         if len(row) == 4:
@@ -134,7 +143,7 @@ def slots_keyboard(slots_cache):
 
 
 def duration_keyboard(slot_start_str, slots_cache, org_work_end):
-    """Выбор длительности. Разрешены только 60/90 минут."""
+    """Выбор длительности."""
     sh, sm = map(int, slot_start_str.split("-"))
     start_minutes = sh * 60 + sm
 
@@ -150,21 +159,17 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
 
     max_free_minutes = 0
     if start_idx is not None:
-        # сколько подряд free слотов доступно
         for i in range(start_idx, len(slots_cache)):
             if not slots_cache[i]["free"]:
                 break
             max_free_minutes += settings.SLOT_MINUTES
 
-        # ограничиваем настройкой MAX_BOOKING_SLOTS
         max_slots = min(settings.MAX_BOOKING_SLOTS, len(slots_cache) - start_idx)
         max_free_minutes = min(max_free_minutes, max_slots * settings.SLOT_MINUTES)
 
-    # ограничим по work_end
     if work_end_minutes > start_minutes:
         max_free_minutes = min(max_free_minutes, work_end_minutes - start_minutes)
 
-    # показываем только допустимые длительности
     allowed = []
     for dur in DURATION_OPTIONS:
         if dur <= max_free_minutes and dur % settings.SLOT_MINUTES == 0:
@@ -192,9 +197,7 @@ def duration_keyboard(slot_start_str, slots_cache, org_work_end):
         buttons.append(row)
 
     if not buttons:
-        # Если на выбранное время нет возможных 60/90 — покажем понятное сообщение кнопкой назад
         buttons = [[InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")]]
-
     else:
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back:slot_start")])
 
@@ -245,6 +248,23 @@ def _parse_time(hhmm_str):
     return time(h, m)
 
 
+# ─── Portion label helper ───
+
+def _portion_label(units_needed: int, total_units: int) -> str:
+    """Человекочитаемый лейбл для части площадки."""
+    if total_units == 0 or units_needed >= total_units:
+        return "Целое поле"
+    fraction = units_needed / total_units
+    if abs(fraction - 0.25) < 0.01:
+        return "1/4 поля"
+    elif abs(fraction - 0.5) < 0.01:
+        return "1/2 поля"
+    elif abs(fraction - 0.75) < 0.01:
+        return "3/4 поля"
+    else:
+        return f"{units_needed}/{total_units} поля"
+
+
 # ───────────────────────── Commands / Menu ─────────────────────────
 
 @router.message(CommandStart())
@@ -263,10 +283,11 @@ async def cmd_help(message: Message):
     text = (
         "ℹ️ <b>Как работает бронирование</b>\n\n"
         "1) Выберите учреждение и площадку\n"
-        "2) Выберите дату и время начала\n"
-        "3) Укажите длительность\n"
-        "4) Оставьте контакты\n"
-        "5) Подтвердите отправку заявки\n\n"
+        "2) Укажите какую часть площадки хотите забронировать\n"
+        "3) Выберите дату и время начала\n"
+        "4) Укажите длительность\n"
+        "5) Оставьте контакты\n"
+        "6) Подтвердите отправку заявки\n\n"
         "После отправки заявка поступает администратору.\n"
         "Статусы и история: /my"
     )
@@ -295,10 +316,11 @@ async def menu_help(cb: CallbackQuery):
     text = (
         "ℹ️ <b>Как работает бронирование</b>\n\n"
         "1) Выберите учреждение и площадку\n"
-        "2) Выберите дату и время начала\n"
-        "3) Укажите длительность\n"
-        "4) Оставьте контакты\n"
-        "5) Подтвердите отправку заявки\n\n"
+        "2) Укажите какую часть площадки хотите забронировать\n"
+        "3) Выберите дату и время начала\n"
+        "4) Укажите длительность\n"
+        "5) Оставьте контакты\n"
+        "6) Подтвердите отправку заявки\n\n"
         "После отправки заявка поступает администратору.\n"
         "Статусы и история: /my"
     )
@@ -335,8 +357,12 @@ async def _send_my_requests(telegram_user_id: int, msg: Message, edit: bool = Fa
         start_str = r["desired_start"].strftime("%H:%M")
         end_str = r["desired_end"].strftime("%H:%M")
         venue = r["venue_name"]
+        unit = f" ({r['unit_name']})" if r.get("unit_name") else ""
         comment = f"\n   💬 {r['staff_comment']}" if r.get("staff_comment") else ""
-        lines.append(f"{emoji} <b>#{r['id']}</b>  {date_str} {start_str}–{end_str}\n   📍 {venue}{comment}")
+        lines.append(
+            f"{emoji} <b>#{r['id']}</b>  {date_str} {start_str}–{end_str}\n"
+            f"   📍 {venue}{unit}{comment}"
+        )
 
     text = "\n".join(lines)
     if edit:
@@ -369,7 +395,7 @@ async def _start_booking(msg: Message, state: FSMContext, edit: bool = False):
             return
 
         await state.set_state(BookingFlow.choose_resource)
-        text = org_card(org) + "\n\n<b>Шаг 1/4.</b> Выберите площадку:"
+        text = org_card(org) + "\n\n<b>Шаг 1.</b> Выберите площадку:"
         if edit:
             await msg.edit_text(text, reply_markup=resource_keyboard(resources))
         else:
@@ -379,7 +405,7 @@ async def _start_booking(msg: Message, state: FSMContext, edit: bool = False):
     await state.set_state(BookingFlow.choose_org)
     text = (
         f"⚽ <b>{ORG_BRAND}</b>\n"
-        "<b>Шаг 1/4.</b> Выберите учреждение:"
+        "<b>Шаг 1.</b> Выберите учреждение:"
     )
     if edit:
         await msg.edit_text(text, reply_markup=org_keyboard(orgs))
@@ -405,7 +431,7 @@ async def on_org(cb: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(BookingFlow.choose_resource)
-    text = org_card(org) + "\n\n<b>Шаг 2/4.</b> Выберите площадку:"
+    text = org_card(org) + "\n\n<b>Шаг 2.</b> Выберите площадку:"
     await cb.message.edit_text(text, reply_markup=resource_keyboard(resources))
 
 
@@ -423,13 +449,70 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
 
     await state.update_data(
         venue_id=venue_id,
-        venue_unit_id=None,
         resource_name=resource["name"],
     )
+
+    # ─── НОВОЕ: проверяем есть ли варианты разбиения ───
+    portion_options = db.get_portion_options(venue_id)
+
+    if not portion_options:
+        # Площадка не делится — пропускаем шаг, бронируем целиком
+        units = db.load_venue_units(venue_id)
+        total_units = len(units)
+        await state.update_data(
+            units_needed=0,
+            total_units=total_units,
+            portion_label="Целое поле",
+        )
+        await state.set_state(BookingFlow.choose_date)
+        text = (
+            f"📍 <b>{resource['name']}</b>\n\n"
+            "<b>Выберите дату:</b>"
+        )
+        await cb.message.edit_text(text, reply_markup=date_keyboard())
+    else:
+        # Показываем выбор части
+        total_units = len(db.load_venue_units(venue_id))
+        await state.update_data(
+            total_units=total_units,
+            portion_options=[
+                {"label": o["label"], "units_needed": o["units_needed"], "callback": o["callback"]}
+                for o in portion_options
+            ],
+        )
+        await state.set_state(BookingFlow.choose_portion)
+        text = (
+            f"📍 <b>{resource['name']}</b>\n\n"
+            "🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+        )
+        await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
+
+
+# ─── НОВЫЙ ШАГ: выбор части площадки ───
+
+@router.callback_query(BookingFlow.choose_portion, F.data.startswith("portion:"))
+async def on_portion(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    data = await state.get_data()
+
+    # Парсим callback: "portion:N" или "portion:1:unit:ID"
+    parts = cb.data.split(":")
+    units_needed = int(parts[1])
+
+    # Определяем лейбл
+    total_units = data.get("total_units", 0)
+    portion_label = _portion_label(units_needed, total_units)
+
+    await state.update_data(
+        units_needed=units_needed,
+        portion_label=portion_label,
+    )
     await state.set_state(BookingFlow.choose_date)
+
     text = (
-        f"📍 <b>{resource['name']}</b>\n\n"
-        "<b>Шаг 3/4.</b> Выберите дату:"
+        f"📍 <b>{data['resource_name']}</b>\n"
+        f"🏟 <b>{portion_label}</b>\n\n"
+        "<b>Выберите дату:</b>"
     )
     await cb.message.edit_text(text, reply_markup=date_keyboard())
 
@@ -444,7 +527,12 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
         await cb.answer("❌ Площадка закрыта в этот день", show_alert=True)
         return
 
-    slots = db.compute_free_slots(data["venue_id"], None, data["org_id"], d)
+    units_needed = data.get("units_needed", 0)
+
+    slots = db.compute_free_slots(
+        data["venue_id"], None, data["org_id"], d,
+        units_needed=units_needed,
+    )
     free_count = sum(1 for s in slots if s["free"])
     if free_count == 0:
         await cb.answer("😔 Нет свободного времени", show_alert=True)
@@ -452,17 +540,19 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
 
     date_label = f"{d.strftime('%d.%m.%Y')} ({WEEKDAYS[d.weekday()]})"
 
-    # slots_cache в HH-MM
     slots_cache = []
     for s in slots:
-        start_str = s["start"].strftime("%H-%M") if hasattr(s["start"], "strftime") else str(s["start"]).replace(":", "-")
-        end_str = s["end"].strftime("%H-%M") if hasattr(s["end"], "strftime") else str(s["end"]).replace(":", "-")
+        start_str = (
+            s["start"].strftime("%H-%M")
+            if hasattr(s["start"], "strftime")
+            else str(s["start"]).replace(":", "-")
+        )
+        end_str = (
+            s["end"].strftime("%H-%M")
+            if hasattr(s["end"], "strftime")
+            else str(s["end"]).replace(":", "-")
+        )
         slots_cache.append({"start": start_str, "end": end_str, "free": s["free"]})
-
-    org = db.get_org(data["org_id"])
-    org_work_end = None
-    if org and not org.get("is_24h"):
-        org_work_end = org.get("work_end")
 
     await state.update_data(
         desired_date=d.isoformat(),
@@ -471,11 +561,15 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
     )
     await state.set_state(BookingFlow.choose_slot_start)
 
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     text = (
         f"📍 <b>{data['resource_name']}</b>\n"
+        f"{portion_line}"
         f"📅 <b>{date_label}</b>\n\n"
         f"Свободных интервалов: <b>{free_count}</b>\n"
-        "<b>Шаг 4/4.</b> Выберите время начала:"
+        "<b>Выберите время начала:</b>"
     )
     await cb.message.edit_text(text, reply_markup=slots_keyboard(slots_cache))
 
@@ -494,8 +588,12 @@ async def on_slot_start(cb: CallbackQuery, state: FSMContext):
     await state.update_data(slot_start=start_str)
     await state.set_state(BookingFlow.choose_slot_end)
 
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     text = (
         f"📍 <b>{data['resource_name']}</b>\n"
+        f"{portion_line}"
         f"📅 <b>{data['date_label']}</b>\n"
         f"🕐 Начало: <b>{_time_display(start_str)}</b>\n\n"
         "Выберите длительность:"
@@ -515,8 +613,12 @@ async def on_duration(cb: CallbackQuery, state: FSMContext):
     await state.update_data(slot_end=end_str)
     await state.set_state(BookingFlow.enter_name)
 
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     text = (
         f"📍 <b>{data['resource_name']}</b>\n"
+        f"{portion_line}"
         f"📅 <b>{data['date_label']}</b>\n"
         f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(end_str)}</b>\n\n"
         "Введите <b>ваше имя</b> (ФИО):"
@@ -579,6 +681,7 @@ async def _show_confirm(msg: Message, state: FSMContext, edit: bool):
 
     org_name = data.get("org_name", "—")
     resource = data.get("resource_name", "—")
+    portion_label = data.get("portion_label", "")
     date_label = data.get("date_label", "—")
     slot_start = _time_display(data["slot_start"])
     slot_end = _time_display(data["slot_end"])
@@ -586,11 +689,14 @@ async def _show_confirm(msg: Message, state: FSMContext, edit: bool):
     phone = data.get("contact_phone") or "—"
     comment = data.get("message") or "—"
 
+    portion_line = f"🏟 {portion_label}\n" if portion_label else ""
+
     text = (
         "✅ <b>Проверка заявки</b>\n\n"
         "<b>Детали бронирования</b>\n"
         f"🏢 {org_name}\n"
         f"📍 {resource}\n"
+        f"{portion_line}"
         f"📅 {date_label}\n"
         f"🕐 {slot_start} – {slot_end}\n\n"
         "<b>Контакты</b>\n"
@@ -615,10 +721,29 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
     start_time = _parse_time(data["slot_start"])
     end_time = _parse_time(data["slot_end"])
 
+    # ─── НОВОЕ: определяем конкретные свободные unit_id ───
+    units_needed = data.get("units_needed", 0)
+    venue_unit_ids = None
+
+    if units_needed > 0:
+        free_ids = db.find_free_unit_ids(
+            data["venue_id"], data["org_id"], d,
+            start_time, end_time, units_needed,
+        )
+        if not free_ids:
+            await cb.message.edit_text(
+                "😔 К сожалению, выбранное время уже занято.\n"
+                "Попробуйте выбрать другое время.\n\n/book"
+            )
+            await state.clear()
+            return
+        venue_unit_ids = free_ids
+
     req_data = {
         "org_id":           data["org_id"],
         "venue_id":         data["venue_id"],
-        "venue_unit_id":    None,
+        "venue_unit_id":    None,  # будет проигнорировано если есть venue_unit_ids
+        "venue_unit_ids":   venue_unit_ids,
         "desired_date":     d,
         "desired_start":    start_time,
         "desired_end":      end_time,
@@ -638,9 +763,13 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     ok_text = (
         f"✅ <b>Заявка #{req_id} отправлена!</b>\n\n"
         f"📍 <b>{data['resource_name']}</b>\n"
+        f"{portion_line}"
         f"📅 <b>{data['date_label']}</b>\n"
         f"🕐 <b>{_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}</b>\n\n"
         "Администратор получит уведомление и свяжется с вами.\n"
@@ -662,6 +791,7 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
             f"📩 <b>Новая заявка #{req_id}</b>\n\n"
             f"🏢 {org_name}\n"
             f"📍 {data['resource_name']}\n"
+            f"{portion_line}"
             f"📅 {data['date_label']}\n"
             f"🕐 {_time_display(data['slot_start'])} – {_time_display(data['slot_end'])}\n\n"
             f"👤 {data['contact_name']}\n"
@@ -682,7 +812,6 @@ async def on_confirm(cb: CallbackQuery, state: FSMContext, bot: Bot):
                 await bot.send_message(chat_id, staff_text, reply_markup=staff_kb)
             except Exception:
                 log.exception("Failed to notify staff %s", chat_id)
-
 
 @router.callback_query(BookingFlow.confirm, F.data == "confirm:no")
 async def on_cancel(cb: CallbackQuery, state: FSMContext):
@@ -718,7 +847,7 @@ async def back_org(cb: CallbackQuery, state: FSMContext):
     orgs = db.load_orgs()
     await state.set_state(BookingFlow.choose_org)
     await cb.message.edit_text(
-        f"⚽ <b>{ORG_BRAND}</b>\n<b>Шаг 1/4.</b> Выберите учреждение:",
+        f"⚽ <b>{ORG_BRAND}</b>\n<b>Шаг 1.</b> Выберите учреждение:",
         reply_markup=org_keyboard(orgs),
     )
 
@@ -733,9 +862,36 @@ async def back_resource(cb: CallbackQuery, state: FSMContext):
     await state.set_state(BookingFlow.choose_resource)
     header = org_card(org, with_title=True) if org else f"⚽ <b>{ORG_BRAND}</b>"
     await cb.message.edit_text(
-        header + "\n\n<b>Шаг 2/4.</b> Выберите площадку:",
+        header + "\n\n<b>Выберите площадку:</b>",
         reply_markup=resource_keyboard(resources),
     )
+
+
+@router.callback_query(F.data == "back:portion")
+async def back_portion(cb: CallbackQuery, state: FSMContext):
+    """Назад к выбору части площадки (или к площадкам если деления нет)."""
+    await cb.answer()
+    data = await state.get_data()
+
+    portion_options = data.get("portion_options")
+    if portion_options:
+        # Площадка делится — показываем выбор части
+        await state.set_state(BookingFlow.choose_portion)
+        text = (
+            f"📍 <b>{data.get('resource_name', '—')}</b>\n\n"
+            "🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+        )
+        await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
+    else:
+        # Площадка не делится — возвращаемся к списку площадок
+        org = db.get_org(data["org_id"]) if data.get("org_id") else None
+        resources = db.load_resources(data["org_id"])
+        await state.set_state(BookingFlow.choose_resource)
+        header = org_card(org, with_title=True) if org else f"⚽ <b>{ORG_BRAND}</b>"
+        await cb.message.edit_text(
+            header + "\n\n<b>Выберите площадку:</b>",
+            reply_markup=resource_keyboard(resources),
+        )
 
 
 @router.callback_query(F.data == "back:date")
@@ -743,11 +899,16 @@ async def back_date(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     data = await state.get_data()
     await state.set_state(BookingFlow.choose_date)
+
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     await cb.message.edit_text(
-        f"📍 <b>{data.get('resource_name','—')}</b>\n\n<b>Шаг 3/4.</b> Выберите дату:",
+        f"📍 <b>{data.get('resource_name', '—')}</b>\n"
+        f"{portion_line}\n"
+        "<b>Выберите дату:</b>",
         reply_markup=date_keyboard(),
     )
-
 
 @router.callback_query(F.data == "back:slot_start")
 async def back_slot_start(cb: CallbackQuery, state: FSMContext):
@@ -755,9 +916,14 @@ async def back_slot_start(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     slots_cache = data.get("slots_cache", [])
     await state.set_state(BookingFlow.choose_slot_start)
+
+    portion_label = data.get("portion_label", "")
+    portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
+
     await cb.message.edit_text(
-        f"📍 <b>{data.get('resource_name','—')}</b>\n"
-        f"📅 <b>{data.get('date_label','—')}</b>\n\n"
-        "<b>Шаг 4/4.</b> Выберите время начала:",
+        f"📍 <b>{data.get('resource_name', '—')}</b>\n"
+        f"{portion_line}"
+        f"📅 <b>{data.get('date_label', '—')}</b>\n\n"
+        "<b>Выберите время начала:</b>",
         reply_markup=slots_keyboard(slots_cache),
     )
