@@ -1622,6 +1622,7 @@ class SchedulePage(QWidget):
             venue_units=venue_units,
             initial=initial,
             allowed_kinds=allowed_kinds,
+            editable_time=True,  # ← НОВОЕ: время редактируемое
         )
 
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -1631,6 +1632,13 @@ class SchedulePage(QWidget):
         kind        = str(data.get("kind") or "PD").upper()
         tenant_id   = int(data["tenant_id"])   if data.get("tenant_id")   is not None else None
         gz_group_id = int(data["gz_group_id"]) if data.get("gz_group_id") is not None else None
+
+        # Определяем новое время (если изменилось)
+        new_starts_at = None
+        new_ends_at = None
+        if data.get("time_changed"):
+            new_starts_at = data["starts_at"]
+            new_ends_at = data["ends_at"]
 
         try:
             update_booking(
@@ -1644,6 +1652,8 @@ class SchedulePage(QWidget):
                     if data.get("venue_unit_id") is not None
                     else None
                 ),
+                starts_at=new_starts_at,
+                ends_at=new_ends_at,
             )
         except Exception as e:
             _uilog("ERROR update_booking: " + repr(e))
