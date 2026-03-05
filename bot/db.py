@@ -117,62 +117,42 @@ def get_portion_options(venue_id: int) -> list[dict]:
     """
     Определяет варианты бронирования для площадки на основе venue_units.
 
-    Возвращает список вариантов:
-    [
-        {"label": "1/4 поля", "fraction": 0.25, "units_needed": 1},
-        {"label": "1/2 поля", "fraction": 0.50, "units_needed": 2},
-        {"label": "Целое поле", "fraction": 1.00, "units_needed": 4},
-    ]
-
-    Если площадка не разбита (нет units или 1 unit с fraction=1.0) — возвращает [].
+    - 4 unit-а (fraction=0.25): 1/4, 1/2, Целое
+    - 2 unit-а (fraction=0.50): 1/2, Целое
+    - 1 unit или нет unit-ов: [] (шаг пропускается)
     """
     units = load_venue_units(venue_id)
 
     if not units:
         return []
 
-    # Если один unit с fraction=1.0 — площадка не делится
+    # Один unit с fraction=1.0 — площадка не делится
     if len(units) == 1 and float(units[0]["fraction"]) >= 1.0:
         return []
 
     total_units = len(units)
-    unit_fraction = float(units[0]["fraction"])  # предполагаем одинаковую дробь
 
-    options = []
-
-    if total_units == 4 and abs(unit_fraction - 0.25) < 0.01:
-        # Площадка из 4 четвертей
-        options = [
+    if total_units == 4:
+        return [
             {"label": "1/4 поля", "fraction": 0.25, "units_needed": 1, "callback": "portion:1"},
             {"label": "1/2 поля", "fraction": 0.50, "units_needed": 2, "callback": "portion:2"},
             {"label": "Целое поле", "fraction": 1.00, "units_needed": 4, "callback": "portion:4"},
         ]
-    elif total_units == 2 and abs(unit_fraction - 0.5) < 0.01:
-        # Площадка из 2 половин
-        options = [
+    elif total_units == 2:
+        return [
             {"label": "1/2 поля", "fraction": 0.50, "units_needed": 1, "callback": "portion:1"},
             {"label": "Целое поле", "fraction": 1.00, "units_needed": 2, "callback": "portion:2"},
         ]
+    elif total_units == 3:
+        return [
+            {"label": "1/3 поля", "fraction": 0.33, "units_needed": 1, "callback": "portion:1"},
+            {"label": "2/3 поля", "fraction": 0.67, "units_needed": 2, "callback": "portion:2"},
+            {"label": "Целое поле", "fraction": 1.00, "units_needed": 3, "callback": "portion:3"},
+        ]
     else:
-        # Произвольное разбиение — предлагаем каждый unit отдельно + целое
-        for i, u in enumerate(units):
-            frac = float(u["fraction"])
-            label = u["name"]
-            options.append({
-                "label": label,
-                "fraction": frac,
-                "units_needed": 1,
-                "callback": f"portion:1:unit:{u['id']}",
-            })
-        # Целое поле
-        options.append({
-            "label": "Целое поле",
-            "fraction": 1.0,
-            "units_needed": total_units,
-            "callback": f"portion:{total_units}",
-        })
-
-    return options
+        # Любое другое количество — предлагаем только целое
+        # (или можно пропустить шаг)
+        return []
 
 
 def is_venue_available(venue_id: int, org_id: int, d: date) -> bool:
