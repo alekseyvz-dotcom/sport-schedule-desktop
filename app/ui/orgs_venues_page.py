@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from app.ui.badge_delegate import BadgeDelegate, BADGE_BG_ROLE
 from app.services.users_service import AuthUser
 from app.services.access_service import get_org_access
+from app.services.venue_prices_service import save_venue_prices
 
 from app.services.orgs_service import (
     list_orgs,
@@ -717,6 +718,12 @@ class OrgsVenuesPage(QWidget):
                 comment=data["comment"],
             )
             apply_units_scheme(new_id, data["units_scheme"])
+
+            # Сохраняем прайс-лист
+            prices = dlg.price_values()
+            prices.venue_id = new_id
+            save_venue_prices(new_id, prices)
+
         except Exception as e:
             QMessageBox.critical(self, "Создать площадку", f"Ошибка:\n{e}")
             return
@@ -770,13 +777,19 @@ class OrgsVenuesPage(QWidget):
                 comment=data["comment"],
             )
             apply_units_scheme(v.id, data["units_scheme"])
+
+            # Сохраняем прайс-лист
+            prices = dlg.price_values()
+            prices.venue_id = v.id
+            save_venue_prices(v.id, prices)
+
         except Exception as e:
             QMessageBox.critical(self, "Редактировать площадку", f"Ошибка:\n{e}")
             return
 
         self.reload_venues()
         self._select_venue_row_by_id(v.id)
-
+    
     def _venue_toggle(self):
         org = self._selected_org()
         if not org:
