@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
@@ -10,10 +11,44 @@ from bot import db
 router = Router()
 log = logging.getLogger(__name__)
 
+TZ = timezone(timedelta(hours=3))
+
 STATUS_TEXT = {
     "confirmed": "✅ Подтверждена",
     "rejected":  "❌ Отклонена",
 }
+
+
+def _compute_price_for_request(req: dict, portion_info: dict) -> str:
+    """
+    Вычисляет цену для заявки и возвращает строку вида
+    "💰 Расч. стоимость: от 7000 ₽\n" или "".
+    """
+    try:
+        venue_id = req["venue_id"]
+        start = req["desired_start"]
+        end = req["desired_end"]
+
+        # Длительность в минутах
+        start_min = start.hour * 60 + start.minute
+        end_min = end.hour * 60 + end.minute
+        duration = end_min - start_min
+        if duration <= 0:
+            return ""
+
+        units_booked = portion_info.get("units_booked", 0)
+        total_units = portion_info.get("total_units", 0)
+
+        price = db.compute_booking_price(
+            venue_id, units_booked, total_units, duration
+        )
+
+        if price is not None:
+            return f"💰 Расч. стоимость: от {int(price)} ₽\n"
+    except Exception:
+        log.exception("Failed to compute price for request #%s", req.get("id"))
+
+    return ""
 
 
 @router.callback_query(F.data.startswith("staff:confirm:"))
@@ -45,6 +80,9 @@ async def _process(cb: CallbackQuery, bot: Bot, req_id: int, new_status: str):
 
     # Получаем информацию о части площадки
     portion_info = db.get_request_portion_info(req_id)
+
+    # Вычисляем цену
+    price_line = _compute_price_for_request(req, portion_info)
 
     staff_name = cb.from_user.full_name
 
@@ -88,7 +126,8 @@ async def _process(cb: CallbackQuery, bot: Bot, req_id: int, new_status: str):
                 f"📍 {venue}\n"
                 f"{portion_line}"
                 f"📅 {date_str}\n"
-                f"🕐 {start_str}–{end_str}\n\n"
+                f"🕐 {start_str}–{end_str}\n"
+                f"{price_line}\n"
                 f"С вами свяжутся для уточнения деталей."
             )
         else:
