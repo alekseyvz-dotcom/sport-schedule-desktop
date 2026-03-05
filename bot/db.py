@@ -796,3 +796,51 @@ def get_user_requests(telegram_user_id: int, limit: int = 10) -> list[dict]:
                 (telegram_user_id, limit),
             )
             return cur.fetchall()
+
+def get_booking_price(
+    venue_id: int,
+    units_needed: int,
+    total_units: int,
+    duration_minutes: int,
+) -> Optional[Decimal]:
+    """Вычисляет цену бронирования для бота."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT price_q_60, price_q_90,
+                       price_h_60, price_h_90,
+                       price_f_60, price_f_90
+                FROM public.venue_prices
+                WHERE venue_id = %s AND is_active = true
+                """,
+                (venue_id,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    # Определяем часть
+    if total_units == 0 or units_needed >= total_units:
+        portion = "f"
+    else:
+        fraction = units_needed / total_units
+        if abs(fraction - 0.25) < 0.01:
+            portion = "q"
+        elif abs(fraction - 0.5) < 0.01:
+            portion = "h"
+        else:
+            portion = "f"
+
+    # Определяем длительность
+    if duration_minutes <= 60:
+        dur = "60"
+    elif duration_minutes <= 90:
+        dur = "90"
+    else:
+        # 120 мин = 2 × 60
+        price_60 = row.get(f"price_{portion}_60")
+        return Decimal(price_60) * 2 if price_60 is not None else None
+
+    return row.get(f"price_{portion}_{dur}")
