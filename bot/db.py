@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -460,10 +461,16 @@ def find_free_unit_ids(
     return free_ids if len(free_ids) >= units_needed else []
 
 
+import uuid  # ← добавить в imports вверху файла
+
+# ... остальные imports без изменений ...
+
+
 def save_request(data: dict) -> int:
     """
     Сохраняет заявку. Если передан venue_unit_ids (список) — создаёт
-    отдельную заявку для каждого unit. Возвращает id первой заявки.
+    отдельную заявку для каждого unit с общим group_id.
+    Возвращает id первой заявки.
     """
     conn = psycopg2.connect(settings.DATABASE_URL)
     try:
@@ -472,8 +479,13 @@ def save_request(data: dict) -> int:
             cur.execute("SET TIME ZONE 'Europe/Moscow'")
 
         venue_unit_ids = data.get("venue_unit_ids")
+
+        # Определяем group_id если бронируем несколько unit-ов
+        group_id = None
+        if venue_unit_ids and len(venue_unit_ids) > 1:
+            group_id = str(uuid.uuid4())
+
         if not venue_unit_ids:
-            # Одна заявка (старое поведение)
             venue_unit_ids = [data.get("venue_unit_id")]
 
         first_id = None
@@ -485,8 +497,9 @@ def save_request(data: dict) -> int:
                         (org_id, venue_id, venue_unit_id,
                          desired_date, desired_start, desired_end,
                          contact_name, contact_phone, contact_email,
-                         telegram_user_id, telegram_chat_id, message)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         telegram_user_id, telegram_chat_id, message,
+                         group_id)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     RETURNING id
                     """,
                     (
@@ -500,6 +513,7 @@ def save_request(data: dict) -> int:
                         data.get("telegram_user_id"),
                         data.get("telegram_chat_id"),
                         data.get("message"),
+                        group_id,
                     ),
                 )
                 req_id = cur.fetchone()["id"]
@@ -507,7 +521,10 @@ def save_request(data: dict) -> int:
                     first_id = req_id
 
         conn.commit()
-        log.info("Saved booking request(s), first id=#%s, units=%s", first_id, venue_unit_ids)
+        log.info(
+            "Saved booking request(s), first id=#%s, units=%s, group=%s",
+            first_id, venue_unit_ids, group_id,
+        )
         return first_id
     except Exception:
         conn.rollback()
@@ -515,6 +532,212 @@ def save_request(data: dict) -> int:
     finally:
         conn.close()
 
+
+def get_grouped_requests(request_id: int) -> list[dict]:
+    """
+    Возвращает все заявки из той же группы (group_id).
+    Если group_id is NULL — возвращает только саму заявку.
+    """
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Сначала получаем group_id этой заявки
+            cur.execute(
+                "SELECT group_id FROM booking_requests WHERE id = %s",
+                (request_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return []
+
+            group_id = row["group_id"]
+
+            if group_id is None:
+                # Одиночная заявка
+                cur.execute(
+                    """
+                    SELECT br.*, v.name AS venue_name,
+                           vu.name AS unit_name, o.name AS org_name
+                    FROM booking_requests br
+                    JOIN venues v ON v.id = br.venue_id
+                    LEFT JOIN venue_units vu ON vu.id = br.venue_unit_id
+                    JOIN sport_orgs o ON o.id = br.org_id
+                    WHERE br.id = %s
+                    """,
+                    (request_id,),
+                )
+                result = cur.fetchone()
+                return [result] if result else []
+            else:
+                # Групповая заявка
+                cur.execute(
+                    """
+                    SELECT br.*, v.name AS venue_name,
+                           vu.name AS unit_name, o.name AS org_name
+                    FROM booking_requests br
+                    JOIN venues v ON v.id = br.venue_id
+                    LEFT JOIN venue_units vu ON vu.id = br.venue_unit_id
+                    JOIN sport_orgs o ON o.id = br.org_id
+                    WHERE br.group_id = %s
+                    ORDER BY br.id
+                    """,
+                    (group_id,),
+                )
+                return cur.fetchall()
+
+
+def update_group_status(
+    request_id: int, status: str, staff_comment: str = None
+) -> list[dict]:
+    """
+    Обновляет статус заявки и всех связанных заявок (по group_id).
+    Возвращает список обновлённых заявок.
+    """
+    now = datetime.now(TZ)
+    conn = psycopg2.connect(settings.DATABASE_URL)
+    try:
+        conn.autocommit = False
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Получаем group_id
+            cur.execute(
+                "SELECT group_id FROM booking_requests WHERE id = %s",
+                (request_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return []
+
+            group_id = row["group_id"]
+
+            if group_id is None:
+                # Одиночная заявка
+                cur.execute(
+                    """
+                    UPDATE booking_requests
+                    SET status=%s, staff_comment=%s,
+                        processed_at=%s, updated_at=%s
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (status, staff_comment, now, now, request_id),
+                )
+                updated = cur.fetchone()
+                conn.commit()
+                return [updated] if updated else []
+            else:
+                # Все заявки группы
+                cur.execute(
+                    """
+                    UPDATE booking_requests
+                    SET status=%s, staff_comment=%s,
+                        processed_at=%s, updated_at=%s
+                    WHERE group_id=%s AND status='new'
+                    RETURNING *
+                    """,
+                    (status, staff_comment, now, now, group_id),
+                )
+                updated = cur.fetchall()
+                conn.commit()
+                return updated
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_request_portion_info(request_id: int) -> dict:
+    """
+    Получает информацию о части площадки для заявки.
+    Возвращает dict с полями:
+      - venue_name, org_name
+      - unit_names: список названий забронированных зон
+      - total_units: общее кол-во зон площадки
+      - units_booked: кол-во забронированных зон
+      - portion_label: человекочитаемый лейбл ("1/4 поля", "1/2 поля", "Целое поле")
+    """
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Получаем основную заявку
+            cur.execute(
+                """
+                SELECT br.venue_id, br.group_id, v.name AS venue_name, o.name AS org_name
+                FROM booking_requests br
+                JOIN venues v ON v.id = br.venue_id
+                JOIN sport_orgs o ON o.id = br.org_id
+                WHERE br.id = %s
+                """,
+                (request_id,),
+            )
+            req = cur.fetchone()
+            if not req:
+                return {}
+
+            venue_id = req["venue_id"]
+            group_id = req["group_id"]
+
+            # Получаем все unit-ы площадки
+            cur.execute(
+                """
+                SELECT id, name FROM venue_units
+                WHERE venue_id = %s AND is_active = true
+                ORDER BY sort_order, name
+                """,
+                (venue_id,),
+            )
+            all_units = cur.fetchall()
+            total_units = len(all_units)
+
+            # Получаем забронированные unit-ы
+            if group_id:
+                cur.execute(
+                    """
+                    SELECT DISTINCT vu.name
+                    FROM booking_requests br
+                    JOIN venue_units vu ON vu.id = br.venue_unit_id
+                    WHERE br.group_id = %s
+                    ORDER BY vu.name
+                    """,
+                    (group_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT vu.name
+                    FROM booking_requests br
+                    JOIN venue_units vu ON vu.id = br.venue_unit_id
+                    WHERE br.id = %s
+                    """,
+                    (request_id,),
+                )
+            booked_units = cur.fetchall()
+            unit_names = [u["name"] for u in booked_units]
+            units_booked = len(unit_names)
+
+    # Определяем лейбл
+    if total_units == 0 or units_booked == 0:
+        portion_label = ""
+    elif units_booked >= total_units:
+        portion_label = "Целое поле"
+    else:
+        fraction = units_booked / total_units
+        if abs(fraction - 0.25) < 0.01:
+            portion_label = "1/4 поля"
+        elif abs(fraction - 0.5) < 0.01:
+            portion_label = "1/2 поля"
+        elif abs(fraction - 0.75) < 0.01:
+            portion_label = "3/4 поля"
+        else:
+            portion_label = f"{units_booked}/{total_units} поля"
+
+    return {
+        "venue_name": req["venue_name"],
+        "org_name": req["org_name"],
+        "unit_names": unit_names,
+        "total_units": total_units,
+        "units_booked": units_booked,
+        "portion_label": portion_label,
+    }
 
 def get_staff_chat_ids(org_id: int) -> list[int]:
     with get_conn() as conn:
