@@ -57,7 +57,6 @@ def get_org(org_id: int) -> Optional[dict]:
 def load_resources(org_id: int) -> list[dict]:
 
     today = date.today()
-    last_day = today + timedelta(days=settings.MAX_DAYS_AHEAD)
 
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -69,7 +68,7 @@ def load_resources(org_id: int) -> list[dict]:
                 WHERE v.org_id = %s
                   AND v.is_active = true
 
-                  -- площадка не закрыта на весь период
+                  -- площадка не закрыта сегодня
                   AND NOT EXISTS (
                       SELECT 1
                       FROM venue_closures vc
@@ -79,23 +78,19 @@ def load_resources(org_id: int) -> list[dict]:
                         AND vc.date_to >= %s
                   )
 
-                  -- есть хотя бы один день сезона в доступном диапазоне
-                  AND EXISTS (
-                      SELECT 1
-                      FROM generate_series(%s::date, %s::date, interval '1 day') d(day)
-                      WHERE public.is_venue_in_season(v.id, d.day)
-                  )
+                  -- площадка сейчас в сезоне
+                  AND public.is_venue_in_season(v.id, %s)
 
                 ORDER BY v.name
                 """,
                 (
                     org_id,
                     today,
-                    last_day,
                     today,
-                    last_day,
+                    today,
                 ),
             )
+
             rows = cur.fetchall()
 
     resources = []
@@ -107,7 +102,6 @@ def load_resources(org_id: int) -> list[dict]:
         })
 
     return resources
-
 
 def load_venue_units(venue_id: int) -> list[dict]:
     """
