@@ -447,60 +447,49 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
         await cb.answer("Площадка не найдена", show_alert=True)
         return
 
+    units = db.load_venue_units(venue_id)
+    total_units = max(len(units), 1)  # для прайса хотя бы 1
+    portion_options = db.get_portion_options(venue_id)
+    price_text = db.format_price_list(venue_id, total_units)
+
     await state.update_data(
         venue_id=venue_id,
         resource_name=resource["name"],
+        total_units=total_units,
+        resource_price_text=price_text,
+        portion_options=[
+            {"label": o["label"], "units_needed": o["units_needed"], "callback": o["callback"]}
+            for o in portion_options
+        ] if portion_options else [],
     )
 
-    # Проверяем варианты разбиения
-    portion_options = db.get_portion_options(venue_id)
-
     if not portion_options:
-        units = db.load_venue_units(venue_id)
-        total_units = len(units)
-    
-        price_text = db.format_price_list(venue_id, total_units)
-    
+        # Площадка не делится — шаг выбора части пропускаем,
+        # НО прайс всё равно показываем
         await state.update_data(
-            units_needed=total_units,   # целое поле
-            total_units=total_units,
-            portion_label="Целое поле",
+            units_needed=0,
+            portion_label="",
         )
-    
         await state.set_state(BookingFlow.choose_date)
-    
+
         price_block = f"\n\n{price_text}" if price_text else ""
-    
         text = (
-            f"📍 <b>{resource['name']}</b>\n"
-            f"🏟 <b>Целое поле</b>"
+            f"📍 <b>{resource['name']}</b>"
             f"{price_block}\n\n"
             "<b>Выберите дату:</b>"
         )
-    
         await cb.message.edit_text(text, reply_markup=date_keyboard())
-    else:
-        # Показываем выбор части + прайс-лист
-        total_units = len(db.load_venue_units(venue_id))
-        price_text = db.format_price_list(venue_id, total_units)
+        return
 
-        await state.update_data(
-            total_units=total_units,
-            portion_options=[
-                {"label": o["label"], "units_needed": o["units_needed"], "callback": o["callback"]}
-                for o in portion_options
-            ],
-        )
-        await state.set_state(BookingFlow.choose_portion)
+    await state.set_state(BookingFlow.choose_portion)
 
-        price_block = f"\n\n{price_text}" if price_text else ""
-
-        text = (
-            f"📍 <b>{resource['name']}</b>\n\n"
-            f"🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
-            f"{price_block}"
-        )
-        await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
+    price_block = f"\n\n{price_text}" if price_text else ""
+    text = (
+        f"📍 <b>{resource['name']}</b>\n\n"
+        f"🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+        f"{price_block}"
+    )
+    await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
 
 # ─── НОВЫЙ ШАГ: выбор части площадки ───
 
@@ -538,7 +527,7 @@ async def on_date(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if not db.is_venue_available(data["venue_id"], data["org_id"], d):
-        await cb.answer("❌ Площадка закрыта в этот день", show_alert=True)
+        await cb.answer("❌ Площадка недоступна в этот день (закрыта или вне сезона)", show_alert=True)
         return
 
     units_needed = data.get("units_needed", 0)
@@ -629,11 +618,13 @@ async def on_duration(cb: CallbackQuery, state: FSMContext):
     eh, em = map(int, end_str.split("-"))
     duration_minutes = (eh * 60 + em) - (sh * 60 + sm)
 
-    # Вычисляем цену
+    # Для площадки без деления считаем цену как за целую площадку
     units_needed = data.get("units_needed", 0)
-    total_units = data.get("total_units", 0)
+    total_units = max(data.get("total_units", 0), 1)
+    pricing_units_needed = units_needed if units_needed > 0 else total_units
+
     price = db.compute_booking_price(
-        data["venue_id"], units_needed, total_units, duration_minutes
+        data["venue_id"], pricing_units_needed, total_units, duration_minutes
     )
 
     price_str = str(price) if price is not None else None
@@ -656,7 +647,6 @@ async def on_duration(cb: CallbackQuery, state: FSMContext):
         "Введите <b>ваше имя</b> (ФИО):"
     )
     await cb.message.edit_text(text)
-
 
 @router.message(BookingFlow.enter_name)
 async def on_name(message: Message, state: FSMContext):
@@ -917,21 +907,23 @@ async def back_resource(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back:portion")
 async def back_portion(cb: CallbackQuery, state: FSMContext):
-    """Назад к выбору части площадки (или к площадкам если деления нет)."""
     await cb.answer()
     data = await state.get_data()
 
     portion_options = data.get("portion_options")
     if portion_options:
-        # Площадка делится — показываем выбор части
         await state.set_state(BookingFlow.choose_portion)
+
+        price_text = data.get("resource_price_text")
+        price_block = f"\n\n{price_text}" if price_text else ""
+
         text = (
             f"📍 <b>{data.get('resource_name', '—')}</b>\n\n"
             "🏟 <b>Какую часть площадки вы хотите забронировать?</b>"
+            f"{price_block}"
         )
         await cb.message.edit_text(text, reply_markup=portion_keyboard(portion_options))
     else:
-        # Площадка не делится — возвращаемся к списку площадок
         org = db.get_org(data["org_id"]) if data.get("org_id") else None
         resources = db.load_resources(data["org_id"])
         await state.set_state(BookingFlow.choose_resource)
@@ -951,9 +943,15 @@ async def back_date(cb: CallbackQuery, state: FSMContext):
     portion_label = data.get("portion_label", "")
     portion_line = f"🏟 <b>{portion_label}</b>\n" if portion_label else ""
 
+    price_text = data.get("resource_price_text")
+    price_block = ""
+    if not data.get("portion_options") and price_text:
+        price_block = f"\n\n{price_text}"
+
     await cb.message.edit_text(
         f"📍 <b>{data.get('resource_name', '—')}</b>\n"
-        f"{portion_line}\n"
+        f"{portion_line}"
+        f"{price_block}\n\n"
         "<b>Выберите дату:</b>",
         reply_markup=date_keyboard(),
     )
