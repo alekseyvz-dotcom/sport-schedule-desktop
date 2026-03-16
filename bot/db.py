@@ -55,43 +55,59 @@ def get_org(org_id: int) -> Optional[dict]:
 
 
 def load_resources(org_id: int) -> list[dict]:
-    """
-    Загружает только площадки (venues), без venue_units.
-    """
+
     today = date.today()
+    last_day = today + timedelta(days=settings.MAX_DAYS_AHEAD)
+
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT v.id   AS venue_id,
+                SELECT v.id AS venue_id,
                        v.name AS venue_name
                 FROM venues v
                 WHERE v.org_id = %s
                   AND v.is_active = true
+
+                  -- площадка не закрыта на весь период
                   AND NOT EXISTS (
-                      SELECT 1 FROM venue_closures vc
+                      SELECT 1
+                      FROM venue_closures vc
                       WHERE vc.venue_id = v.id
                         AND vc.is_active = true
                         AND vc.date_from <= %s
                         AND vc.date_to >= %s
                   )
+
+                  -- есть хотя бы один день сезона в доступном диапазоне
+                  AND EXISTS (
+                      SELECT 1
+                      FROM generate_series(%s::date, %s::date, interval '1 day') d(day)
+                      WHERE public.is_venue_in_season(v.id, d.day)
+                  )
+
                 ORDER BY v.name
                 """,
-                (org_id, today, today),
+                (
+                    org_id,
+                    today,
+                    last_day,
+                    today,
+                    last_day,
+                ),
             )
             rows = cur.fetchall()
 
     resources = []
     for r in rows:
         resources.append({
-            "venue_id":      r["venue_id"],
+            "venue_id": r["venue_id"],
             "venue_unit_id": None,
-            "name":          r["venue_name"],
+            "name": r["venue_name"],
         })
+
     return resources
 
-
-# ─── НОВОЕ: загрузка venue_units ───
 
 def load_venue_units(venue_id: int) -> list[dict]:
     """
