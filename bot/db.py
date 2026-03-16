@@ -32,6 +32,8 @@ def get_conn():
             pass
         conn.close()
 
+def _today_msk() -> date:
+    return datetime.now(TZ).date()
 
 def load_orgs() -> list[dict]:
     with get_conn() as conn:
@@ -55,8 +57,7 @@ def get_org(org_id: int) -> Optional[dict]:
 
 
 def load_resources(org_id: int) -> list[dict]:
-
-    today = date.today()
+    today = _today_msk()
 
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -64,44 +65,47 @@ def load_resources(org_id: int) -> list[dict]:
                 """
                 SELECT v.id AS venue_id,
                        v.name AS venue_name
-                FROM venues v
+                FROM public.venues v
+                JOIN public.sport_orgs o ON o.id = v.org_id
                 WHERE v.org_id = %s
                   AND v.is_active = true
+                  AND o.is_active = true
+
+                  -- учреждение не закрыто сегодня
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM public.org_closures oc
+                      WHERE oc.org_id = v.org_id
+                        AND oc.is_active = true
+                        AND %s BETWEEN oc.date_from AND oc.date_to
+                  )
 
                   -- площадка не закрыта сегодня
                   AND NOT EXISTS (
                       SELECT 1
-                      FROM venue_closures vc
+                      FROM public.venue_closures vc
                       WHERE vc.venue_id = v.id
                         AND vc.is_active = true
-                        AND vc.date_from <= %s
-                        AND vc.date_to >= %s
+                        AND %s BETWEEN vc.date_from AND vc.date_to
                   )
 
-                  -- площадка сейчас в сезоне
+                  -- площадка в сезоне сегодня
                   AND public.is_venue_in_season(v.id, %s)
 
                 ORDER BY v.name
                 """,
-                (
-                    org_id,
-                    today,
-                    today,
-                    today,
-                ),
+                (org_id, today, today, today),
             )
-
             rows = cur.fetchall()
 
-    resources = []
-    for r in rows:
-        resources.append({
+    return [
+        {
             "venue_id": r["venue_id"],
             "venue_unit_id": None,
             "name": r["venue_name"],
-        })
-
-    return resources
+        }
+        for r in rows
+    ]
 
 def load_venue_units(venue_id: int) -> list[dict]:
     """
@@ -164,47 +168,43 @@ def get_portion_options(venue_id: int) -> list[dict]:
         # (или можно пропустить шаг)
         return []
 
-
 def is_venue_available(venue_id: int, org_id: int, d: date) -> bool:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT 1 FROM org_closures "
-                "WHERE org_id=%s AND is_active=true AND date_from<=%s AND date_to>=%s LIMIT 1",
-                (org_id, d, d),
-            )
-            if cur.fetchone():
-                return False
-
-            cur.execute(
-                "SELECT 1 FROM venue_closures "
-                "WHERE venue_id=%s AND is_active=true AND date_from<=%s AND date_to>=%s LIMIT 1",
-                (venue_id, d, d),
-            )
-            if cur.fetchone():
-                return False
-
-            cur.execute(
                 """
-                SELECT EXISTS(
-                    SELECT 1 FROM venue_season_templates
-                    WHERE venue_id=%s AND is_active=true
-                    UNION ALL
-                    SELECT 1 FROM venue_season_overrides
-                    WHERE venue_id=%s AND is_active=true
-                )
-                """,
-                (venue_id, venue_id),
-            )
-            if cur.fetchone()["exists"]:
-                cur.execute(
-                    "SELECT public.is_venue_in_season(%s, %s) AS ok",
-                    (venue_id, d),
-                )
-                if not cur.fetchone()["ok"]:
-                    return False
-    return True
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM public.venues v
+                    JOIN public.sport_orgs o ON o.id = v.org_id
+                    WHERE v.id = %s
+                      AND v.org_id = %s
+                      AND v.is_active = true
+                      AND o.is_active = true
 
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM public.org_closures oc
+                          WHERE oc.org_id = v.org_id
+                            AND oc.is_active = true
+                            AND %s BETWEEN oc.date_from AND oc.date_to
+                      )
+
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM public.venue_closures vc
+                          WHERE vc.venue_id = v.id
+                            AND vc.is_active = true
+                            AND %s BETWEEN vc.date_from AND vc.date_to
+                      )
+
+                      AND public.is_venue_in_season(v.id, %s)
+                ) AS ok
+                """,
+                (venue_id, org_id, d, d, d),
+            )
+            row = cur.fetchone()
+            return bool(row and row["ok"])
 
 def compute_free_slots(
     venue_id: int,
@@ -223,6 +223,11 @@ def compute_free_slots(
     """
     org = get_org(org_id)
     if not org:
+        return []
+
+    # Дополнительная защита: если площадка закрыта или вне сезона,
+    # слоты вообще не считаем
+    if not is_venue_available(venue_id, org_id, d):
         return []
 
     if org["is_24h"]:
@@ -249,7 +254,6 @@ def compute_free_slots(
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if units_needed > 0 and all_units:
-                # Загружаем бронирования ПО КАЖДОМУ unit
                 unit_ids = [u["id"] for u in all_units]
                 cur.execute(
                     """
@@ -264,7 +268,6 @@ def compute_free_slots(
                 )
                 bookings = cur.fetchall()
 
-                # Загружаем pending заявки по unit
                 cur.execute(
                     """
                     SELECT br.venue_unit_id, br.desired_start, br.desired_end
@@ -277,7 +280,6 @@ def compute_free_slots(
                 )
                 pending = cur.fetchall()
             else:
-                # Старая логика — целиком площадка
                 cur.execute(
                     """
                     SELECT b.starts_at, b.ends_at
@@ -310,26 +312,21 @@ def compute_free_slots(
         s_end = cur_dt + timedelta(minutes=SLOT)
         free = True
 
-        # Прошедшее время — не свободно
         if s_start < now:
             free = False
 
         if free and units_needed > 0 and all_units:
-            # Считаем сколько unit-ов свободны в этом слоте
             free_unit_count = 0
             for unit in all_units:
                 unit_id = unit["id"]
                 unit_busy = False
 
-                # Проверяем бронирования
                 for bk in bookings:
-                    # Бронирование без unit_id = занята ВСЯ площадка
                     if bk.get("venue_unit_id") is None or bk["venue_unit_id"] == unit_id:
                         if s_start < bk["ends_at"] and s_end > bk["starts_at"]:
                             unit_busy = True
                             break
 
-                # Проверяем pending заявки
                 if not unit_busy:
                     for rq in pending:
                         rq_s = datetime.combine(d, rq["desired_start"], tzinfo=TZ)
@@ -342,12 +339,10 @@ def compute_free_slots(
                 if not unit_busy:
                     free_unit_count += 1
 
-            # Слот свободен только если достаточно свободных зон
             if free_unit_count < units_needed:
                 free = False
 
         elif free and units_needed == 0:
-            # Старая логика — без unit-ов
             for bk in bookings:
                 if s_start < bk["ends_at"] and s_end > bk["starts_at"]:
                     free = False
@@ -363,13 +358,12 @@ def compute_free_slots(
 
         slots.append({
             "start": s_start.time(),
-            "end":   s_end.time(),
-            "free":  free,
+            "end": s_end.time(),
+            "free": free,
         })
         cur_dt = s_end
 
     return slots
-
 
 def find_free_unit_ids(
     venue_id: int,
@@ -381,9 +375,13 @@ def find_free_unit_ids(
 ) -> list[int]:
     """
     Находит конкретные свободные venue_unit_id-ы для данного временного интервала.
-    Возвращает список из units_needed свободных unit_id.
-    Если свободных не хватает — возвращает пустой список.
     """
+    if units_needed <= 0:
+        return []
+
+    if not is_venue_available(venue_id, org_id, d):
+        return []
+
     all_units = load_venue_units(venue_id)
     if not all_units:
         return []
@@ -449,12 +447,6 @@ def find_free_unit_ids(
             break
 
     return free_ids if len(free_ids) >= units_needed else []
-
-
-import uuid  # ← добавить в imports вверху файла
-
-# ... остальные imports без изменений ...
-
 
 def save_request(data: dict) -> int:
     """
@@ -894,8 +886,18 @@ def compute_booking_price(
     if not prices:
         return None
 
+    total_units = int(total_units or 0)
+    units_needed = int(units_needed or 0)
+
+    # Если площадка без деления или значение не передали —
+    # считаем как полное поле
+    if total_units <= 0:
+        total_units = 1
+    if units_needed <= 0:
+        units_needed = total_units
+
     # Определяем часть
-    if total_units == 0 or units_needed >= total_units:
+    if units_needed >= total_units:
         portion = "f"
     else:
         fraction = units_needed / total_units
@@ -904,7 +906,9 @@ def compute_booking_price(
         elif abs(fraction - 0.5) < 0.01:
             portion = "h"
         else:
-            portion = "f"
+            # Для неподдерживаемых дробей (например 1/3, 2/3)
+            # цена в текущей схеме не определена
+            return None
 
     # Определяем длительность
     if duration_minutes <= 60:
