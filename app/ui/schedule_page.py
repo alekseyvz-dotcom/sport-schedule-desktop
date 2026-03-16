@@ -759,6 +759,33 @@ class SchedulePage(QWidget):
         if s == "done":      return QColor("#94a3b8")
         return QColor("#4ade80")
 
+    def _booking_time_text(self, b) -> str:
+        starts_at = getattr(b, "starts_at", None)
+        ends_at = getattr(b, "ends_at", None)
+        if starts_at and ends_at:
+            return f"{starts_at:%H:%M} – {ends_at:%H:%M}"
+        return ""
+
+    def _booking_primary_text(self, b) -> str:
+        kind = (getattr(b, "kind", "") or "").upper()
+
+        primary = (getattr(b, "tenant_name", "") or "").strip()
+        if kind == "GZ":
+            primary = (getattr(b, "gz_group_name", "") or "").strip()
+
+        title = (getattr(b, "title", "") or "").strip()
+        return primary or title or "Бронирование"
+
+    def _booking_secondary_text(self, b, primary_text: str) -> str:
+        time_text = self._booking_time_text(b)
+        title = (getattr(b, "title", "") or "").strip()
+
+        # Если title уже показан в первой строке — не дублируем его во второй
+        if title and title != primary_text:
+            return f"{time_text} · {title}" if time_text else title
+
+        return time_text
+
     # ── selection helpers ────────────────────────────────────────────────────
 
     def _selected_booking_from_grid(self):
@@ -1081,23 +1108,27 @@ class SchedulePage(QWidget):
                 else:
                     it.setData(BookingBlockDelegate.ROLE_PART, "middle")
 
-            kind        = (getattr(b, "kind", "") or "").upper()
-            tenant_name = (getattr(b, "tenant_name", "") or "").strip()
-            if kind == "GZ":
-                tenant_name = (getattr(b, "gz_group_name", "") or "").strip()
-            title = (getattr(b, "title", "") or "").strip()
+            primary_text = self._booking_primary_text(b)
+            time_text = self._booking_time_text(b)
+            line2 = self._booking_secondary_text(b, primary_text)
 
             it0 = self.tbl.item(r0, col)
             if it0:
-                it0.setText(tenant_name)
+                if span == 0:
+                    # Для одного слота влезает только одна строка,
+                    # поэтому ставим время первым, чтобы оно было видно всегда.
+                    it0.setText(
+                        f"{time_text} · {primary_text}"
+                        if time_text and primary_text
+                        else (time_text or primary_text)
+                    )
+                else:
+                    it0.setText(primary_text)
 
-            line2 = title or f"{b.starts_at:%H:%M} – {b.ends_at:%H:%M}"
             if span >= 1:
                 it1 = self.tbl.item(r0 + 1, col)
                 if it1:
                     it1.setData(BookingBlockDelegate.ROLE_LINE2, line2)
-            elif span == 0 and it0:
-                it0.setText(f"{tenant_name}\n{line2}" if line2 else tenant_name)
 
         self.tbl.viewport().update()
 
