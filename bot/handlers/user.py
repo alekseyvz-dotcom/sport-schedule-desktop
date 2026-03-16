@@ -456,19 +456,28 @@ async def on_resource(cb: CallbackQuery, state: FSMContext):
     portion_options = db.get_portion_options(venue_id)
 
     if not portion_options:
-        # Площадка не делится — пропускаем шаг
         units = db.load_venue_units(venue_id)
         total_units = len(units)
+    
+        price_text = db.format_price_list(venue_id, total_units)
+    
         await state.update_data(
-            units_needed=0,
+            units_needed=total_units,   # целое поле
             total_units=total_units,
-            portion_label="",
+            portion_label="Целое поле",
         )
+    
         await state.set_state(BookingFlow.choose_date)
+    
+        price_block = f"\n\n{price_text}" if price_text else ""
+    
         text = (
-            f"📍 <b>{resource['name']}</b>\n\n"
+            f"📍 <b>{resource['name']}</b>\n"
+            f"🏟 <b>Целое поле</b>"
+            f"{price_block}\n\n"
             "<b>Выберите дату:</b>"
         )
+    
         await cb.message.edit_text(text, reply_markup=date_keyboard())
     else:
         # Показываем выбор части + прайс-лист
