@@ -450,9 +450,9 @@ class OrgUsagePage(QWidget):
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
         s = self._get_day_parts_settings()
     
-        m = f"{s.morning_title()}" if m_cap > 0 else f"{s.morning_title()} (нет)"
-        d = f"{s.day_title()}" if d_cap > 0 else f"{s.day_title()} (нет)"
-        e = f"{s.evening_title()}" if e_cap > 0 else f"{s.evening_title()} (нет)"
+        m = f"{s.morning_title()} (в пределах режима)" if m_cap > 0 else f"{s.morning_title()} (нет)"
+        d = f"{s.day_title()} (в пределах режима)" if d_cap > 0 else f"{s.day_title()} (нет)"
+        e = f"{s.evening_title()} (в пределах режима)" if e_cap > 0 else f"{s.evening_title()} (нет)"
     
         self.details.set_shift_titles(m, d, e)
 
@@ -461,7 +461,7 @@ class OrgUsagePage(QWidget):
         self._period = p
         self.lbl_period.setText(f"Период: {p.title}")
 
-        org_id = self.cmb_org.currentData()
+        org_id = self._selected_org_id()
         include_cancelled = self.cb_cancelled.isChecked()
 
         try:
@@ -472,7 +472,7 @@ class OrgUsagePage(QWidget):
                 start_day=p.start,
                 end_day=p.end,
                 tz=self.TZ,
-                org_id=(int(org_id) if org_id is not None else None),
+                org_id=org_id,
                 include_cancelled=include_cancelled,
                 day_parts=day_parts,
             )
@@ -647,9 +647,17 @@ class OrgUsagePage(QWidget):
         f.setBold(True)
         return f
 
-    def _get_day_parts_settings(self) -> DayPartsSettings:
-        return get_day_parts_settings()
+    def _selected_org_id(self) -> Optional[int]:
+        org_id = self.cmb_org.currentData()
+        return int(org_id) if org_id is not None else None
     
+    
+    def _selected_org_name(self) -> str:
+        return self.cmb_org.currentText().strip() or "Все учреждения"
+    
+    
+    def _get_day_parts_settings(self) -> DayPartsSettings:
+        return get_day_parts_settings(self._selected_org_id())
     
     def _apply_day_parts_settings_to_ui(self) -> None:
         settings = self._get_day_parts_settings()
@@ -657,13 +665,23 @@ class OrgUsagePage(QWidget):
     
     
     def _edit_day_parts_settings(self) -> None:
-        current = self._get_day_parts_settings()
-        dlg = DayPartsSettingsDialog(current, self)
+        org_id = self._selected_org_id()
+        org_name = self._selected_org_name()
+    
+        current = get_day_parts_settings(org_id)
+    
+        scope_title = (
+            f"Учреждение: {org_name}"
+            if org_id is not None
+            else "Глобальные настройки для всех учреждений"
+        )
+    
+        dlg = DayPartsSettingsDialog(current, scope_title=scope_title, parent=self)
         if not dlg.exec():
             return
     
         try:
-            save_day_parts_settings(dlg.get_settings())
+            save_day_parts_settings(dlg.get_settings(), org_id=org_id)
         except Exception as e:
             QMessageBox.critical(self, "Интервалы", f"Не удалось сохранить настройки:\n{e}")
             return
