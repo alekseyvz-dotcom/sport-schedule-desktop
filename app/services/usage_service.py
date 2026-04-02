@@ -1,4 +1,3 @@
-# app/services/usage_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +8,8 @@ from collections import defaultdict
 from psycopg2.extras import RealDictCursor
 
 from app.db import get_conn, put_conn
+from app.core.day_parts_settings import DayPartsSettings
+from app.services.day_parts_settings_service import get_day_parts_settings
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,40 @@ def _weighted_busy_seconds(intervals: List[Tuple[datetime, datetime, float]]) ->
             i += 1
 
     return int(total)
+
+
+def _validate_shift_order(
+    m: Tuple[time, time],
+    d: Tuple[time, time],
+    e: Tuple[time, time],
+) -> None:
+    if not (m[0] < m[1]):
+        raise ValueError("Некорректный интервал 'утро'")
+    if not (d[0] < d[1]):
+        raise ValueError("Некорректный интервал 'день'")
+    if not (e[0] < e[1]):
+        raise ValueError("Некорректный интервал 'вечер'")
+    if m[1] > d[0]:
+        raise ValueError("Интервалы 'утро' и 'день' пересекаются")
+    if d[1] > e[0]:
+        raise ValueError("Интервалы 'день' и 'вечер' пересекаются")
+
+
+def _resolve_day_parts(
+    day_parts: Optional[DayPartsSettings],
+    base_shift_m: Optional[Tuple[time, time]],
+    base_shift_d: Optional[Tuple[time, time]],
+    base_shift_e: Optional[Tuple[time, time]],
+) -> Tuple[Tuple[time, time], Tuple[time, time], Tuple[time, time]]:
+    if day_parts is None:
+        day_parts = get_day_parts_settings()
+
+    m = base_shift_m or day_parts.morning_interval()
+    d = base_shift_d or day_parts.day_interval()
+    e = base_shift_e or day_parts.evening_interval()
+
+    _validate_shift_order(m, d, e)
+    return m, d, e
 
 
 def _load_bookings_for_range(
@@ -273,9 +308,10 @@ def calc_usage_by_venues(
     tz: timezone,
     org_id: Optional[int] = None,
     include_cancelled: bool = False,
-    base_shift_m: Tuple[time, time] = (time(8, 0), time(12, 0)),
-    base_shift_d: Tuple[time, time] = (time(12, 0), time(18, 0)),
-    base_shift_e: Tuple[time, time] = (time(18, 0), time(22, 0)),
+    day_parts: Optional[DayPartsSettings] = None,
+    base_shift_m: Optional[Tuple[time, time]] = None,
+    base_shift_d: Optional[Tuple[time, time]] = None,
+    base_shift_e: Optional[Tuple[time, time]] = None,
 ) -> List[UsageRow]:
     """
     Аналитика по площадкам (venues).
@@ -290,9 +326,19 @@ def calc_usage_by_venues(
 
     ВАЖНО: capacity считается только по дням, когда площадка ОТКРЫТА
     (учитывается сезонность + закрытия org/venue).
+
+    Интервалы morning/day/evening берутся из day_parts.
+    Если day_parts не передан — подгружаются из settings.dat.
     """
     if end_day < start_day:
         raise ValueError("end_day < start_day")
+
+    base_shift_m, base_shift_d, base_shift_e = _resolve_day_parts(
+        day_parts=day_parts,
+        base_shift_m=base_shift_m,
+        base_shift_d=base_shift_d,
+        base_shift_e=base_shift_e,
+    )
 
     range_start_dt = datetime.combine(start_day, time(0, 0), tzinfo=tz)
     range_end_dt = datetime.combine(end_day + timedelta(days=1), time(0, 0), tzinfo=tz)
@@ -339,7 +385,6 @@ def calc_usage_by_venues(
             "shift_m": sm,
             "shift_d": sd,
             "shift_e": se,
-            # capacity только по открытым дням:
             "capacity_sec": open_days_count * cap_day,
             "morning_capacity_sec": open_days_count * cap_m,
             "day_capacity_sec": open_days_count * cap_d,
@@ -354,7 +399,6 @@ def calc_usage_by_venues(
             "evening_gz_sec": 0,
         }
 
-    # 1) Собираем интервалы (по площадке+дню+активности), с весом fraction
     intervals_work: DefaultDict[tuple, list] = defaultdict(list)
     intervals_m: DefaultDict[tuple, list] = defaultdict(list)
     intervals_d: DefaultDict[tuple, list] = defaultdict(list)
@@ -380,11 +424,9 @@ def calc_usage_by_venues(
         se = agg[vid]["shift_e"]
 
         for d in _iter_days(start_day, end_day):
-            # НЕ считаем закрытые/внесезонные дни
             if not open_days_map.get((vid, d), True):
                 continue
 
-            # рабочее окно
             work0 = datetime.combine(d, work_start, tzinfo=tz)
             work1 = datetime.combine(d, work_end, tzinfo=tz)
             s = max(starts_at, work0)
@@ -418,7 +460,6 @@ def calc_usage_by_venues(
                 if ee > es:
                     intervals_e[(vid, d, activity)].append((es, ee, frac))
 
-    # 2) Начисляем занятость (взвешенную и клипнутую до 1.0)
     for vid in list(agg.keys()):
         for d in _iter_days(start_day, end_day):
             if not open_days_map.get((vid, d), True):
@@ -474,9 +515,6 @@ def calc_usage_by_venues(
             )
         )
 
-    # Если площадка была закрыта/внесезонна весь период => capacity_sec=0.
-    # Можно скрывать такие строки:
     out = [r for r in out if r.capacity_sec > 0]
-
     out.sort(key=lambda r: (r.total_sec / r.capacity_sec) if r.capacity_sec else 0.0, reverse=True)
     return out
