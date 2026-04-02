@@ -32,6 +32,13 @@ from app.services.ref_service import list_active_orgs
 from app.services.usage_service import calc_usage_by_venues, UsageRow
 from app.ui.usage_details_widget import UsageDetailsWidget, UsageTotals
 
+from app.core.day_parts_settings import DayPartsSettings
+from app.services.day_parts_settings_service import (
+    get_day_parts_settings,
+    save_day_parts_settings,
+)
+from app.ui.day_parts_settings_dialog import DayPartsSettingsDialog
+
 
 ROLE_IS_TOTAL = Qt.ItemDataRole.UserRole + 50
 ROLE_PCT      = Qt.ItemDataRole.UserRole + 51
@@ -313,6 +320,8 @@ class OrgUsagePage(QWidget):
         self.cb_cancelled.setChecked(False)
 
         self.btn_refresh = QPushButton("Обновить")
+        self.btn_day_parts = QPushButton("Интервалы")
+        self.btn_day_parts.clicked.connect(self._edit_day_parts_settings)
 
         self.cmb_org.currentIndexChanged.connect(lambda *_: self.reload())
         self.cmb_period.currentIndexChanged.connect(lambda *_: self.reload())
@@ -331,6 +340,7 @@ class OrgUsagePage(QWidget):
         top.addWidget(QLabel("Дата:"))
         top.addWidget(self.dt_anchor)
         top.addWidget(self.cb_cancelled)
+        top.addWidget(self.btn_day_parts)
         top.addWidget(self.btn_refresh)
 
         self.lbl_period = QLabel("")
@@ -376,7 +386,7 @@ class OrgUsagePage(QWidget):
         self.tbl.setFont(f)
 
         self.details = UsageDetailsWidget(self)
-        self.details.set_shift_titles("Утро", "День", "Вечер")
+        self._apply_day_parts_settings_to_ui()
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.tbl)
@@ -438,9 +448,12 @@ class OrgUsagePage(QWidget):
         return Period(start=d, end=d, title=f"{d:%d.%m.%Y}")
 
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
-        m = "Утро (в пределах режима)" if m_cap > 0 else "Утро (нет)"
-        d = "День (в пределах режима)" if d_cap > 0 else "День (нет)"
-        e = "Вечер (в пределах режима)" if e_cap > 0 else "Вечер (нет)"
+        s = self._get_day_parts_settings()
+    
+        m = f"{s.morning_title()} (в пределах режима)" if m_cap > 0 else f"{s.morning_title()} (нет)"
+        d = f"{s.day_title()} (в пределах режима)" if d_cap > 0 else f"{s.day_title()} (нет)"
+        e = f"{s.evening_title()} (в пределах режима)" if e_cap > 0 else f"{s.evening_title()} (нет)"
+    
         self.details.set_shift_titles(m, d, e)
 
     def reload(self):
@@ -452,12 +465,16 @@ class OrgUsagePage(QWidget):
         include_cancelled = self.cb_cancelled.isChecked()
 
         try:
+            day_parts = self._get_day_parts_settings()
+            self.details.set_day_parts(day_parts)
+            
             rows = calc_usage_by_venues(
                 start_day=p.start,
                 end_day=p.end,
                 tz=self.TZ,
                 org_id=(int(org_id) if org_id is not None else None),
                 include_cancelled=include_cancelled,
+                day_parts=day_parts,
             )
         except Exception as e:
             QMessageBox.critical(self, "Загрузка учреждений", f"Ошибка расчёта:\n{e}")
@@ -629,3 +646,27 @@ class OrgUsagePage(QWidget):
         f = QFont(self.tbl.font())
         f.setBold(True)
         return f
+
+    def _get_day_parts_settings(self) -> DayPartsSettings:
+        return get_day_parts_settings()
+    
+    
+    def _apply_day_parts_settings_to_ui(self) -> None:
+        settings = self._get_day_parts_settings()
+        self.details.set_day_parts(settings)
+    
+    
+    def _edit_day_parts_settings(self) -> None:
+        current = self._get_day_parts_settings()
+        dlg = DayPartsSettingsDialog(current, self)
+        if not dlg.exec():
+            return
+    
+        try:
+            save_day_parts_settings(dlg.get_settings())
+        except Exception as e:
+            QMessageBox.critical(self, "Интервалы", f"Не удалось сохранить настройки:\n{e}")
+            return
+    
+        self._apply_day_parts_settings_to_ui()
+        self.reload()
