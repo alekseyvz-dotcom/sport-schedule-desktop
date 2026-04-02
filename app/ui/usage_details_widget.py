@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPainterPath
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 
+from app.core.day_parts_settings import DayPartsSettings
+
 
 PD_COLOR   = QColor("#60a5fa")   # blue-400
 GZ_COLOR   = QColor("#f59e0b")   # amber-500
@@ -331,6 +333,10 @@ class UsageDetailsWidget(QWidget):
         self.lbl_period = QLabel("")
         self.lbl_period.setObjectName("scheduleMeta")
 
+        self.lbl_day_parts = QLabel("")
+        self.lbl_day_parts.setObjectName("scheduleMeta")
+        self._day_parts = DayPartsSettings()
+
         self.donut = _DonutWidget(self)
         self.bars = _BarsWidget(self)
 
@@ -341,6 +347,7 @@ class UsageDetailsWidget(QWidget):
         lay.setSpacing(10)
         lay.addWidget(self.lbl_title)
         lay.addWidget(self.lbl_period)
+        lay.addWidget(self.lbl_day_parts)
         lay.addWidget(self.donut)
         lay.addWidget(self.bars, 1)
 
@@ -348,6 +355,7 @@ class UsageDetailsWidget(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(card, 1)
 
+        self.set_day_parts(self._day_parts)
         self.set_data(None)
 
     def set_shift_titles(self, morning_title: str, day_title: str, evening_title: str) -> None:
@@ -357,10 +365,18 @@ class UsageDetailsWidget(QWidget):
         if not data:
             self.lbl_title.setText("Детали")
             self.lbl_period.setText("")
-            self.set_shift_titles("Утро", "День", "Вечер")
         else:
             self.lbl_title.setText(data.title)
             self.lbl_period.setText(f"Период: {data.period_title}")
-
+    
         self.donut.set_data(data)
         self.bars.set_data(data)
+
+    def set_day_parts(self, settings: DayPartsSettings) -> None:
+        self._day_parts = settings
+        self.lbl_day_parts.setText(settings.summary_text())
+        self.set_shift_titles(
+            settings.morning_title(),
+            settings.day_title(),
+            settings.evening_title(),
+    )
