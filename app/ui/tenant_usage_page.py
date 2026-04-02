@@ -28,8 +28,6 @@ from app.services.users_service import AuthUser
 from app.services.ref_service import list_active_orgs
 from app.services.tenant_usage_service import list_usage_by_tenants, TenantUsageRow
 
-from app.services.day_parts_settings_service import get_day_parts_settings, save_day_parts_settings
-from app.ui.day_parts_settings_dialog import DayPartsSettingsDialog
 
 @dataclass(frozen=True)
 class Period:
@@ -441,8 +439,6 @@ class TenantUsagePage(QWidget):
         self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_only_active = QCheckBox("Только активные контрагенты")
         self.btn_refresh = QPushButton("Обновить")
-        self.btn_day_parts = QPushButton("Интервалы")
-        self.btn_day_parts.clicked.connect(self._edit_day_parts_settings)
 
         self.cmb_org.currentIndexChanged.connect(lambda *_: self.reload())
         self.cmb_period.currentIndexChanged.connect(lambda *_: self.reload())
@@ -463,7 +459,6 @@ class TenantUsagePage(QWidget):
         top.addWidget(self.dt_anchor)
         top.addWidget(self.cb_cancelled)
         top.addWidget(self.cb_only_active)
-        top.addWidget(self.btn_day_parts)
         top.addWidget(self.btn_refresh)
 
         self.lbl_period = QLabel("")
@@ -471,23 +466,11 @@ class TenantUsagePage(QWidget):
 
         self.lbl_total = QLabel("")
         self.lbl_total.setObjectName("scheduleMetaStrong")
-        self.lbl_day_parts = QLabel("")
-        self.lbl_day_parts.setObjectName("scheduleMeta")
 
-        meta_top = QHBoxLayout()
-        meta_top.setContentsMargins(0, 0, 0, 0)
-        meta_top.addWidget(self.lbl_period, 1)
-        meta_top.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
-        
-        meta_bottom = QHBoxLayout()
-        meta_bottom.setContentsMargins(0, 0, 0, 0)
-        meta_bottom.addWidget(self.lbl_day_parts, 1)
-        
-        meta = QVBoxLayout()
+        meta = QHBoxLayout()
         meta.setContentsMargins(0, 0, 0, 0)
-        meta.setSpacing(2)
-        meta.addLayout(meta_top)
-        meta.addLayout(meta_bottom)
+        meta.addWidget(self.lbl_period, 1)
+        meta.addWidget(self.lbl_total, 0, Qt.AlignmentFlag.AlignRight)
 
         self.chart_donut = DonutChart(self)
         self.chart_top = BarListChart(self)
@@ -542,7 +525,6 @@ class TenantUsagePage(QWidget):
         root.addLayout(charts_row)
         root.addWidget(tbl_card, 1)
 
-        self._refresh_day_parts_label()
         QTimer.singleShot(0, self._load_orgs)
 
     def _load_orgs(self):
@@ -660,20 +642,3 @@ class TenantUsagePage(QWidget):
 
         self.tbl.setSortingEnabled(True)
         self.tbl.sortItems(5, Qt.SortOrder.DescendingOrder)
-
-    def _refresh_day_parts_label(self) -> None:
-        s = get_day_parts_settings()
-        self.lbl_day_parts.setText(f"Интервалы: {s.to_display_text()}")
-
-    def _edit_day_parts_settings(self) -> None:
-        current = get_day_parts_settings()
-        dlg = DayPartsSettingsDialog(current, self)
-        if dlg.exec():
-            try:
-                save_day_parts_settings(dlg.get_settings())
-            except Exception as e:
-                QMessageBox.critical(self, "Настройки интервалов", f"Не удалось сохранить настройки:\n{e}")
-                return
-    
-            self._refresh_day_parts_label()
-            QMessageBox.information(self, "Настройки интервалов", "Интервалы времени успешно сохранены.")
