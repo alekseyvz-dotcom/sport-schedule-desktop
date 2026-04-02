@@ -450,9 +450,9 @@ class OrgUsagePage(QWidget):
     def _apply_shift_titles(self, *, m_cap: int, d_cap: int, e_cap: int) -> None:
         s = self._get_day_parts_settings()
     
-        m = f"{s.morning_title()} (в пределах режима)" if m_cap > 0 else f"{s.morning_title()} (нет)"
-        d = f"{s.day_title()} (в пределах режима)" if d_cap > 0 else f"{s.day_title()} (нет)"
-        e = f"{s.evening_title()} (в пределах режима)" if e_cap > 0 else f"{s.evening_title()} (нет)"
+        m = f"{s.morning_title()}" if m_cap > 0 else f"{s.morning_title()} (нет)"
+        d = f"{s.day_title()}" if d_cap > 0 else f"{s.day_title()} (нет)"
+        e = f"{s.evening_title()}" if e_cap > 0 else f"{s.evening_title()} (нет)"
     
         self.details.set_shift_titles(m, d, e)
 
