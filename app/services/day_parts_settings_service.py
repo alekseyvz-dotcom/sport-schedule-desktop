@@ -29,8 +29,7 @@ def _save_all_settings(data: dict) -> None:
 
 def get_day_parts_settings() -> DayPartsSettings:
     data = _load_all_settings()
-    raw = data.get(_SETTINGS_KEY)
-    return DayPartsSettings.from_dict(raw)
+    return DayPartsSettings.from_dict(data.get(_SETTINGS_KEY))
 
 
 def save_day_parts_settings(settings: DayPartsSettings) -> None:
