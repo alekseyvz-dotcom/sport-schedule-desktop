@@ -6,8 +6,6 @@ from datetime import time
 
 @dataclass(frozen=True)
 class DayPartsSettings:
-    # Дефолты оставляем такими же, как сейчас в usage_service.py,
-    # чтобы при внедрении не поменять отчёты "по умолчанию".
     morning_start: str = "08:00"
     morning_end: str = "12:00"
     day_start: str = "12:00"
@@ -38,18 +36,18 @@ class DayPartsSettings:
         )
 
     @staticmethod
-    def _parse_hhmm(value: str) -> time:
+    def _parse(value: str) -> time:
         hh, mm = value.split(":")
         return time(hour=int(hh), minute=int(mm))
 
     def morning_interval(self) -> tuple[time, time]:
-        return self._parse_hhmm(self.morning_start), self._parse_hhmm(self.morning_end)
+        return self._parse(self.morning_start), self._parse(self.morning_end)
 
     def day_interval(self) -> tuple[time, time]:
-        return self._parse_hhmm(self.day_start), self._parse_hhmm(self.day_end)
+        return self._parse(self.day_start), self._parse(self.day_end)
 
     def evening_interval(self) -> tuple[time, time]:
-        return self._parse_hhmm(self.evening_start), self._parse_hhmm(self.evening_end)
+        return self._parse(self.evening_start), self._parse(self.evening_end)
 
     def morning_title(self) -> str:
         return f"Утро {self.morning_start}–{self.morning_end}"
