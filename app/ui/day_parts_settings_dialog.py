@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from PySide6.QtCore import QTime
 from PySide6.QtWidgets import (
     QDialog,
@@ -17,13 +19,17 @@ from app.services.day_parts_settings_service import get_default_day_parts_settin
 
 
 class DayPartsSettingsDialog(QDialog):
-    def __init__(self, settings: DayPartsSettings, parent=None):
+    def __init__(self, settings: DayPartsSettings, *, scope_title: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Интервалы утро / день / вечер")
         self.setModal(True)
-        self.resize(360, 220)
+        self.resize(380, 240)
 
-        self.lbl_info = QLabel("Настройте интервалы времени для аналитики загрузки.")
+        scope_text = scope_title or "Общие настройки"
+        self.lbl_info = QLabel(
+            f"Настройте интервалы времени для аналитики загрузки.\n"
+            f"Область применения: {scope_text}"
+        )
 
         self.ed_morning_start = QTimeEdit()
         self.ed_morning_end = QTimeEdit()
