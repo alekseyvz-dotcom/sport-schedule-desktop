@@ -19,11 +19,11 @@ from app.services.day_parts_settings_service import get_default_day_parts_settin
 class DayPartsSettingsDialog(QDialog):
     def __init__(self, settings: DayPartsSettings, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Настройки интервалов")
+        self.setWindowTitle("Интервалы утро / день / вечер")
         self.setModal(True)
         self.resize(360, 220)
 
-        self.lbl_info = QLabel("Настройте интервалы для аналитики загрузки: утро / день / вечер.")
+        self.lbl_info = QLabel("Настройте интервалы времени для аналитики загрузки.")
 
         self.ed_morning_start = QTimeEdit()
         self.ed_morning_end = QTimeEdit()
@@ -93,21 +93,17 @@ class DayPartsSettingsDialog(QDialog):
         ee = self.ed_evening_end.time()
 
         if not (ms < me):
-            QMessageBox.warning(self, "Проверка", "Для интервала 'Утро' время начала должно быть меньше времени окончания.")
+            QMessageBox.warning(self, "Проверка", "Для интервала 'Утро' начало должно быть меньше окончания.")
             return
-
         if not (ds < de):
-            QMessageBox.warning(self, "Проверка", "Для интервала 'День' время начала должно быть меньше времени окончания.")
+            QMessageBox.warning(self, "Проверка", "Для интервала 'День' начало должно быть меньше окончания.")
             return
-
         if not (es < ee):
-            QMessageBox.warning(self, "Проверка", "Для интервала 'Вечер' время начала должно быть меньше времени окончания.")
+            QMessageBox.warning(self, "Проверка", "Для интервала 'Вечер' начало должно быть меньше окончания.")
             return
-
         if me > ds:
             QMessageBox.warning(self, "Проверка", "Интервалы 'Утро' и 'День' не должны пересекаться.")
             return
-
         if de > es:
             QMessageBox.warning(self, "Проверка", "Интервалы 'День' и 'Вечер' не должны пересекаться.")
             return
