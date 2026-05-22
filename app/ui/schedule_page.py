@@ -93,6 +93,7 @@ from app.services.bookings_service import (
     create_booking,
     update_booking,
     cancel_booking,
+    cancel_related_booking_parts,
 )
 from app.ui.booking_dialog import BookingDialog
 
@@ -1698,7 +1699,7 @@ class SchedulePage(QWidget):
         org_id = self.cmb_org.currentData()
         if org_id is None:
             return
-
+    
         acc = get_org_access(
             int(self.user.id), str(self.user.role_code), int(org_id)
         )
@@ -1708,30 +1709,52 @@ class SchedulePage(QWidget):
                 "У вас нет прав на редактирование расписания этого учреждения.",
             )
             return
-
+    
         b = self._selected_booking()
         if not b:
             QMessageBox.information(self, "Отменить", "Выберите бронирование.")
             return
-
+    
+        kind = (getattr(b, "kind", "") or "").upper()
+        tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+        gz_group_name = (getattr(b, "gz_group_name", "") or "").strip()
+        title = (getattr(b, "title", "") or "").strip()
+    
+        owner = gz_group_name if kind == "GZ" else tenant_name
+        owner = owner or title or "Бронирование"
+    
+        msg = (
+            "Отменить выбранное бронирование?\n\n"
+            "Если оно занимает несколько частей площадки, будут отменены все связанные части.\n\n"
+            f"{owner}\n"
+            f"{getattr(b, 'starts_at'):%d.%m.%Y %H:%M}–{getattr(b, 'ends_at'):%H:%M}"
+        )
+    
         if (
             QMessageBox.question(
                 self,
                 "Отмена бронирования",
-                "Отменить выбранное бронирование?",
+                msg,
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
-
+    
         try:
-            cancel_booking(int(getattr(b, "id")))
+            affected = cancel_related_booking_parts(int(getattr(b, "id")))
         except Exception as e:
-            _uilog("ERROR cancel: " + repr(e))
+            _uilog("ERROR cancel_related_booking_parts: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Отменить", f"Ошибка отмены:\n{e}")
             return
-
+    
+        if affected > 1:
+            QMessageBox.information(
+                self,
+                "Отмена бронирования",
+                f"Отменено связанных частей: {affected}",
+            )
+    
         self.reload()
 
     # ── misc ─────────────────────────────────────────────────────────────────
