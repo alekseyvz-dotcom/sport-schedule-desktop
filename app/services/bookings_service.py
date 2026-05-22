@@ -424,6 +424,70 @@ def cancel_booking(booking_id: int) -> None:
         if conn:
             put_conn(conn)
 
+def cancel_related_booking_parts(booking_id: int) -> int:
+    """
+    Отменяет все части одной логической брони.
+
+    Сейчас бронь на 2/4 части площадки хранится как несколько строк bookings
+    с одинаковыми venue_id, starts_at, ends_at, activity, tenant_id/gz_group_id и title,
+    но разными venue_unit_id.
+
+    Возвращает количество отменённых строк.
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH src AS (
+                    SELECT
+                        id,
+                        venue_id,
+                        tenant_id,
+                        gz_group_id,
+                        title,
+                        activity,
+                        starts_at,
+                        ends_at
+                    FROM public.bookings
+                    WHERE id = %s
+                )
+                UPDATE public.bookings b
+                SET status = 'cancelled'
+                FROM src
+                WHERE b.status <> 'cancelled'
+                  AND b.venue_id = src.venue_id
+                  AND b.starts_at = src.starts_at
+                  AND b.ends_at = src.ends_at
+                  AND b.activity = src.activity
+                  AND b.title = src.title
+                  AND b.tenant_id IS NOT DISTINCT FROM src.tenant_id
+                  AND b.gz_group_id IS NOT DISTINCT FROM src.gz_group_id
+                """,
+                (int(booking_id),),
+            )
+
+            affected = int(cur.rowcount)
+
+            if affected < 1:
+                cur.execute(
+                    "SELECT 1 FROM public.bookings WHERE id = %s",
+                    (int(booking_id),),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError("Бронирование не найдено")
+
+        conn.commit()
+        return affected
+
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
 
 def cancel_future_bookings_like_rule(
     *,
