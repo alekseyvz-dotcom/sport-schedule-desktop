@@ -1,4 +1,4 @@
-name: build-windows-exe
+name: build
 
 on:
   push:
@@ -9,7 +9,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-2022
 
     steps:
@@ -24,22 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Debug list app/services
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse -File app/services | ForEach-Object { $_.FullName }
-          if (Test-Path "app/services/tenants_service.py") { "FOUND tenants_service.py" } else { "NOT FOUND tenants_service.py" }
-
-      - name: Debug list app/ui
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse -File app/ui | ForEach-Object { $_.FullName }
-          if (Test-Path "app/ui/load_page.py") { "FOUND load_page.py" } else { "NOT FOUND load_page.py" }
-          if (Test-Path "app/ui/__init__.py") { "FOUND ui/__init__.py" } else { "NOT FOUND ui/__init__.py" }
-          if (Test-Path "app/__init__.py") { "FOUND app/__init__.py" } else { "NOT FOUND app/__init__.py" }
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
 
       - name: Clean build folders
         shell: pwsh
@@ -47,12 +33,49 @@ jobs:
           if (Test-Path build) { Remove-Item build -Recurse -Force }
           if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 
-      - name: Build one-file exe (spec)
+      - name: Build Windows exe
         run: |
           pyinstaller --noconfirm --clean SportSchedule.spec
 
-      - name: Upload artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v5
         with:
-          name: SportSchedule-win
+          name: SportSchedule-windows
           path: dist/SportSchedule.exe
+
+  build-macos:
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Clean build folders
+        run: |
+          rm -rf build dist
+
+      - name: Build macOS app
+        run: |
+          pyinstaller --noconfirm --clean SportSchedule-macos.spec
+
+      - name: Zip macOS app
+        run: |
+          cd dist
+          zip -r SportSchedule-macos.zip SportSchedule.app
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: SportSchedule-macos
+          path: dist/SportSchedule-macos.zip
