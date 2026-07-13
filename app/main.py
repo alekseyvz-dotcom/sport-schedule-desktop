@@ -55,6 +55,7 @@ QCalendarWidget QAbstractItemView {
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
 
     # ОДИН раз задаём весь стиль приложению
     app.setStyleSheet(DARK_APP_QSS + "\n" + CALENDAR_QSS)
