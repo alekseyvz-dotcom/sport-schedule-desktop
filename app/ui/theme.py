@@ -33,27 +33,45 @@ QStatusBar {
 QStatusBar QLabel { color: rgba(226, 232, 240, 0.65); }
 
 /* ---- Tabs ---- */
+QTabWidget {
+    background: #0b1220;
+}
+
 QTabWidget::pane {
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 26);
     border-radius: 14px;
     top: -1px;
-    background: rgba(15, 23, 42, 0.35);
+    background: rgba(15, 23, 42, 90);
 }
+
+QTabBar {
+    background: #0b1220;
+}
+
 QTabBar::tab {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(226, 232, 240, 0.80);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 15);
+    color: rgba(226, 232, 240, 204);
+    border: 1px solid rgba(255, 255, 255, 26);
     padding: 8px 14px;
     margin-right: 6px;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
 }
+
 QTabBar::tab:selected {
-    background: rgba(15, 23, 42, 0.55);
-    color: rgba(255, 255, 255, 0.92);
-    border-color: rgba(99, 102, 241, 0.55);
+    background: rgba(15, 23, 42, 180);
+    color: rgba(255, 255, 255, 235);
+    border-color: rgba(99, 102, 241, 140);
 }
-QTabBar::tab:hover { border-color: rgba(255, 255, 255, 0.22); }
+
+QTabBar::tab:hover {
+    background: rgba(255, 255, 255, 25);
+    border-color: rgba(255, 255, 255, 56);
+}
+
+QTabBar::tab:!selected {
+    margin-top: 3px;
+}
 
 /* ---- Titles ---- */
 QLabel#sectionTitle {
