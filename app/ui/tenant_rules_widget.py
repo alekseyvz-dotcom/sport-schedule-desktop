@@ -22,7 +22,7 @@ from app.services.tenant_rules_service import (
     set_rule_active,
     delete_rule,
 )
-from app.services.bookings_service import cancel_future_bookings_like_rule
+
 from app.ui.tenant_rule_dialog import TenantRuleDialog
 
 
@@ -332,11 +332,34 @@ class TenantRulesWidget(QWidget):
         if r.get("op") == "deactivate" or not r.get("is_active", True):
             return
 
-        # Если правила ещё не в БД (создание контрагента) — просто помечаем локально
-        if not self._tenant_id or not r.get("id"):
+        # Новое правило ещё не записано в БД.
+        if not r.get("id"):
             r["op"] = "deactivate"
             r["is_active"] = False
             self._refresh()
+            return
+
+        if not self._tenant_id:
+            QMessageBox.warning(
+                self,
+                "Правила",
+                "Нельзя отключить сохранённое правило: "
+                "контрагент ещё не сохранён.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Отключить правило",
+            "Отключить выбранное правило?\n\n"
+            "Правило будет отключено сразу, даже если затем нажать "
+            "«Отмена» в карточке контрагента.\n\n"
+            "Уже созданные бронирования останутся в расписании. "
+            "При необходимости отмените их вручную.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
             return
 
         try:
@@ -347,34 +370,15 @@ class TenantRulesWidget(QWidget):
                 is_active=False,
             )
         except Exception as e:
-            QMessageBox.critical(self, "Правила", f"Не удалось отключить правило:\n{e}")
+            QMessageBox.critical(
+                self,
+                "Правила",
+                f"Не удалось отключить правило:\n{e}",
+            )
             return
 
-        ans = QMessageBox.question(
-            self,
-            "Правило отключено",
-            "Правило отключено. Уже созданные бронирования останутся.\n\n"
-            "Отменить будущие бронирования автоматически?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if ans == QMessageBox.StandardButton.Yes:
-            try:
-                cancelled = cancel_future_bookings_like_rule(
-                    tenant_id=int(self._tenant_id),
-                    venue_unit_id=int(r["venue_unit_id"]),
-                    weekday=int(r["weekday"]),
-                    starts_at=r["starts_at"],
-                    ends_at=r["ends_at"],
-                    from_day=date.today(),
-                    activity="PD",
-                )
-                QMessageBox.information(self, "Бронирования", f"Отменено бронирований: {cancelled}")
-            except Exception as e:
-                QMessageBox.warning(self, "Бронирования", f"Не удалось отменить бронирования:\n{e}")
-
-        r["op"] = "deactivate"
+        # Изменение уже сохранено в БД — повторно отправлять его не нужно.
+        r["op"] = "keep"
         r["is_active"] = False
         self._refresh()
 
@@ -390,47 +394,46 @@ class TenantRulesWidget(QWidget):
 
         r = self._rules_local[idx]
 
-        # локальное (ещё не в БД) — просто убрать
+        # Новое правило ещё не записано в БД.
         if not r.get("id"):
             self._rules_local.pop(idx)
             self._refresh()
             return
 
         if not self._tenant_id:
-            QMessageBox.warning(self, "Правила", "Нельзя удалить правило: контрагент ещё не сохранён.")
+            QMessageBox.warning(
+                self,
+                "Правила",
+                "Нельзя удалить правило: контрагент ещё не сохранён.",
+            )
             return
 
-        if (
-            QMessageBox.question(
-                self,
-                "Удалить правило",
-                "Удалить правило полностью?\n\n"
-                "Будущие бронирования, похожие на это правило, будут отменены.\n"
-                "Действие необратимо.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
+        answer = QMessageBox.question(
+            self,
+            "Удалить правило",
+            "Удалить выбранное правило полностью?\n\n"
+            "Правило будет удалено сразу, даже если затем нажать "
+            "«Отмена» в карточке контрагента. Действие необратимо.\n\n"
+            "Уже созданные бронирования останутся в расписании. "
+            "При необходимости отмените их вручную.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
             return
 
         try:
-            cancel_future_bookings_like_rule(
-                tenant_id=int(self._tenant_id),
-                venue_unit_id=int(r["venue_unit_id"]),
-                weekday=int(r["weekday"]),
-                starts_at=r["starts_at"],
-                ends_at=r["ends_at"],
-                from_day=date.today(),
-                activity="PD",
-            )
             delete_rule(
                 user_id=self._user_id,
                 role_code=self._role_code,
                 rule_id=int(r["id"]),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Удалить правило", f"Ошибка:\n{e}")
+            QMessageBox.critical(
+                self,
+                "Удалить правило",
+                f"Не удалось удалить правило:\n{e}",
+            )
             return
 
         self._rules_local.pop(idx)
