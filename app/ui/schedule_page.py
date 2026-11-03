@@ -97,6 +97,8 @@ from app.services.bookings_service import (
 )
 from app.ui.booking_dialog import BookingDialog
 from app.ui.schedule_month_view import ScheduleMonthView
+from app.ui.schedule_windows_view import ScheduleWindowsView
+from app.ui.client_info_dialog import ClientInfoDialog
 
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
@@ -482,14 +484,22 @@ class SchedulePage(QWidget):
         self.btn_view_month.setCheckable(True)
         self.btn_view_month.setToolTip("Визуализация объекта на месяц целиком")
 
+        self.btn_view_windows = QToolButton()
+        self.btn_view_windows.setObjectName("viewTab")
+        self.btn_view_windows.setText("Окна")
+        self.btn_view_windows.setCheckable(True)
+        self.btn_view_windows.setToolTip("Свободное время по объекту")
+
         self._view_group = QButtonGroup(self)
         self._view_group.setExclusive(True)
         self._view_group.addButton(self.btn_view_grid)
         self._view_group.addButton(self.btn_view_list)
         self._view_group.addButton(self.btn_view_month)
+        self._view_group.addButton(self.btn_view_windows)
         self.btn_view_grid.clicked.connect(lambda: self._set_mode("grid"))
         self.btn_view_list.clicked.connect(lambda: self._set_mode("list"))
         self.btn_view_month.clicked.connect(lambda: self._set_mode("month"))
+        self.btn_view_windows.clicked.connect(lambda: self._set_mode("windows"))
 
         self.cmb_period = QComboBox()
         self.cmb_period.addItem("День",           "day")
@@ -528,6 +538,7 @@ class SchedulePage(QWidget):
         top.addWidget(self.btn_view_grid)
         top.addWidget(self.btn_view_list)
         top.addWidget(self.btn_view_month)
+        top.addWidget(self.btn_view_windows)
         self.lbl_period_caption = QLabel("Период:")
         top.addWidget(self.lbl_period_caption)
         top.addWidget(self.cmb_period)
@@ -594,7 +605,13 @@ class SchedulePage(QWidget):
         self.month_view = ScheduleMonthView(self.user, self)
         self.month_view.requestOpenTenant.connect(self._open_tenant_from_month)
         self.month_view.requestOpenDay.connect(self._open_day_from_month)
+        self.month_view.requestOpenClient.connect(self._open_client_info)
         self.stack.addWidget(self.month_view)
+
+        # 3 — свободные окна объекта (ТЗ, п. 8)
+        self.windows_view = ScheduleWindowsView(self.user, self)
+        self.windows_view.requestOpenDay.connect(self._open_day_from_month)
+        self.stack.addWidget(self.windows_view)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
@@ -616,31 +633,34 @@ class SchedulePage(QWidget):
         self._set_mode(last_mode, persist=False)
 
     def _set_mode(self, mode: str, *, persist: bool = True) -> None:
-        mode = mode if mode in ("grid", "list", "month") else "grid"
+        mode = mode if mode in ("grid", "list", "month", "windows") else "grid"
         if persist:
             self._settings.setValue("schedule/view_mode", mode)
 
-        self.stack.setCurrentIndex(0 if mode == "grid" else (1 if mode == "list" else 2))
+        index = {"grid": 0, "list": 1, "month": 2, "windows": 3}[mode]
+        self.stack.setCurrentIndex(index)
 
         self.btn_view_grid.blockSignals(True)
         self.btn_view_list.blockSignals(True)
         self.btn_view_month.blockSignals(True)
+        self.btn_view_windows.blockSignals(True)
         self.btn_view_grid.setChecked(mode == "grid")
         self.btn_view_list.setChecked(mode == "list")
         self.btn_view_month.setChecked(mode == "month")
+        self.btn_view_windows.setChecked(mode == "windows")
         self.btn_view_grid.blockSignals(False)
         self.btn_view_list.blockSignals(False)
         self.btn_view_month.blockSignals(False)
+        self.btn_view_windows.blockSignals(False)
 
         is_list = (mode == "list")
-        is_month = (mode == "month")
+        is_panel = mode in ("month", "windows")   # свой выбор периода внутри
         self.cmb_period.setVisible(is_list)
         self.lbl_period_caption.setVisible(is_list)
         self.meta_row.setVisible(is_list)
 
-        # в месячном режиме месяц выбирается внутри самого экрана
-        self.dt_day.setVisible(not is_month)
-        self.lbl_date_caption.setVisible(not is_month)
+        self.dt_day.setVisible(not is_panel)
+        self.lbl_date_caption.setVisible(not is_panel)
 
         if not is_list:
             self.lbl_period.setText("")
@@ -649,10 +669,20 @@ class SchedulePage(QWidget):
         self.btn_columns.setEnabled(mode == "grid")
         self._apply_access_buttons()
 
-        if is_month:
+        if mode == "month":
             self._sync_month_view()
+        elif mode == "windows":
+            self._sync_windows_view()
 
         self.reload()
+
+    def _sync_windows_view(self) -> None:
+        """Передаёт экрану окон учреждение и окно работы."""
+        self.windows_view.set_org(
+            self.cmb_org.currentData(),
+            self._work_start,
+            self._work_end,
+        )
 
     def _sync_month_view(self) -> None:
         """Передаёт месячному экрану учреждение, окно работы и признаки ГЗ."""
@@ -724,6 +754,64 @@ class SchedulePage(QWidget):
         if self._mode() == "month":
             self.month_view.reload()
 
+    def _open_client_info(self, booking) -> None:
+        """
+        Карточка просмотра клиента из месячной визуализации (ТЗ, п. 7).
+        Работает и для ПД (контрагент), и для ГЗ (группа).
+        """
+        try:
+            tenant = None
+            gz_group = None
+
+            tenant_id = getattr(booking, "tenant_id", None)
+            gz_id = getattr(booking, "gz_group_id", None)
+
+            if tenant_id is not None:
+                from app.services.tenants_service import get_tenant
+                tenant = get_tenant(
+                    user_id=int(self.user.id),
+                    role_code=str(self.user.role_code),
+                    tenant_id=int(tenant_id),
+                )
+            elif gz_id is not None:
+                from app.services.gz_service import list_groups
+                groups = list_groups(
+                    include_inactive=True,
+                    user_id=int(self.user.id),
+                    role_code=str(self.user.role_code),
+                )
+                gz_group = next(
+                    (g for g in groups if int(g.id) == int(gz_id)), None
+                )
+                if gz_group is None:
+                    raise ValueError("Группа ГЗ не найдена")
+            else:
+                QMessageBox.information(
+                    self, "Клиент", "У этого занятия нет привязки к клиенту."
+                )
+                return
+
+            dlg = ClientInfoDialog(
+                self,
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                tenant=tenant,
+                gz_group=gz_group,
+                booking=booking,
+            )
+            dlg.exec()
+
+            # из карточки можно перейти в полную форму контрагента
+            if dlg.open_full_requested and tenant is not None:
+                self._open_tenant_from_month(int(tenant.id))
+
+        except Exception as e:
+            _uilog("ERROR _open_client_info: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(
+                self, "Клиент", f"Не удалось открыть информацию о клиенте:\n{e}"
+            )
+
     def _open_day_from_month(self, day) -> None:
         """Переключает на дневной вид с выбранной датой."""
         if day is None:
@@ -733,6 +821,8 @@ class SchedulePage(QWidget):
         self._set_mode("grid")
 
     def _mode(self) -> str:
+        if self.btn_view_windows.isChecked():
+            return "windows"
         if self.btn_view_month.isChecked():
             return "month"
         return "list" if self.btn_view_list.isChecked() else "grid"
@@ -1048,6 +1138,8 @@ class SchedulePage(QWidget):
         self._apply_hidden_columns(org_id)
         if self._mode() == "month":
             self._sync_month_view()
+        elif self._mode() == "windows":
+            self._sync_windows_view()
         self.reload()
 
     # ── period ───────────────────────────────────────────────────────────────
@@ -1091,6 +1183,8 @@ class SchedulePage(QWidget):
         return f"Площадка {venue_id}"
 
     def reload(self):
+        if self._mode() == "windows":
+            return self.windows_view.reload()
         if self._mode() == "month":
             return self.month_view.reload()
         if self._mode() == "list":

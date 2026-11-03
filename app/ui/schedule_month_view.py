@@ -615,6 +615,7 @@ class MonthBookingDetails(QDialog):
         self._booking = booking
         self.open_tenant_requested = False
         self.open_day_requested = False
+        self.open_client_requested = False
 
         self.setWindowTitle("Занятие")
         self.setModal(True)
@@ -648,6 +649,16 @@ class MonthBookingDetails(QDialog):
             lay.addWidget(line)
 
         buttons = QDialogButtonBox(self)
+
+        has_client = bool(
+            getattr(booking, "tenant_id", None) or getattr(booking, "gz_group_id", None)
+        )
+        if has_client:
+            btn_client = QPushButton("Информация о клиенте")
+            btn_client.setToolTip("Договор, правила, условия и комментарии")
+            btn_client.clicked.connect(self._on_client)
+            buttons.addButton(btn_client, QDialogButtonBox.ButtonRole.ActionRole)
+
         if can_open_tenant and kind == "ПД" and getattr(booking, "tenant_id", None):
             btn_tenant = QPushButton("Открыть карточку контрагента")
             btn_tenant.clicked.connect(self._on_tenant)
@@ -661,6 +672,10 @@ class MonthBookingDetails(QDialog):
         btn_close.clicked.connect(self.reject)
         buttons.addButton(btn_close, QDialogButtonBox.ButtonRole.RejectRole)
         lay.addWidget(buttons)
+
+    def _on_client(self) -> None:
+        self.open_client_requested = True
+        self.accept()
 
     def _on_tenant(self) -> None:
         self.open_tenant_requested = True
@@ -687,6 +702,7 @@ class ScheduleMonthView(QWidget):
 
     requestOpenTenant = Signal(int)
     requestOpenDay = Signal(object)
+    requestOpenClient = Signal(object)   # booking
 
     def __init__(self, user: AuthUser, parent=None):
         super().__init__(parent)
@@ -1011,7 +1027,9 @@ class ScheduleMonthView(QWidget):
         )
         dlg.exec()
 
-        if dlg.open_tenant_requested and getattr(booking, "tenant_id", None):
+        if dlg.open_client_requested:
+            self.requestOpenClient.emit(booking)
+        elif dlg.open_tenant_requested and getattr(booking, "tenant_id", None):
             self.requestOpenTenant.emit(int(booking.tenant_id))
         elif dlg.open_day_requested:
             self.requestOpenDay.emit(booking.starts_at.astimezone(APP_TZ).date())
