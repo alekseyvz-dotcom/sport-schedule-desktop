@@ -521,4 +521,29 @@ QToolButton#zoneTile:checked[conflicts_bad="1"] {
     background: rgba(239,68,68,0.22);
     border-color: rgba(239,68,68,0.98);
 }
+
+/* ---- Месячная визуализация объекта (ТЗ, п. 6) ---- */
+QWidget#monthView { background: #0b1220; }
+
+QLabel#monthTitle {
+    color: rgba(255,255,255,0.94);
+    font-weight: 900;
+    font-size: 15px;
+}
+
+QToolButton#monthNav {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    padding: 6px 10px;
+    font-weight: 900;
+    color: rgba(226,232,240,0.86);
+}
+QToolButton#monthNav:hover {
+    background: rgba(255,255,255,0.11);
+    border-color: rgba(255,255,255,0.24);
+}
+QToolButton#monthNav:pressed {
+    background: rgba(15,23,42,0.60);
+}
 """
