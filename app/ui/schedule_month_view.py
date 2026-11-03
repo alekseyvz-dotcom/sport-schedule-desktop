@@ -264,16 +264,28 @@ class _MonthTimeHeader(QWidget):
 
         hour = geom.start_min // 60
         last_hour = (geom.end_min + 59) // 60
+        label_w = 60.0
         while hour <= last_hour:
             x = (hour * 60 - geom.start_min) * geom.px_per_min - self._offset
             if x < -60 or x > geom.body_width + 60:
                 hour += 1
                 continue
+
             p.setPen(QPen(QColor(255, 255, 255, 30), 1))
             p.drawLine(int(x), HEADER_H - 8, int(x), HEADER_H)
+
+            # подпись по центру часа, но не выходя за края шапки:
+            # первый час иначе обрезается слева
+            tx = x - label_w / 2.0
+            if -1.0 <= x <= self.width() + 1.0:
+                if tx < 2.0:
+                    tx = 2.0
+                elif tx + label_w > self.width() - 2.0:
+                    tx = self.width() - 2.0 - label_w
+
             p.setPen(QPen(_TEXT_DIM))
             p.drawText(
-                QRectF(x - 30, 8, 60, HEADER_H - 18),
+                QRectF(tx, 8, label_w, HEADER_H - 18),
                 Qt.AlignmentFlag.AlignCenter,
                 f"{hour:02d}:00",
             )
