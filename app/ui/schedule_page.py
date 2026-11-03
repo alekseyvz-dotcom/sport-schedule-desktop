@@ -93,6 +93,7 @@ from app.services.bookings_service import (
     create_booking,
     update_booking,
     cancel_booking,
+    cancel_bookings,
     cancel_related_booking_parts,
 )
 from app.ui.booking_dialog import BookingDialog
@@ -1003,6 +1004,90 @@ class SchedulePage(QWidget):
         return (self._selected_booking_from_list()
                 if self._mode() == "list"
                 else self._selected_booking_from_grid())
+
+    def _selected_bookings(self) -> List:
+        """
+        Все брони, попавшие в выделение (без повторов).
+
+        В режиме «Слоты» одна бронь может занимать несколько ячеек по вертикали,
+        поэтому собираем по id. В режиме «Список» выделена одна строка.
+        """
+        if self._mode() == "list":
+            b = self._selected_booking_from_list()
+            return [b] if b else []
+
+        found: Dict[int, object] = {}
+
+        # selectedIndexes() отдаёт все выделенные ячейки, включая
+        # множественное выделение мышью; selectedRanges() теряет часть
+        # информации, если курсор переставлен.
+        for idx in self.tbl.selectionModel().selectedIndexes():
+            if idx.column() == 0:
+                continue
+            it = self.tbl.item(idx.row(), idx.column())
+            if it is None:
+                continue
+            b = it.data(Qt.ItemDataRole.UserRole)
+            if b is None:
+                continue
+            bid = int(getattr(b, "id", 0) or 0)
+            if bid and bid not in found:
+                found[bid] = b
+
+        # если выделения нет, но есть текущая ячейка — берём её
+        if not found:
+            b = self._selected_booking_from_grid()
+            if b is not None:
+                found[int(getattr(b, "id", 0) or 0)] = b
+
+        return list(found.values())
+
+    def _booking_owner(self, b) -> str:
+        kind = (getattr(b, "kind", "") or "").upper()
+        tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+        gz_name = (getattr(b, "gz_group_name", "") or "").strip()
+        title = (getattr(b, "title", "") or "").strip()
+        owner = gz_name if kind == "GZ" else tenant_name
+        return owner or title or "Бронирование"
+
+    def _related_parts_count(self, bookings: List) -> int:
+        """
+        Сколько ещё частей есть у этих броней помимо выделенных.
+        Считаем по совпадению площадки/времени/владельца.
+        """
+        if not bookings:
+            return 0
+
+        def key(b):
+            return (
+                int(getattr(b, "venue_id", 0) or 0),
+                getattr(b, "starts_at", None),
+                getattr(b, "ends_at", None),
+                (getattr(b, "kind", "") or "").upper(),
+                (getattr(b, "title", "") or ""),
+                getattr(b, "tenant_id", None),
+                getattr(b, "gz_group_id", None),
+            )
+
+        keys = {key(b) for b in bookings}
+        selected_ids = {int(getattr(b, "id", 0) or 0) for b in bookings}
+
+        extra = 0
+        model = self.tbl
+        for r in range(model.rowCount()):
+            for c in range(1, model.columnCount()):
+                it = model.item(r, c)
+                if it is None:
+                    continue
+                other = it.data(Qt.ItemDataRole.UserRole)
+                if other is None:
+                    continue
+                oid = int(getattr(other, "id", 0) or 0)
+                if oid in selected_ids:
+                    continue
+                if key(other) in keys:
+                    extra += 1
+        return extra
 
     def _row_to_datetime(self, day: date, row: int) -> datetime:
         slots = self._time_slots()
@@ -1917,51 +2002,71 @@ class SchedulePage(QWidget):
             )
             return
     
-        b = self._selected_booking()
-        if not b:
+        # Берём ровно то, что выделено мышью
+        bookings = self._selected_bookings()
+        if not bookings:
             QMessageBox.information(self, "Отменить", "Выберите бронирование.")
             return
-    
-        kind = (getattr(b, "kind", "") or "").upper()
-        tenant_name = (getattr(b, "tenant_name", "") or "").strip()
-        gz_group_name = (getattr(b, "gz_group_name", "") or "").strip()
-        title = (getattr(b, "title", "") or "").strip()
-    
-        owner = gz_group_name if kind == "GZ" else tenant_name
-        owner = owner or title or "Бронирование"
-    
-        msg = (
-            "Отменить выбранное бронирование?\n\n"
-            "Если оно занимает несколько частей площадки, будут отменены все связанные части.\n\n"
-            f"{owner}\n"
-            f"{getattr(b, 'starts_at'):%d.%m.%Y %H:%M}–{getattr(b, 'ends_at'):%H:%M}"
-        )
-    
-        if (
-            QMessageBox.question(
-                self,
-                "Отмена бронирования",
-                msg,
+
+        # Уже отменённые повторно не трогаем
+        active = [
+            b for b in bookings
+            if (getattr(b, "status", "") or "").lower() != "cancelled"
+        ]
+        if not active:
+            QMessageBox.information(
+                self, "Отменить",
+                "Выбранное бронирование уже отменено.",
             )
-            != QMessageBox.StandardButton.Yes
-        ):
             return
-    
+
+        ids = sorted({int(getattr(b, "id")) for b in active})
+        owners: Dict[str, str] = {}
+        for b in active:
+            key = self._booking_owner(b)
+            if key not in owners:
+                starts = getattr(b, "starts_at")
+                ends = getattr(b, "ends_at")
+                owners[key] = f"{key} — {starts:%d.%m.%Y %H:%M}–{ends:%H:%M}"
+
+        lines = "\n".join(f"• {v}" for v in owners.values())
+
+        if len(active) == 1:
+            head = "Отменить выбранное бронирование?"
+        else:
+            head = f"Отменить выбранные бронирования ({len(active)})?"
+
+        msg = f"{head}\n\n{lines}"
+
+        # Предупреждаем, только если у этой же брони есть части, которые НЕ выделены
+        extra = self._related_parts_count(active)
+        if extra:
+            msg += (
+                f"\n\nВнимание: у этой брони есть ещё {extra} "
+                f"{'часть' if extra % 10 == 1 and extra % 100 != 11 else ('части' if 2 <= extra % 10 <= 4 and not 12 <= extra % 100 <= 14 else 'частей')}, "
+                "которые останутся в расписании.\n"
+                "Чтобы отменить их тоже — выделите их вместе с текущими."
+            )
+
+        if QMessageBox.question(self, "Отмена бронирования", msg) != QMessageBox.StandardButton.Yes:
+            return
+
         try:
-            affected = cancel_related_booking_parts(int(getattr(b, "id")))
+            affected = cancel_bookings(ids)
         except Exception as e:
-            _uilog("ERROR cancel_related_booking_parts: " + repr(e))
+            _uilog("ERROR cancel_bookings: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Отменить", f"Ошибка отмены:\n{e}")
             return
-    
-        if affected > 1:
+
+        if affected != len(ids):
             QMessageBox.information(
                 self,
                 "Отмена бронирования",
-                f"Отменено связанных частей: {affected}",
+                f"Отменено: {affected} из {len(ids)}.\n"
+                "Часть строк, возможно, уже была отменена.",
             )
-    
+
         self.reload()
 
     # ── misc ─────────────────────────────────────────────────────────────────
