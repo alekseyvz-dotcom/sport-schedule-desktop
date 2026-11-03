@@ -546,4 +546,17 @@ QToolButton#monthNav:hover {
 QToolButton#monthNav:pressed {
     background: rgba(15,23,42,0.60);
 }
+
+/* ---- Служба безопасности (ТЗ, п. 1) ---- */
+QTableWidget#securityTenantsTable::item,
+QTableWidget#securityAthletesTable::item,
+QTableWidget#securityVehiclesTable::item {
+    padding: 6px 8px;
+    border: none;
+}
+QTableWidget#securityTenantsTable::item:selected,
+QTableWidget#securityAthletesTable::item:selected,
+QTableWidget#securityVehiclesTable::item:selected {
+    background: rgba(99, 102, 241, 0.30);
+}
 """
