@@ -1,0 +1,218 @@
+diff --git a/app/services/tenant_contracts_service.py b/app/services/tenant_contracts_service.py
+new file mode 100644
+index 0000000..737cc3e
+--- /dev/null
++++ b/app/services/tenant_contracts_service.py
+@@ -0,0 +1,67 @@
++"""Contract history. Adding history does not alter the legacy current contract."""
++from datetime import date
++
++from psycopg2.extras import RealDictCursor
++
++from app.db import get_conn, put_conn
++from app.services.tenants_service import _require_tenants_view, _require_tenants_edit
++
++
++def list_contracts(*, user_id: int, role_code: str, tenant_id: int):
++    _require_tenants_view(user_id=user_id, role_code=role_code)
++    conn = get_conn()
++    try:
++        with conn.cursor(cursor_factory=RealDictCursor) as cur:
++            cur.execute("""
++                SELECT id, contract_no, contract_date, valid_from, valid_to,
++                       contract_signed, attached_in_1c, has_ds, is_legacy
++                  FROM public.tenant_contracts
++                 WHERE tenant_id = %s
++                 ORDER BY valid_from DESC NULLS LAST, id DESC
++            """, (int(tenant_id),))
++            return list(cur.fetchall())
++    finally:
++        put_conn(conn)
++
++
++def add_contract(*, user_id: int, role_code: str, tenant_id: int,
++                 contract_no: str, contract_date: date,
++                 valid_from: date, valid_to: date,
++                 contract_signed: bool = False, attached_in_1c: bool = False,
++                 has_ds: bool = False):
++    _require_tenants_edit(user_id=user_id, role_code=role_code)
++    number = (contract_no or '').strip()
++    if not number:
++        raise ValueError('Укажите номер договора.')
++    if not all(isinstance(d, date) for d in (contract_date, valid_from, valid_to)):
++        raise ValueError('Укажите дату договора и срок его действия.')
++    if valid_to < valid_from:
++        raise ValueError('Дата окончания раньше даты начала.')
++    conn = get_conn()
++    try:
++        with conn.cursor() as cur:
++            # Serializes additions for this tenant; does not change its legacy fields.
++            cur.execute('SELECT id FROM public.tenants WHERE id = %s FOR UPDATE', (int(tenant_id),))
++            if cur.fetchone() is None:
++                raise ValueError('Контрагент не найден.')
++            cur.execute('''
++                SELECT 1 FROM public.tenant_contracts
++                 WHERE tenant_id = %s AND contract_no = %s
++                   AND contract_date = %s AND valid_from = %s AND valid_to = %s
++                 LIMIT 1
++            ''', (int(tenant_id), number, contract_date, valid_from, valid_to))
++            if cur.fetchone():
++                raise ValueError('Такой договор уже есть в истории.')
++            cur.execute('''
++                INSERT INTO public.tenant_contracts
++                    (tenant_id, contract_no, contract_date, valid_from, valid_to,
++                     contract_signed, attached_in_1c, has_ds, is_legacy)
++                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false)
++            ''', (int(tenant_id), number, contract_date, valid_from, valid_to,
++                  bool(contract_signed), bool(attached_in_1c), bool(has_ds)))
++        conn.commit()
++    except Exception:
++        conn.rollback()
++        raise
++    finally:
++        put_conn(conn)
+diff --git a/app/ui/tenant_contracts_dialog.py b/app/ui/tenant_contracts_dialog.py
+new file mode 100644
+index 0000000..ebeb18d
+--- /dev/null
++++ b/app/ui/tenant_contracts_dialog.py
+@@ -0,0 +1,98 @@
++from PySide6.QtCore import QDate
++from PySide6.QtWidgets import (
++    QAbstractItemView, QCheckBox, QDateEdit, QDialog, QDialogButtonBox,
++    QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
++    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
++)
++
++from app.services.tenant_contracts_service import add_contract, list_contracts
++
++
++class NewContractDialog(QDialog):
++    def __init__(self, parent=None):
++        super().__init__(parent)
++        self.setWindowTitle('Новый договор')
++        form = QFormLayout(self)
++        self.number = QLineEdit()
++        form.addRow('Номер *:', self.number)
++        self.dates = []
++        for label in ('Дата договора *:', 'Действует с *:', 'Действует по *:'):
++            edit = QDateEdit(QDate.currentDate())
++            edit.setCalendarPopup(True)
++            edit.setDisplayFormat('dd.MM.yyyy')
++            form.addRow(label, edit)
++            self.dates.append(edit)
++        self.signed = QCheckBox('Подписан')
++        self.attached = QCheckBox('Прикреплён в 1С')
++        self.ds = QCheckBox('ДС')
++        for box in (self.signed, self.attached, self.ds):
++            form.addRow(box)
++        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
++        buttons.accepted.connect(self.accept)
++        buttons.rejected.connect(self.reject)
++        form.addRow(buttons)
++
++
++class TenantContractsDialog(QDialog):
++    def __init__(self, *, user_id, role_code, tenant_id, parent=None):
++        super().__init__(parent)
++        self.user_id, self.role_code, self.tenant_id = user_id, role_code, tenant_id
++        self.setWindowTitle('История договоров')
++        self.resize(850, 420)
++        layout = QVBoxLayout(self)
++        note = QLabel('Новый договор сохраняется сразу в историю. Поля основного договора в карточке и сроки правил автоматически не изменяются.')
++        note.setWordWrap(True)
++        layout.addWidget(note)
++        self.table = QTableWidget(0, 8)
++        self.table.setHorizontalHeaderLabels(['Номер', 'Дата', 'С', 'По', 'Подписан', 'В 1С', 'ДС', 'Источник'])
++        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
++        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
++        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
++        self.table.horizontalHeader().setStretchLastSection(True)
++        layout.addWidget(self.table)
++        row = QHBoxLayout()
++        add = QPushButton('Добавить договор')
++        add.setEnabled(str(role_code or '').strip().lower() == 'admin')
++        add.clicked.connect(self._add)
++        close = QPushButton('Закрыть')
++        close.clicked.connect(self.accept)
++        row.addWidget(add)
++        row.addStretch()
++        row.addWidget(close)
++        layout.addLayout(row)
++        self._reload()
++
++    def _reload(self):
++        try:
++            rows = list_contracts(user_id=self.user_id, role_code=self.role_code, tenant_id=self.tenant_id)
++        except Exception as exc:
++            QMessageBox.warning(self, 'Договоры', f'Не удалось загрузить историю: {exc}')
++            return
++        self.table.setRowCount(len(rows))
++        def fmt(value):
++            return value.strftime('%d.%m.%Y') if value else '—'
++        def flag(value):
++            return '—' if value is None else ('Да' if value else 'Нет')
++        for i, r in enumerate(rows):
++            cells = [r['contract_no'] or '—', fmt(r['contract_date']), fmt(r['valid_from']), fmt(r['valid_to']),
++                     flag(r['contract_signed']), flag(r['attached_in_1c']), flag(r['has_ds']),
++                     'Исходная запись' if r['is_legacy'] else 'Добавлен в историю']
++            for j, value in enumerate(cells):
++                self.table.setItem(i, j, QTableWidgetItem(value))
++
++    def _add(self):
++        dialog = NewContractDialog(self)
++        while dialog.exec() == QDialog.DialogCode.Accepted:
++            try:
++                values = [edit.date().toPython() for edit in dialog.dates]
++                add_contract(user_id=self.user_id, role_code=self.role_code, tenant_id=self.tenant_id,
++                             contract_no=dialog.number.text(), contract_date=values[0],
++                             valid_from=values[1], valid_to=values[2],
++                             contract_signed=dialog.signed.isChecked(),
++                             attached_in_1c=dialog.attached.isChecked(), has_ds=dialog.ds.isChecked())
++            except Exception as exc:
++                QMessageBox.warning(self, 'Договор не сохранён', str(exc))
++                continue
++            self._reload()
++            QMessageBox.information(self, 'Договор', 'Договор сохранён в историю. Основные поля карточки и правила не изменены.')
++            break
+diff --git a/app/ui/tenant_dialog.py b/app/ui/tenant_dialog.py
+index 166a014..2db05bb 100644
+--- a/app/ui/tenant_dialog.py
++++ b/app/ui/tenant_dialog.py
+@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
+     QScrollArea,
+     QSizePolicy,
+     QFrame,
++    QPushButton,
+ )
+ 
+ from app.ui.tenant_rules_widget import TenantRulesWidget
++from app.ui.tenant_contracts_dialog import TenantContractsDialog
+ 
+ from PySide6.QtGui import QColor, QPalette
+ 
+@@ -113,6 +115,11 @@ class TenantDialog(QDialog):
+     Карточка контрагента (тенант).
+     """
+ 
++    def _show_contract_history(self):
++        if self._tenant_id is not None:
++            TenantContractsDialog(user_id=self._user_id, role_code=self._role_code,
++                                  tenant_id=self._tenant_id, parent=self).exec()
++
+     def __init__(
+         self,
+         parent=None,
+@@ -248,6 +255,12 @@ class TenantDialog(QDialog):
+         grid.addWidget(QLabel("Статус:"), 4, 0)
+         grid.addWidget(self.cmb_status, 4, 1)
+ 
++        btn_history = QPushButton("История договоров")
++        btn_history.setEnabled(self._tenant_id is not None)
++        btn_history.setToolTip("Для нового контрагента сначала сохраните карточку")
++        btn_history.clicked.connect(self._show_contract_history)
++        grid.addWidget(btn_history, 5, 0, 1, 4)
++
+         # ---- group: Комментарии
+         gb_notes = QGroupBox("Комментарии")
+         fm_notes = QFormLayout(gb_notes)
