@@ -41,6 +41,8 @@ APP_TZ = timezone(timedelta(hours=3))
 DATE_COL_W = 134
 HEADER_H = 36
 HOUR_W = 88
+HOUR_W_MIN = 56
+HOUR_W_MAX = 168
 LANE_H = 26
 DAY_PAD = 5
 DAY_GAP = 8
@@ -263,8 +265,8 @@ class _MonthTimeHeader(QWidget):
         hour = geom.start_min // 60
         last_hour = (geom.end_min + 59) // 60
         while hour <= last_hour:
-            x = hour * 60 * geom.px_per_min - self._offset
-            if x < -60 or x > self.width() + 60:
+            x = (hour * 60 - geom.start_min) * geom.px_per_min - self._offset
+            if x < -60 or x > geom.body_width + 60:
                 hour += 1
                 continue
             p.setPen(QPen(QColor(255, 255, 255, 30), 1))
@@ -417,7 +419,7 @@ class _MonthGrid(QWidget):
         today = date.today()
 
         for index, dg in enumerate(geom.days):
-            band = QRectF(0, dg.top, geom.body_width, dg.height)
+            band = QRectF(0, dg.top, self.width(), dg.height)
 
             p.fillRect(band, _BAND_EVEN if index % 2 == 0 else _BAND_ODD)
             if dg.day.weekday() >= 5:
@@ -428,7 +430,7 @@ class _MonthGrid(QWidget):
             # сетка времени
             hour = geom.start_min // 60
             while hour * 60 <= geom.end_min:
-                x = hour * 60 * geom.px_per_min
+                x = (hour * 60 - geom.start_min) * geom.px_per_min
                 p.setPen(QPen(_GRID_LINE, 1))
                 p.drawLine(int(x), int(dg.top), int(x), int(dg.top + dg.height))
                 half = x + 30 * geom.px_per_min
@@ -443,7 +445,7 @@ class _MonthGrid(QWidget):
                     self._paint_booking(p, geom, dg, b, lane_index)
 
             p.setPen(QPen(QColor(255, 255, 255, 16), 1))
-            p.drawLine(0, int(dg.top + dg.height), geom.body_width, int(dg.top + dg.height))
+            p.drawLine(0, int(dg.top + dg.height), self.width(), int(dg.top + dg.height))
 
     def _paint_booking(self, p: QPainter, geom: MonthGeometry, dg: DayGeom, b, lane_index: int) -> None:
         start = b.starts_at.astimezone(APP_TZ)
@@ -684,6 +686,7 @@ class ScheduleMonthView(QWidget):
         self._work_end = time(22, 0)
         self._show_cancelled = False
         self._free_gz_ids: set[int] = set()
+        self._rebuilding = False
 
         self._anchor: date = date.today().replace(day=1)
         self._venues: List = []
@@ -927,6 +930,15 @@ class ScheduleMonthView(QWidget):
         self.rebuild()
 
     def rebuild(self) -> None:
+        if self._rebuilding:
+            return
+        self._rebuilding = True
+        try:
+            self._rebuild_impl()
+        finally:
+            self._rebuilding = False
+
+    def _rebuild_impl(self) -> None:
         days = month_days(self._anchor)
 
         start_min = self._work_start.hour * 60 + self._work_start.minute
@@ -934,10 +946,17 @@ class ScheduleMonthView(QWidget):
         if end_min <= start_min:
             end_min = min(24 * 60, start_min + 60)
 
+        # ширина часа подбирается так, чтобы рабочий день занимал окно целиком
+        hour_w = HOUR_W
+        avail = self.scroll.viewport().width()
+        span_hours = (end_min - start_min) / 60.0
+        if avail > 40 and span_hours > 0:
+            hour_w = int(max(HOUR_W_MIN, min(HOUR_W_MAX, avail / span_hours)))
+
         geom = build_geometry(
             days,
             self._lanes,
-            hour_w=HOUR_W,
+            hour_w=hour_w,
             start_min=start_min,
             end_min=end_min,
         )
@@ -960,6 +979,11 @@ class ScheduleMonthView(QWidget):
                     else:
                         pd_count += 1
         self.lbl_summary.setText(f"ПД: {pd_count} · ГЗ: {gz_count} · всего: {total}")
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._geom is not None and not self._rebuilding:
+            self.rebuild()
 
     # ── события ────────────────────────────────────────────────────────────
 
