@@ -673,14 +673,45 @@ class SchedulePage(QWidget):
         """Открывает карточку контрагента из месячной визуализации (ТЗ, п. 7)."""
         try:
             from app.services.tenants_service import get_tenant
-            from app.ui.tenant_card_dialog import TenantCardDialog
+            from app.ui.tenant_dialog import TenantDialog
+            from app.services.tenants_service import get_tenant as _get_tenant
 
-            tenant = get_tenant(
+            tenant = _get_tenant(
                 user_id=int(self.user.id),
                 role_code=str(self.user.role_code),
                 tenant_id=int(tenant_id),
             )
-            dlg = TenantCardDialog(self, tenant=tenant)
+            is_admin = (str(self.user.role_code).lower() == "admin")
+            dlg = TenantDialog(
+                self,
+                title=f"Контрагент: {tenant.name}",
+                is_admin=is_admin,
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                data={
+                    "id":                   tenant.id,
+                    "name":                 tenant.name,
+                    "inn":                  tenant.inn,
+                    "phone":                tenant.phone,
+                    "email":                tenant.email,
+                    "comment":              tenant.comment,
+                    "contact_name":         tenant.contact_name,
+                    "obligation_kind":      tenant.obligation_kind,
+                    "contract_no":          tenant.contract_no,
+                    "contract_date":        tenant.contract_date,
+                    "contract_valid_from":  tenant.contract_valid_from,
+                    "contract_valid_to":    tenant.contract_valid_to,
+                    "docs_delivery_method": tenant.docs_delivery_method,
+                    "status":               tenant.status,
+                    "contract_signed":      tenant.contract_signed,
+                    "attached_in_1c":       tenant.attached_in_1c,
+                    "has_ds":               tenant.has_ds,
+                    "notes":                tenant.notes,
+                    "tenant_kind":          tenant.tenant_kind,
+                    "rent_kind":            tenant.rent_kind,
+                },
+            )
+            dlg.setModal(True)
             dlg.exec()
         except Exception as e:
             _uilog("ERROR _open_tenant_from_month: " + repr(e))
