@@ -88,6 +88,13 @@ def _qdate_to_pydate(qd: QDate) -> Optional[date]:
         return None
     return date(qd.year(), qd.month(), qd.day())
 
+def _date_edit_to_pydate(date_edit: QDateEdit) -> Optional[date]:
+    """Возвращает None для служебного значения «дата не указана»."""
+    qd = date_edit.date()
+    if qd == date_edit.minimumDate():
+        return None
+    return _qdate_to_pydate(qd)
+
 
 _OBLIGATION_OPTIONS = [
     "орг группа 60 минут",
@@ -257,8 +264,8 @@ class TenantDialog(QDialog):
         rules_layout.setContentsMargins(12, 16, 12, 12)
         rules_layout.setSpacing(10)
 
-        contract_from = _qdate_to_pydate(self.dt_valid_from.date())
-        contract_to = _qdate_to_pydate(self.dt_valid_to.date())
+        contract_from = _date_edit_to_pydate(self.dt_valid_from)
+        contract_to = _date_edit_to_pydate(self.dt_valid_to)
 
         self.rules_widget = TenantRulesWidget(
             self,
@@ -270,6 +277,10 @@ class TenantDialog(QDialog):
             user_id=self._user_id,
             role_code=self._role_code,
         )
+
+        self.dt_valid_from.dateChanged.connect(self._sync_rules_period)
+        self.dt_valid_to.dateChanged.connect(self._sync_rules_period)
+        
         self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.rules_widget.setMinimumHeight(260)
 
@@ -324,6 +335,12 @@ class TenantDialog(QDialog):
         root.addWidget(buttons, 0)
 
         self._apply_kind_ui()
+
+    def _sync_rules_period(self, *_):
+        self.rules_widget.set_contract_period(
+            _date_edit_to_pydate(self.dt_valid_from),
+            _date_edit_to_pydate(self.dt_valid_to),
+        )
 
     def _apply_kind_ui(self) -> None:
         is_person = (self.cmb_tenant_kind.currentData() == "person")
@@ -412,12 +429,15 @@ class TenantDialog(QDialog):
         w = QDateEdit()
         w.setCalendarPopup(True)
         w.setDisplayFormat("dd.MM.yyyy")
+
+        # Минимальная дата используется как признак отсутствия значения.
         w.setMinimumDate(QDate(1900, 1, 1))
+        w.setSpecialValueText("Не указано")
 
         if d:
             w.setDate(_pydate_to_qdate(d))
         else:
-            w.setDate(QDate.currentDate())
+            w.setDate(w.minimumDate())
 
         _style_calendar_widget(w)
         return w
@@ -431,9 +451,9 @@ class TenantDialog(QDialog):
 
         is_person = (self.cmb_tenant_kind.currentData() == "person")
         if not is_person:
-            d_from = _qdate_to_pydate(self.dt_valid_from.date())
-            d_to = _qdate_to_pydate(self.dt_valid_to.date())
-            if d_from and d_to and d_to < d_from:
+            d_from = _date_edit_to_pydate(self.dt_valid_from)
+            d_to = _date_edit_to_pydate(self.dt_valid_to)
+            if d_from is not None and d_to is not None and d_to < d_from:
                 QMessageBox.warning(self, "Контрагент", "Срок действия: дата 'по' не может быть раньше даты 'с'.")
                 return
 
@@ -482,9 +502,9 @@ class TenantDialog(QDialog):
                 "email": self.ed_email.text().strip(),
                 "contact_name": self.ed_contact_name.text().strip(),
                 "contract_no": self.ed_contract_no.text().strip(),
-                "contract_date": _qdate_to_pydate(self.dt_contract_date.date()),
-                "contract_valid_from": _qdate_to_pydate(self.dt_valid_from.date()),
-                "contract_valid_to": _qdate_to_pydate(self.dt_valid_to.date()),
+                "contract_date": _date_edit_to_pydate(self.dt_contract_date),
+                "contract_valid_from": _date_edit_to_pydate(self.dt_valid_from),
+                "contract_valid_to": _date_edit_to_pydate(self.dt_valid_to),
                 "docs_delivery_method": self.cmb_delivery.currentText().strip(),
                 "status": self.cmb_status.currentData(),
                 "contract_signed": False,
