@@ -424,6 +424,45 @@ def cancel_booking(booking_id: int) -> None:
         if conn:
             put_conn(conn)
 
+def cancel_bookings(booking_ids: Iterable[int]) -> int:
+    """
+    Отменяет ровно указанные брони (по id), ничего лишнего.
+
+    Нужно для отмены из расписания: каждая «четверть» площадки — отдельная
+    строка bookings, поэтому пользователь отменяет только то, что выделил.
+
+    Возвращает количество реально отменённых строк
+    (уже отменённые не считаются).
+    """
+    ids = sorted({int(x) for x in booking_ids})
+    if not ids:
+        return 0
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.bookings
+                SET status = 'cancelled'
+                WHERE id = ANY(%s)
+                  AND status <> 'cancelled'
+                """,
+                (ids,),
+            )
+            affected = int(cur.rowcount)
+        conn.commit()
+        return affected
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
 def cancel_related_booking_parts(booking_id: int) -> int:
     """
     Отменяет все части одной логической брони.

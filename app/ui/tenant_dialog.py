@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QFrame,
+    QPushButton,
 )
 
 from app.ui.tenant_rules_widget import TenantRulesWidget
+from app.ui.tenant_contracts_dialog import TenantContractsDialog
 
 from PySide6.QtGui import QColor, QPalette
 
@@ -112,6 +114,11 @@ class TenantDialog(QDialog):
     """
     Карточка контрагента (тенант).
     """
+
+    def _show_contract_history(self):
+        if self._tenant_id is not None:
+            TenantContractsDialog(user_id=self._user_id, role_code=self._role_code,
+                                  tenant_id=self._tenant_id, parent=self).exec()
 
     def __init__(
         self,
@@ -247,6 +254,12 @@ class TenantDialog(QDialog):
 
         grid.addWidget(QLabel("Статус:"), 4, 0)
         grid.addWidget(self.cmb_status, 4, 1)
+
+        btn_history = QPushButton("История договоров")
+        btn_history.setEnabled(self._tenant_id is not None)
+        btn_history.setToolTip("Для нового контрагента сначала сохраните карточку")
+        btn_history.clicked.connect(self._show_contract_history)
+        grid.addWidget(btn_history, 5, 0, 1, 4)
 
         # ---- group: Комментарии
         gb_notes = QGroupBox("Комментарии")

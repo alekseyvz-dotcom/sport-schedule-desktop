@@ -93,9 +93,13 @@ from app.services.bookings_service import (
     create_booking,
     update_booking,
     cancel_booking,
+    cancel_bookings,
     cancel_related_booking_parts,
 )
 from app.ui.booking_dialog import BookingDialog
+from app.ui.schedule_month_view import ScheduleMonthView
+from app.ui.schedule_windows_view import ScheduleWindowsView
+from app.ui.client_info_dialog import ClientInfoDialog
 
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
@@ -475,12 +479,28 @@ class SchedulePage(QWidget):
         self.btn_view_list.setText("Список")
         self.btn_view_list.setCheckable(True)
 
+        self.btn_view_month = QToolButton()
+        self.btn_view_month.setObjectName("viewTab")
+        self.btn_view_month.setText("Месяц")
+        self.btn_view_month.setCheckable(True)
+        self.btn_view_month.setToolTip("Визуализация объекта на месяц целиком")
+
+        self.btn_view_windows = QToolButton()
+        self.btn_view_windows.setObjectName("viewTab")
+        self.btn_view_windows.setText("Окна")
+        self.btn_view_windows.setCheckable(True)
+        self.btn_view_windows.setToolTip("Свободное время по объекту")
+
         self._view_group = QButtonGroup(self)
         self._view_group.setExclusive(True)
         self._view_group.addButton(self.btn_view_grid)
         self._view_group.addButton(self.btn_view_list)
+        self._view_group.addButton(self.btn_view_month)
+        self._view_group.addButton(self.btn_view_windows)
         self.btn_view_grid.clicked.connect(lambda: self._set_mode("grid"))
         self.btn_view_list.clicked.connect(lambda: self._set_mode("list"))
+        self.btn_view_month.clicked.connect(lambda: self._set_mode("month"))
+        self.btn_view_windows.clicked.connect(lambda: self._set_mode("windows"))
 
         self.cmb_period = QComboBox()
         self.cmb_period.addItem("День",           "day")
@@ -492,7 +512,7 @@ class SchedulePage(QWidget):
 
         self.cb_cancelled = QCheckBox("Отменённые")
         self.cb_cancelled.setChecked(False)
-        self.cb_cancelled.stateChanged.connect(lambda *_: self.reload())
+        self.cb_cancelled.stateChanged.connect(self._on_cancelled_flag_changed)
 
         self.btn_create  = QPushButton("Создать")
         self.btn_edit    = QPushButton("Редактировать")
@@ -512,11 +532,14 @@ class SchedulePage(QWidget):
         top.addWidget(self.lbl_title)
         top.addWidget(QLabel("Учреждение:"))
         top.addWidget(self.cmb_org, 1)
-        top.addWidget(QLabel("Дата:"))
+        self.lbl_date_caption = QLabel("Дата:")
+        top.addWidget(self.lbl_date_caption)
         top.addWidget(self.dt_day)
         top.addSpacing(6)
         top.addWidget(self.btn_view_grid)
         top.addWidget(self.btn_view_list)
+        top.addWidget(self.btn_view_month)
+        top.addWidget(self.btn_view_windows)
         self.lbl_period_caption = QLabel("Период:")
         top.addWidget(self.lbl_period_caption)
         top.addWidget(self.cmb_period)
@@ -579,6 +602,18 @@ class SchedulePage(QWidget):
         self.stack.addWidget(self.tbl)      # 0 — grid
         self.stack.addWidget(splitter)      # 1 — list
 
+        # 2 — месячная визуализация объекта (ТЗ, п. 6)
+        self.month_view = ScheduleMonthView(self.user, self)
+        self.month_view.requestOpenTenant.connect(self._open_tenant_from_month)
+        self.month_view.requestOpenDay.connect(self._open_day_from_month)
+        self.month_view.requestOpenClient.connect(self._open_client_info)
+        self.stack.addWidget(self.month_view)
+
+        # 3 — свободные окна объекта (ТЗ, п. 8)
+        self.windows_view = ScheduleWindowsView(self.user, self)
+        self.windows_view.requestOpenDay.connect(self._open_day_from_month)
+        self.stack.addWidget(self.windows_view)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 12)
         root.setSpacing(10)
@@ -599,23 +634,34 @@ class SchedulePage(QWidget):
         self._set_mode(last_mode, persist=False)
 
     def _set_mode(self, mode: str, *, persist: bool = True) -> None:
-        mode = "list" if mode == "list" else "grid"
+        mode = mode if mode in ("grid", "list", "month", "windows") else "grid"
         if persist:
             self._settings.setValue("schedule/view_mode", mode)
 
-        self.stack.setCurrentIndex(0 if mode == "grid" else 1)
+        index = {"grid": 0, "list": 1, "month": 2, "windows": 3}[mode]
+        self.stack.setCurrentIndex(index)
 
         self.btn_view_grid.blockSignals(True)
         self.btn_view_list.blockSignals(True)
+        self.btn_view_month.blockSignals(True)
+        self.btn_view_windows.blockSignals(True)
         self.btn_view_grid.setChecked(mode == "grid")
         self.btn_view_list.setChecked(mode == "list")
+        self.btn_view_month.setChecked(mode == "month")
+        self.btn_view_windows.setChecked(mode == "windows")
         self.btn_view_grid.blockSignals(False)
         self.btn_view_list.blockSignals(False)
+        self.btn_view_month.blockSignals(False)
+        self.btn_view_windows.blockSignals(False)
 
         is_list = (mode == "list")
+        is_panel = mode in ("month", "windows")   # свой выбор периода внутри
         self.cmb_period.setVisible(is_list)
         self.lbl_period_caption.setVisible(is_list)
         self.meta_row.setVisible(is_list)
+
+        self.dt_day.setVisible(not is_panel)
+        self.lbl_date_caption.setVisible(not is_panel)
 
         if not is_list:
             self.lbl_period.setText("")
@@ -623,9 +669,163 @@ class SchedulePage(QWidget):
 
         self.btn_columns.setEnabled(mode == "grid")
         self._apply_access_buttons()
+
+        if mode == "month":
+            self._sync_month_view()
+        elif mode == "windows":
+            self._sync_windows_view()
+
         self.reload()
 
+    def _sync_windows_view(self) -> None:
+        """Передаёт экрану окон учреждение и окно работы."""
+        self.windows_view.set_org(
+            self.cmb_org.currentData(),
+            self._work_start,
+            self._work_end,
+        )
+
+    def _sync_month_view(self) -> None:
+        """Передаёт месячному экрану учреждение, окно работы и признаки ГЗ."""
+        self.month_view.set_free_gz_ids(self._gz_group_is_free.keys())
+        self.month_view.set_show_cancelled(self.cb_cancelled.isChecked())
+        self.month_view.set_org(
+            self.cmb_org.currentData(),
+            self._work_start,
+            self._work_end,
+        )
+
+    def _on_cancelled_flag_changed(self, *_):
+        if self._mode() == "month":
+            self.month_view.set_show_cancelled(self.cb_cancelled.isChecked())
+        self.reload()
+
+    def _open_tenant_from_month(self, tenant_id: int) -> None:
+        """Открывает карточку контрагента из месячной визуализации (ТЗ, п. 7)."""
+        try:
+            from app.services.tenants_service import get_tenant
+            from app.ui.tenant_dialog import TenantDialog
+            from app.services.tenants_service import get_tenant as _get_tenant
+
+            tenant = _get_tenant(
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                tenant_id=int(tenant_id),
+            )
+            is_admin = (str(self.user.role_code).lower() == "admin")
+            dlg = TenantDialog(
+                self,
+                title=f"Контрагент: {tenant.name}",
+                is_admin=is_admin,
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                data={
+                    "id":                   tenant.id,
+                    "name":                 tenant.name,
+                    "inn":                  tenant.inn,
+                    "phone":                tenant.phone,
+                    "email":                tenant.email,
+                    "comment":              tenant.comment,
+                    "contact_name":         tenant.contact_name,
+                    "obligation_kind":      tenant.obligation_kind,
+                    "contract_no":          tenant.contract_no,
+                    "contract_date":        tenant.contract_date,
+                    "contract_valid_from":  tenant.contract_valid_from,
+                    "contract_valid_to":    tenant.contract_valid_to,
+                    "docs_delivery_method": tenant.docs_delivery_method,
+                    "status":               tenant.status,
+                    "contract_signed":      tenant.contract_signed,
+                    "attached_in_1c":       tenant.attached_in_1c,
+                    "has_ds":               tenant.has_ds,
+                    "notes":                tenant.notes,
+                    "tenant_kind":          tenant.tenant_kind,
+                    "rent_kind":            tenant.rent_kind,
+                },
+            )
+            dlg.setModal(True)
+            dlg.exec()
+        except Exception as e:
+            _uilog("ERROR _open_tenant_from_month: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(
+                self, "Контрагент", f"Не удалось открыть карточку контрагента:\n{e}"
+            )
+            return
+
+        if self._mode() == "month":
+            self.month_view.reload()
+
+    def _open_client_info(self, booking) -> None:
+        """
+        Карточка просмотра клиента из месячной визуализации (ТЗ, п. 7).
+        Работает и для ПД (контрагент), и для ГЗ (группа).
+        """
+        try:
+            tenant = None
+            gz_group = None
+
+            tenant_id = getattr(booking, "tenant_id", None)
+            gz_id = getattr(booking, "gz_group_id", None)
+
+            if tenant_id is not None:
+                from app.services.tenants_service import get_tenant
+                tenant = get_tenant(
+                    user_id=int(self.user.id),
+                    role_code=str(self.user.role_code),
+                    tenant_id=int(tenant_id),
+                )
+            elif gz_id is not None:
+                from app.services.gz_service import list_groups
+                groups = list_groups(
+                    include_inactive=True,
+                    user_id=int(self.user.id),
+                    role_code=str(self.user.role_code),
+                )
+                gz_group = next(
+                    (g for g in groups if int(g.id) == int(gz_id)), None
+                )
+                if gz_group is None:
+                    raise ValueError("Группа ГЗ не найдена")
+            else:
+                QMessageBox.information(
+                    self, "Клиент", "У этого занятия нет привязки к клиенту."
+                )
+                return
+
+            dlg = ClientInfoDialog(
+                self,
+                user_id=int(self.user.id),
+                role_code=str(self.user.role_code),
+                tenant=tenant,
+                gz_group=gz_group,
+                booking=booking,
+            )
+            dlg.exec()
+
+            # из карточки можно перейти в полную форму контрагента
+            if dlg.open_full_requested and tenant is not None:
+                self._open_tenant_from_month(int(tenant.id))
+
+        except Exception as e:
+            _uilog("ERROR _open_client_info: " + repr(e))
+            _uilog(traceback.format_exc())
+            QMessageBox.critical(
+                self, "Клиент", f"Не удалось открыть информацию о клиенте:\n{e}"
+            )
+
+    def _open_day_from_month(self, day) -> None:
+        """Переключает на дневной вид с выбранной датой."""
+        if day is None:
+            return
+        from PySide6.QtCore import QDate
+        self.dt_day.setDate(QDate(day.year, day.month, day.day))
+        self._set_mode("grid")
+
     def _mode(self) -> str:
+        if self.btn_view_windows.isChecked():
+            return "windows"
+        if self.btn_view_month.isChecked():
+            return "month"
         return "list" if self.btn_view_list.isChecked() else "grid"
 
     def _apply_access_buttons(self) -> None:
@@ -805,6 +1005,90 @@ class SchedulePage(QWidget):
                 if self._mode() == "list"
                 else self._selected_booking_from_grid())
 
+    def _selected_bookings(self) -> List:
+        """
+        Все брони, попавшие в выделение (без повторов).
+
+        В режиме «Слоты» одна бронь может занимать несколько ячеек по вертикали,
+        поэтому собираем по id. В режиме «Список» выделена одна строка.
+        """
+        if self._mode() == "list":
+            b = self._selected_booking_from_list()
+            return [b] if b else []
+
+        found: Dict[int, object] = {}
+
+        # selectedIndexes() отдаёт все выделенные ячейки, включая
+        # множественное выделение мышью; selectedRanges() теряет часть
+        # информации, если курсор переставлен.
+        for idx in self.tbl.selectionModel().selectedIndexes():
+            if idx.column() == 0:
+                continue
+            it = self.tbl.item(idx.row(), idx.column())
+            if it is None:
+                continue
+            b = it.data(Qt.ItemDataRole.UserRole)
+            if b is None:
+                continue
+            bid = int(getattr(b, "id", 0) or 0)
+            if bid and bid not in found:
+                found[bid] = b
+
+        # если выделения нет, но есть текущая ячейка — берём её
+        if not found:
+            b = self._selected_booking_from_grid()
+            if b is not None:
+                found[int(getattr(b, "id", 0) or 0)] = b
+
+        return list(found.values())
+
+    def _booking_owner(self, b) -> str:
+        kind = (getattr(b, "kind", "") or "").upper()
+        tenant_name = (getattr(b, "tenant_name", "") or "").strip()
+        gz_name = (getattr(b, "gz_group_name", "") or "").strip()
+        title = (getattr(b, "title", "") or "").strip()
+        owner = gz_name if kind == "GZ" else tenant_name
+        return owner or title or "Бронирование"
+
+    def _related_parts_count(self, bookings: List) -> int:
+        """
+        Сколько ещё частей есть у этих броней помимо выделенных.
+        Считаем по совпадению площадки/времени/владельца.
+        """
+        if not bookings:
+            return 0
+
+        def key(b):
+            return (
+                int(getattr(b, "venue_id", 0) or 0),
+                getattr(b, "starts_at", None),
+                getattr(b, "ends_at", None),
+                (getattr(b, "kind", "") or "").upper(),
+                (getattr(b, "title", "") or ""),
+                getattr(b, "tenant_id", None),
+                getattr(b, "gz_group_id", None),
+            )
+
+        keys = {key(b) for b in bookings}
+        selected_ids = {int(getattr(b, "id", 0) or 0) for b in bookings}
+
+        extra = 0
+        model = self.tbl
+        for r in range(model.rowCount()):
+            for c in range(1, model.columnCount()):
+                it = model.item(r, c)
+                if it is None:
+                    continue
+                other = it.data(Qt.ItemDataRole.UserRole)
+                if other is None:
+                    continue
+                oid = int(getattr(other, "id", 0) or 0)
+                if oid in selected_ids:
+                    continue
+                if key(other) in keys:
+                    extra += 1
+        return extra
+
     def _row_to_datetime(self, day: date, row: int) -> datetime:
         slots = self._time_slots()
         row = max(0, min(row, len(slots) - 1))
@@ -937,6 +1221,10 @@ class SchedulePage(QWidget):
 
         self._setup_table()
         self._apply_hidden_columns(org_id)
+        if self._mode() == "month":
+            self._sync_month_view()
+        elif self._mode() == "windows":
+            self._sync_windows_view()
         self.reload()
 
     # ── period ───────────────────────────────────────────────────────────────
@@ -980,6 +1268,10 @@ class SchedulePage(QWidget):
         return f"Площадка {venue_id}"
 
     def reload(self):
+        if self._mode() == "windows":
+            return self.windows_view.reload()
+        if self._mode() == "month":
+            return self.month_view.reload()
         if self._mode() == "list":
             return self._reload_list()
         return self._reload_grid()
@@ -1710,51 +2002,71 @@ class SchedulePage(QWidget):
             )
             return
     
-        b = self._selected_booking()
-        if not b:
+        # Берём ровно то, что выделено мышью
+        bookings = self._selected_bookings()
+        if not bookings:
             QMessageBox.information(self, "Отменить", "Выберите бронирование.")
             return
-    
-        kind = (getattr(b, "kind", "") or "").upper()
-        tenant_name = (getattr(b, "tenant_name", "") or "").strip()
-        gz_group_name = (getattr(b, "gz_group_name", "") or "").strip()
-        title = (getattr(b, "title", "") or "").strip()
-    
-        owner = gz_group_name if kind == "GZ" else tenant_name
-        owner = owner or title or "Бронирование"
-    
-        msg = (
-            "Отменить выбранное бронирование?\n\n"
-            "Если оно занимает несколько частей площадки, будут отменены все связанные части.\n\n"
-            f"{owner}\n"
-            f"{getattr(b, 'starts_at'):%d.%m.%Y %H:%M}–{getattr(b, 'ends_at'):%H:%M}"
-        )
-    
-        if (
-            QMessageBox.question(
-                self,
-                "Отмена бронирования",
-                msg,
+
+        # Уже отменённые повторно не трогаем
+        active = [
+            b for b in bookings
+            if (getattr(b, "status", "") or "").lower() != "cancelled"
+        ]
+        if not active:
+            QMessageBox.information(
+                self, "Отменить",
+                "Выбранное бронирование уже отменено.",
             )
-            != QMessageBox.StandardButton.Yes
-        ):
             return
-    
+
+        ids = sorted({int(getattr(b, "id")) for b in active})
+        owners: Dict[str, str] = {}
+        for b in active:
+            key = self._booking_owner(b)
+            if key not in owners:
+                starts = getattr(b, "starts_at")
+                ends = getattr(b, "ends_at")
+                owners[key] = f"{key} — {starts:%d.%m.%Y %H:%M}–{ends:%H:%M}"
+
+        lines = "\n".join(f"• {v}" for v in owners.values())
+
+        if len(active) == 1:
+            head = "Отменить выбранное бронирование?"
+        else:
+            head = f"Отменить выбранные бронирования ({len(active)})?"
+
+        msg = f"{head}\n\n{lines}"
+
+        # Предупреждаем, только если у этой же брони есть части, которые НЕ выделены
+        extra = self._related_parts_count(active)
+        if extra:
+            msg += (
+                f"\n\nВнимание: у этой брони есть ещё {extra} "
+                f"{'часть' if extra % 10 == 1 and extra % 100 != 11 else ('части' if 2 <= extra % 10 <= 4 and not 12 <= extra % 100 <= 14 else 'частей')}, "
+                "которые останутся в расписании.\n"
+                "Чтобы отменить их тоже — выделите их вместе с текущими."
+            )
+
+        if QMessageBox.question(self, "Отмена бронирования", msg) != QMessageBox.StandardButton.Yes:
+            return
+
         try:
-            affected = cancel_related_booking_parts(int(getattr(b, "id")))
+            affected = cancel_bookings(ids)
         except Exception as e:
-            _uilog("ERROR cancel_related_booking_parts: " + repr(e))
+            _uilog("ERROR cancel_bookings: " + repr(e))
             _uilog(traceback.format_exc())
             QMessageBox.critical(self, "Отменить", f"Ошибка отмены:\n{e}")
             return
-    
-        if affected > 1:
+
+        if affected != len(ids):
             QMessageBox.information(
                 self,
                 "Отмена бронирования",
-                f"Отменено связанных частей: {affected}",
+                f"Отменено: {affected} из {len(ids)}.\n"
+                "Часть строк, возможно, уже была отменена.",
             )
-    
+
         self.reload()
 
     # ── misc ─────────────────────────────────────────────────────────────────
