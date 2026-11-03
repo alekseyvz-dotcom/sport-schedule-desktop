@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
+from PySide6.QtCore import QDate
+
 from app.services.gz_service import GzCoach
 from app.ui.gz_rules_widget import GzRulesWidget
 
@@ -74,6 +76,12 @@ def _style_calendar_widget(date_edit: QDateEdit) -> None:
         QCalendarWidget QHeaderView::section { background: #0f172a; color: rgba(226,232,240,0.70); border: none; padding: 4px; font-weight: 700; }
     """)
 
+def _date_edit_to_pydate(date_edit: QDateEdit) -> Optional[date]:
+    """Возвращает None, если дата в поле не указана."""
+    if date_edit.date() == date_edit.minimumDate():
+        return None
+    return date_edit.date().toPython()
+
 class GzGroupDialog(QDialog):
     def __init__(
         self,
@@ -113,16 +121,16 @@ class GzGroupDialog(QDialog):
         self.dt_from = QDateEdit()
         self.dt_from.setCalendarPopup(True)
         self.dt_from.setDisplayFormat("dd.MM.yyyy")
-        self.dt_from.setSpecialValueText("—")
-        self.dt_from.setDate(date.today())
-        self.dt_from.setMinimumDate(date(1900, 1, 1))
+        self.dt_from.setMinimumDate(QDate(1900, 1, 1))
+        self.dt_from.setSpecialValueText("Не указано")
+        self.dt_from.setDate(self.dt_from.minimumDate())
 
         self.dt_to = QDateEdit()
         self.dt_to.setCalendarPopup(True)
         self.dt_to.setDisplayFormat("dd.MM.yyyy")
-        self.dt_to.setSpecialValueText("—")
-        self.dt_to.setDate(date.today())
-        self.dt_to.setMinimumDate(date(1900, 1, 1))
+        self.dt_to.setMinimumDate(QDate(1900, 1, 1))
+        self.dt_to.setSpecialValueText("Не указано")
+        self.dt_to.setDate(self.dt_to.minimumDate())
 
         _style_calendar_widget(self.dt_from)
         _style_calendar_widget(self.dt_to)
@@ -161,8 +169,8 @@ class GzGroupDialog(QDialog):
             self,
             gz_group_id=self._group_id,
             is_admin=self._is_admin,
-            group_period_from=self.dt_from.date().toPython(),
-            group_period_to=self.dt_to.date().toPython(),
+            group_period_from=_date_edit_to_pydate(self.dt_from),
+            group_period_to=_date_edit_to_pydate(self.dt_to),
             user_id=self._user_id,
             role_code=self._role_code,
         )
@@ -235,8 +243,8 @@ class GzGroupDialog(QDialog):
     def _sync_rules_period(self, *_):
         if hasattr(self, "rules_widget") and self.rules_widget:
             self.rules_widget.set_group_period(
-                self.dt_from.date().toPython(),
-                self.dt_to.date().toPython(),
+                _date_edit_to_pydate(self.dt_from),
+                _date_edit_to_pydate(self.dt_to),
             )
 
     def _on_ok(self):
@@ -244,8 +252,8 @@ class GzGroupDialog(QDialog):
             QMessageBox.warning(self, "Проверка", "Поле 'Группа' не может быть пустым.")
             return
 
-        d0 = self.dt_from.date().toPython()
-        d1 = self.dt_to.date().toPython()
+        d0 = _date_edit_to_pydate(self.dt_from)
+        d1 = _date_edit_to_pydate(self.dt_to)
         if d0 and d1 and d1 < d0:
             QMessageBox.warning(self, "Проверка", "Дата 'по' не может быть раньше даты 'с'.")
             return
@@ -257,8 +265,8 @@ class GzGroupDialog(QDialog):
             "coach_id": int(self.cmb_coach.currentData()),
             "group_year": (self.ed_year.text() or "").strip(),
             "is_free": bool(self.cb_free.isChecked()),
-            "period_from": self.dt_from.date().toPython(),
-            "period_to": self.dt_to.date().toPython(),
+            "period_from": _date_edit_to_pydate(self.dt_from),
+            "period_to": _date_edit_to_pydate(self.dt_to),
             "notes": (self.ed_notes.toPlainText() or "").strip(),
         }
 
