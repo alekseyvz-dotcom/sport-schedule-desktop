@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.tenant_contracts_service import add_contract, list_contracts
+from app.ui.fit_screen import fit_and_scroll
 
 
 class NewContractDialog(QDialog):
@@ -38,7 +39,6 @@ class TenantContractsDialog(QDialog):
         super().__init__(parent)
         self.user_id, self.role_code, self.tenant_id = user_id, role_code, tenant_id
         self.setWindowTitle('История договоров')
-        self.resize(850, 420)
         layout = QVBoxLayout(self)
         note = QLabel('Новый договор сохраняется сразу в историю. Поля основного договора в карточке и сроки правил автоматически не изменяются.')
         note.setWordWrap(True)
@@ -60,6 +60,7 @@ class TenantContractsDialog(QDialog):
         row.addStretch()
         row.addWidget(close)
         layout.addLayout(row)
+        fit_and_scroll(self, width=850, height=420)
         self._reload()
 
     def _reload(self):

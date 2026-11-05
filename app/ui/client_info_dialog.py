@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.fit_screen import fit_and_scroll
+
 APP_TZ = timezone(timedelta(hours=3))
 WEEKDAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
 
@@ -80,7 +82,6 @@ class ClientInfoDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setModal(True)
-        self.resize(880, 620)
 
         self._user_id = int(user_id)
         self._role_code = str(role_code)
@@ -153,6 +154,8 @@ class ClientInfoDialog(QDialog):
             root.addWidget(lbl_slot)
         root.addWidget(self.tabs, 1)
         root.addWidget(buttons)
+
+        fit_and_scroll(self, width=880, height=620)
 
     # ── вспомогательное ────────────────────────────────────────────────────
 

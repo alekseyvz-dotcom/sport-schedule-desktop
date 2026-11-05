@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from app.ui.fit_screen import fit_and_scroll
 from app.ui.tenant_rules_widget import TenantRulesWidget
 from app.ui.tenant_contracts_dialog import TenantContractsDialog
 
@@ -145,7 +146,6 @@ class TenantDialog(QDialog):
         self._tenant_kind_in = (self._data_in.get("tenant_kind") or "legal").strip()
         self._rent_kind_in = (self._data_in.get("rent_kind") or "long_term").strip()
 
-        self.resize(980, 640)
         self.setSizeGripEnabled(True)
 
         # ---- widgets (общие)
@@ -348,6 +348,10 @@ class TenantDialog(QDialog):
         root.addWidget(buttons, 0)
 
         self._apply_kind_ui()
+
+        # на ноутбуке содержимое не помещается — включаем прокрутку
+        # и вписываем окно в экран
+        fit_and_scroll(self, width=980, height=640)
 
     def _sync_rules_period(self, *_):
         self.rules_widget.set_contract_period(

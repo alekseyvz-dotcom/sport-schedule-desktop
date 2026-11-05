@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.users_admin_service import OrgPermRow, RoleRow
+from app.ui.fit_screen import fit_and_scroll
 
 
 class RoleSelectDialog(QDialog):
@@ -33,7 +34,6 @@ class RoleSelectDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(520, 360)
 
         self._roles = roles
 
@@ -73,6 +73,7 @@ class RoleSelectDialog(QDialog):
         self._load_list(current_code)
 
         self.lst.currentItemChanged.connect(self._update_desc)
+        fit_and_scroll(self, width=520, height=360)
         self._update_desc()
 
     def _load_list(self, current_code: Optional[str]):
@@ -128,7 +129,6 @@ class UserEditDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(560, 300)
 
         self.roles = roles
         self.ask_password = ask_password
@@ -215,6 +215,7 @@ class UserEditDialog(QDialog):
         if not self.ed_role.text().strip() and self.roles:
             self._set_role_code(self.roles[0].code)
 
+        fit_and_scroll(self, width=560, height=300)
         self.ed_username.setReadOnly(username_readonly)
 
     def _role_name(self, code: str) -> str:
@@ -281,7 +282,6 @@ class PasswordDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(520, 190)
 
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dlgTitle")
@@ -317,6 +317,7 @@ class PasswordDialog(QDialog):
         footer.addStretch(1)
         footer.addWidget(self.btn_ok)
         footer.addWidget(self.btn_cancel)
+        fit_and_scroll(self, width=520, height=190)
         root.addLayout(footer)
 
     def _on_ok(self):
@@ -346,7 +347,6 @@ class OrgPermissionsDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(860, 600)
 
         self._perms_all: List[OrgPermRow] = perms[:]
 
@@ -418,6 +418,7 @@ class OrgPermissionsDialog(QDialog):
         root.addLayout(footer)
 
         self._render_table_from_perms_all()
+        fit_and_scroll(self, width=860, height=600)
         self._apply_filter()
 
     # --- остальная логика без изменений ---
@@ -490,7 +491,7 @@ class OrgPermissionsDialog(QDialog):
         dlg = QDialog(self)
         dlg.setObjectName("dialog")
         dlg.setWindowTitle("Выберите учреждение")
-        dlg.resize(560, 460)
+        fit_and_scroll(dlg, width=560, height=460)
 
         title = QLabel("Доступ только к 1 учреждению")
         title.setObjectName("dlgTitle")
@@ -584,7 +585,6 @@ class TabsPermissionsDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(640, 520)
 
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dlgTitle")
@@ -636,6 +636,7 @@ class TabsPermissionsDialog(QDialog):
         root.addLayout(footer)
 
         self._load(perms)
+        fit_and_scroll(self, width=640, height=520)
         self._apply_filter()
 
     def _load(self, perms):

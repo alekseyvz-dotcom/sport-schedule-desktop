@@ -100,6 +100,7 @@ from app.ui.booking_dialog import BookingDialog
 from app.ui.schedule_month_view import ScheduleMonthView
 from app.ui.schedule_windows_view import ScheduleWindowsView
 from app.ui.client_info_dialog import ClientInfoDialog
+from app.ui.fit_screen import fit_and_scroll
 
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QStyle
@@ -1627,7 +1628,7 @@ class SchedulePage(QWidget):
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Колонки расписания")
-        dlg.resize(560, 430)
+        fit_and_scroll(dlg, width=560, height=430)
 
         lst = QListWidget(dlg)
         lst.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)

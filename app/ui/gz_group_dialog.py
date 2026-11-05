@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QDate
 
 from app.services.gz_service import GzCoach
+from app.ui.fit_screen import fit_and_scroll
 from app.ui.gz_rules_widget import GzRulesWidget
 
 from PySide6.QtGui import QColor, QPalette
@@ -97,7 +98,6 @@ class GzGroupDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(980, 620)
 
         self._user_id = int(user_id)
         self._role_code = str(role_code or "")
@@ -239,6 +239,8 @@ class GzGroupDialog(QDialog):
         footer.addWidget(btn_ok)
         footer.addWidget(btn_cancel)
         root.addLayout(footer)
+
+        fit_and_scroll(self, width=980, height=620)
 
     def _sync_rules_period(self, *_):
         if hasattr(self, "rules_widget") and self.rules_widget:

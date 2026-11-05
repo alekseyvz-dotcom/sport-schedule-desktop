@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.day_parts_settings import DayPartsSettings
+from app.ui.fit_screen import fit_and_scroll
 from app.services.day_parts_settings_service import get_default_day_parts_settings
 
 
@@ -23,7 +24,6 @@ class DayPartsSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Интервалы утро / день / вечер")
         self.setModal(True)
-        self.resize(380, 240)
 
         scope_text = scope_title or "Общие настройки"
         self.lbl_info = QLabel(
@@ -77,6 +77,7 @@ class DayPartsSettingsDialog(QDialog):
         root.addWidget(self.lbl_info)
         root.addLayout(form)
         root.addStretch(1)
+        fit_and_scroll(self, width=380, height=240)
         root.addLayout(buttons)
 
     def _apply_settings(self, settings: DayPartsSettings) -> None:

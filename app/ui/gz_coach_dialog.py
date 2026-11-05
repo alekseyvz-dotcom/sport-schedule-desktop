@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
 )
 
+from app.ui.fit_screen import fit_and_scroll
+
 
 class GzCoachDialog(QDialog):
     def __init__(
@@ -31,7 +33,6 @@ class GzCoachDialog(QDialog):
 
         self.setObjectName("dialog")
         self.setWindowTitle(title)
-        self.resize(520, 420)
 
         data = data or {}
         selected = {int(x) for x in (selected_org_ids or [])}
@@ -82,6 +83,7 @@ class GzCoachDialog(QDialog):
         footer.addStretch(1)
         footer.addWidget(btn_ok)
         footer.addWidget(btn_cancel)
+        fit_and_scroll(self, width=520, height=420)
         root.addLayout(footer)
 
     def _on_ok(self):

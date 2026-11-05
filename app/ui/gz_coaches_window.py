@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app.services.users_service import AuthUser
 from app.services.access_service import list_allowed_org_ids
+from app.ui.fit_screen import fit_and_scroll
 from app.services.ref_service import list_active_orgs_by_ids
 
 from app.services.gz_service import (
@@ -42,7 +43,6 @@ class GzCoachesWindow(QDialog):
 
         self.setObjectName("dialog")
         self.setWindowTitle("Тренеры (ГЗ)")
-        self.resize(860, 560)
 
         self._orgs: list[dict] = []
 
@@ -118,6 +118,7 @@ class GzCoachesWindow(QDialog):
         root.addLayout(bottom)
 
         self._load_orgs()
+        fit_and_scroll(self, width=860, height=560)
         self.reload()
 
     def _allowed_org_ids_list(self) -> list[int]:
