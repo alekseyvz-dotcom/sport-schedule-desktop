@@ -173,6 +173,7 @@ class GzGroupDialog(QDialog):
         self.dt_from.dateChanged.connect(self._sync_rules_period)
         self.dt_to.dateChanged.connect(self._sync_rules_period)
 
+        self.rules_widget.rules_changed.connect(self._refresh_rules_count)
         self._rules_win = RulesWindow(self, "Правила расписания (ГЗ)", self.rules_widget)
 
         gb_rules = QGroupBox("Правила расписания (ГЗ)")

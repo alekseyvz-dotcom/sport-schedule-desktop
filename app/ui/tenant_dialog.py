@@ -289,6 +289,7 @@ class TenantDialog(QDialog):
         self.dt_valid_from.dateChanged.connect(self._sync_rules_period)
         self.dt_valid_to.dateChanged.connect(self._sync_rules_period)
 
+        self.rules_widget.rules_changed.connect(self._refresh_rules_count)
         self._rules_win = RulesWindow(self, "Правила расписания", self.rules_widget)
 
         gb_rules = QGroupBox("Правила расписания")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional, Dict, List
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -31,6 +31,8 @@ def _weekday_name(w: int) -> str:
 
 
 class TenantRulesWidget(QWidget):
+    rules_changed = Signal(int)
+
     """
     Готовый виджет правил (tenant_recurring_rules) для встраивания в TenantDialog.
 
@@ -229,6 +231,7 @@ class TenantRulesWidget(QWidget):
                         item.setForeground(Qt.GlobalColor.gray)
 
         self.tbl.resizeColumnsToContents()
+        self.rules_changed.emit(self.tbl.rowCount())
 
     # ---------- Actions ----------
     def _on_add(self) -> None:

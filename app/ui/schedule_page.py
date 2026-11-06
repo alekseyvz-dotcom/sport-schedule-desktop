@@ -1320,9 +1320,9 @@ class SchedulePage(QWidget):
 
         hdr = self.tbl.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setMinimumSectionSize(180)
         for c in range(1, 1 + resource_count):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
-            self.tbl.setColumnWidth(c, 180)
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
 
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))

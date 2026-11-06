@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional, Dict, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -32,6 +32,8 @@ def _weekday_name(w: int) -> str:
 
 
 class GzRulesWidget(QWidget):
+    rules_changed = Signal(int)
+
     def __init__(
         self,
         parent=None,
@@ -229,6 +231,7 @@ class GzRulesWidget(QWidget):
                         item.setForeground(Qt.GlobalColor.gray)
 
         self.tbl.resizeColumnsToContents()
+        self.rules_changed.emit(self.tbl.rowCount())
 
     def _on_add(self):
         dlg = TenantRuleDialog(
