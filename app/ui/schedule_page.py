@@ -19,7 +19,7 @@ from app.services.gz_service import list_active_gz_groups_for_booking
 # ── Импорт фильтрации площадок ──────────────────────────────────────────────
 from app.services.venue_status_service import get_available_venue_ids_for_week
 
-from PySide6.QtCore import Qt, QTimer, QSettings
+from PySide6.QtCore import Qt, QTimer, QSettings, QObject, QEvent
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPainterPath, QBrush, QPalette
 from PySide6.QtWidgets import (
     QWidget,
@@ -438,6 +438,17 @@ class ListColorBarDelegate(QStyledItemDelegate):
 # Page
 # ---------------------------------------------------------------------------
 
+class _ResizeWatcher(QObject):
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            self._callback()
+        return False
+
+
 class SchedulePage(QWidget):
     SLOT_MINUTES    = 30
     TZ_OFFSET_HOURS = 3
@@ -612,6 +623,7 @@ class SchedulePage(QWidget):
         splitter.setStretchFactor(1, 2)
 
         self.stack = QStackedWidget()
+        self.stack.setMinimumWidth(480)
         self.stack.addWidget(self.tbl)      # 0 — grid
         self.stack.addWidget(splitter)      # 1 — list
 
@@ -1307,6 +1319,23 @@ class SchedulePage(QWidget):
             cur += step
         return out
 
+    TIME_COL_W = 70
+    RESOURCE_MIN_W = 180
+
+    def _apply_resource_columns(self):
+        n = self.tbl.columnCount() - 1
+        if n <= 0:
+            return
+        hdr = self.tbl.horizontalHeader()
+        avail = self.tbl.viewport().width() - self.TIME_COL_W
+        fits = n * self.RESOURCE_MIN_W <= avail
+        for c in range(1, n + 1):
+            if fits:
+                hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+            else:
+                hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
+                self.tbl.setColumnWidth(c, self.RESOURCE_MIN_W)
+
     def _setup_table(self):
         times          = self._time_slots()
         resource_count = len(self._resources)
@@ -1319,19 +1348,12 @@ class SchedulePage(QWidget):
         )
 
         hdr = self.tbl.horizontalHeader()
-        RESOURCE_MIN_W = 180
-        TIME_W = 70
-        hdr.setMinimumSectionSize(TIME_W)
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.tbl.setColumnWidth(0, TIME_W)
-        avail = self.tbl.viewport().width() - TIME_W
-        fits = resource_count > 0 and resource_count * RESOURCE_MIN_W <= avail
-        for c in range(1, 1 + resource_count):
-            if fits:
-                hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
-            else:
-                hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
-                self.tbl.setColumnWidth(c, RESOURCE_MIN_W)
+        self.tbl.setColumnWidth(0, self.TIME_COL_W)
+        self._apply_resource_columns()
+        if not hasattr(self, "_grid_resize_watch"):
+            self._grid_resize_watch = _ResizeWatcher(self._apply_resource_columns)
+            self.tbl.viewport().installEventFilter(self._grid_resize_watch)
 
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
