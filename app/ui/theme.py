@@ -113,21 +113,31 @@ QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
 
 /* ---- Buttons ---- */
 QPushButton {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(226, 232, 240, 0.86);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(59, 76, 130, 0.92),
+        stop:1 rgba(41, 54, 99, 0.92)
+    );
+    color: rgba(238, 242, 255, 0.96);
+    border: 1px solid rgba(120, 140, 220, 0.55);
     border-radius: 10px;
     padding: 4px 10px;
     font-weight: 700;
     min-height: 24px;
 }
 QPushButton:hover {
-    background: rgba(255, 255, 255, 0.10);
-    border-color: rgba(255, 255, 255, 0.22);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(74, 95, 158, 0.96),
+        stop:1 rgba(53, 69, 122, 0.96)
+    );
+    border-color: rgba(147, 165, 240, 0.80);
+    color: rgba(255, 255, 255, 1.0);
 }
-QPushButton:pressed { background: rgba(255, 255, 255, 0.07); }
+QPushButton:pressed {
+    background: rgba(33, 44, 82, 0.96);
+    border-color: rgba(99, 102, 241, 0.90);
+}
 QPushButton:disabled {
-    color: rgba(226, 232, 240, 0.35);
+    color: rgba(226, 232, 240, 0.30);
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.08);
 }
@@ -401,21 +411,25 @@ QScrollArea { background: transparent; border: none; }
 
 /* ---- View tabs (SchedulePage) ---- */
 QToolButton#viewTab {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(44, 58, 105, 0.85);
+    border: 1px solid rgba(120, 140, 220, 0.45);
     border-radius: 10px;
     padding: 4px 10px;
     font-weight: 800;
-    color: rgba(226, 232, 240, 0.82);
+    color: rgba(226, 234, 255, 0.88);
 }
 QToolButton#viewTab:hover {
-    background: rgba(255, 255, 255, 0.10);
-    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(60, 78, 138, 0.92);
+    border-color: rgba(147, 165, 240, 0.70);
+    color: rgba(255, 255, 255, 1.0);
 }
 QToolButton#viewTab:checked {
-    background: rgba(15, 23, 42, 0.55);
-    border-color: rgba(99, 102, 241, 0.65);
-    color: rgba(255, 255, 255, 0.92);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(99, 102, 241, 0.95),
+        stop:1 rgba(70, 80, 190, 0.95)
+    );
+    border-color: rgba(165, 180, 252, 0.90);
+    color: rgba(255, 255, 255, 1.0);
 }
 
 /* ---- Details card ---- */
