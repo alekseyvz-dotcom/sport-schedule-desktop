@@ -116,10 +116,10 @@ QPushButton {
     background: rgba(255, 255, 255, 0.06);
     color: rgba(226, 232, 240, 0.86);
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
-    padding: 8px 12px;
+    border-radius: 10px;
+    padding: 4px 10px;
     font-weight: 700;
-    min-height: 34px;
+    min-height: 24px;
 }
 QPushButton:hover {
     background: rgba(255, 255, 255, 0.10);
@@ -233,7 +233,7 @@ QGroupBox::title {
 
 /* ---- DialogButtonBox ---- */
 QDialogButtonBox { padding-top: 6px; }
-QDialogButtonBox QPushButton { min-width: 120px; }
+QDialogButtonBox QPushButton { min-width: 90px; }
 
 /* ---- ComboBox (arrow + popup) ---- */
 QComboBox { padding-right: 28px; }
@@ -403,8 +403,8 @@ QScrollArea { background: transparent; border: none; }
 QToolButton#viewTab {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
-    padding: 8px 12px;
+    border-radius: 10px;
+    padding: 4px 10px;
     font-weight: 800;
     color: rgba(226, 232, 240, 0.82);
 }

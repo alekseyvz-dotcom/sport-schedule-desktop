@@ -182,6 +182,9 @@ class GzRulesWidget(QWidget):
     def rules_payload(self) -> List[Dict]:
         return list(self._rules_local)
 
+    def rules_count(self) -> int:
+        return self.tbl.rowCount()
+
     def _selected_index(self) -> Optional[int]:
         row = self.tbl.currentRow()
         if row < 0:

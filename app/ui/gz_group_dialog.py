@@ -24,6 +24,7 @@ from PySide6.QtCore import QDate
 
 from app.services.gz_service import GzCoach
 from app.ui.fit_screen import fit_and_scroll
+from app.ui.rules_window import RulesWindow
 from app.ui.gz_rules_widget import GzRulesWidget
 
 from PySide6.QtGui import QColor, QPalette
@@ -160,11 +161,6 @@ class GzGroupDialog(QDialog):
                 self.dt_to.setDate(pt)
 
         # --- rules widget
-        gb_rules = QGroupBox("Правила расписания (ГЗ)")
-        rules_lay = QVBoxLayout(gb_rules)
-        rules_lay.setContentsMargins(12, 16, 12, 12)
-        rules_lay.setSpacing(10)
-
         self.rules_widget = GzRulesWidget(
             self,
             gz_group_id=self._group_id,
@@ -174,16 +170,25 @@ class GzGroupDialog(QDialog):
             user_id=self._user_id,
             role_code=self._role_code,
         )
-
         self.dt_from.dateChanged.connect(self._sync_rules_period)
         self.dt_to.dateChanged.connect(self._sync_rules_period)
 
-        scroll = QScrollArea(gb_rules)
-        scroll.setObjectName("rulesScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(self.rules_widget)
-        rules_lay.addWidget(scroll, 1)
+        self._rules_win = RulesWindow(self, "Правила расписания (ГЗ)", self.rules_widget)
+
+        gb_rules = QGroupBox("Правила расписания (ГЗ)")
+        rules_lay = QVBoxLayout(gb_rules)
+        rules_lay.setContentsMargins(12, 16, 12, 12)
+        rules_lay.setSpacing(8)
+        self.lbl_rules_count = QLabel()
+        btn_rules = QPushButton("Открыть правила…")
+        btn_rules.clicked.connect(self._open_rules)
+        rules_row = QHBoxLayout()
+        rules_row.addWidget(self.lbl_rules_count)
+        rules_row.addStretch(1)
+        rules_row.addWidget(btn_rules)
+        rules_lay.addLayout(rules_row)
+        rules_lay.addStretch(1)
+        self._refresh_rules_count()
 
         btn_ok = QPushButton("Сохранить")
         btn_cancel = QPushButton("Отмена")
@@ -241,6 +246,13 @@ class GzGroupDialog(QDialog):
         root.addLayout(footer)
 
         fit_and_scroll(self, width=980, height=620)
+
+    def _open_rules(self) -> None:
+        self._rules_win.exec()
+        self._refresh_rules_count()
+
+    def _refresh_rules_count(self) -> None:
+        self.lbl_rules_count.setText(f"Правил: {self.rules_widget.rules_count()}")
 
     def _sync_rules_period(self, *_):
         if hasattr(self, "rules_widget") and self.rules_widget:

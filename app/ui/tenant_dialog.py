@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.fit_screen import fit_and_scroll
+from app.ui.rules_window import RulesWindow
 from app.ui.tenant_rules_widget import TenantRulesWidget
 from app.ui.tenant_contracts_dialog import TenantContractsDialog
 
@@ -272,11 +273,6 @@ class TenantDialog(QDialog):
         gb_notes.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         # ---- group: Правила расписания
-        gb_rules = QGroupBox("Правила расписания")
-        rules_layout = QVBoxLayout(gb_rules)
-        rules_layout.setContentsMargins(12, 16, 12, 12)
-        rules_layout.setSpacing(10)
-
         contract_from = _date_edit_to_pydate(self.dt_valid_from)
         contract_to = _date_edit_to_pydate(self.dt_valid_to)
 
@@ -290,22 +286,25 @@ class TenantDialog(QDialog):
             user_id=self._user_id,
             role_code=self._role_code,
         )
-
         self.dt_valid_from.dateChanged.connect(self._sync_rules_period)
         self.dt_valid_to.dateChanged.connect(self._sync_rules_period)
-        
-        self.rules_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.rules_widget.setMinimumHeight(260)
 
-        scroll = QScrollArea(gb_rules)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setWidget(self.rules_widget)
+        self._rules_win = RulesWindow(self, "Правила расписания", self.rules_widget)
 
-        rules_layout.addWidget(scroll, 1)
-        gb_rules.setMinimumHeight(300)
+        gb_rules = QGroupBox("Правила расписания")
+        rules_layout = QVBoxLayout(gb_rules)
+        rules_layout.setContentsMargins(12, 16, 12, 12)
+        rules_layout.setSpacing(8)
+        self.lbl_rules_count = QLabel()
+        btn_rules = QPushButton("Открыть правила…")
+        btn_rules.clicked.connect(self._open_rules)
+        rules_row = QHBoxLayout()
+        rules_row.addWidget(self.lbl_rules_count)
+        rules_row.addStretch(1)
+        rules_row.addWidget(btn_rules)
+        rules_layout.addLayout(rules_row)
+        rules_layout.addStretch(1)
+        self._refresh_rules_count()
 
         # ---- layout: two columns
         cols = QHBoxLayout()
@@ -352,6 +351,13 @@ class TenantDialog(QDialog):
         # на ноутбуке содержимое не помещается — включаем прокрутку
         # и вписываем окно в экран
         fit_and_scroll(self, width=980, height=640)
+
+    def _open_rules(self) -> None:
+        self._rules_win.exec()
+        self._refresh_rules_count()
+
+    def _refresh_rules_count(self) -> None:
+        self.lbl_rules_count.setText(f"Правил: {self.rules_widget.rules_count()}")
 
     def _sync_rules_period(self, *_):
         self.rules_widget.set_contract_period(

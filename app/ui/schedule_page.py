@@ -44,6 +44,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QButtonGroup,
     QToolButton,
+    QScrollArea,
+    QFrame,
 )
 
 
@@ -527,29 +529,38 @@ class SchedulePage(QWidget):
         self.btn_refresh.clicked.connect(self.reload)
         self.btn_columns.clicked.connect(self._on_columns)
 
-        top = QHBoxLayout()
-        top.setContentsMargins(12, 12, 12, 8)
-        top.setSpacing(10)
-        top.addWidget(self.lbl_title)
-        top.addWidget(QLabel("Учреждение:"))
-        top.addWidget(self.cmb_org, 1)
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(self.lbl_title)
+        row1.addWidget(QLabel("Учреждение:"))
+        self.cmb_org.setMinimumWidth(160)
+        row1.addWidget(self.cmb_org, 1)
         self.lbl_date_caption = QLabel("Дата:")
-        top.addWidget(self.lbl_date_caption)
-        top.addWidget(self.dt_day)
-        top.addSpacing(6)
-        top.addWidget(self.btn_view_grid)
-        top.addWidget(self.btn_view_list)
-        top.addWidget(self.btn_view_month)
-        top.addWidget(self.btn_view_windows)
+        row1.addWidget(self.lbl_date_caption)
+        row1.addWidget(self.dt_day)
         self.lbl_period_caption = QLabel("Период:")
-        top.addWidget(self.lbl_period_caption)
-        top.addWidget(self.cmb_period)
-        top.addWidget(self.cb_cancelled)
-        top.addWidget(self.btn_create)
-        top.addWidget(self.btn_edit)
-        top.addWidget(self.btn_cancel)
-        top.addWidget(self.btn_refresh)
-        top.addWidget(self.btn_columns)
+        row1.addWidget(self.lbl_period_caption)
+        row1.addWidget(self.cmb_period)
+        row1.addWidget(self.cb_cancelled)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.addWidget(self.btn_view_grid)
+        row2.addWidget(self.btn_view_list)
+        row2.addWidget(self.btn_view_month)
+        row2.addWidget(self.btn_view_windows)
+        row2.addStretch(1)
+        row2.addWidget(self.btn_create)
+        row2.addWidget(self.btn_edit)
+        row2.addWidget(self.btn_cancel)
+        row2.addWidget(self.btn_refresh)
+        row2.addWidget(self.btn_columns)
+
+        top = QVBoxLayout()
+        top.setContentsMargins(12, 10, 12, 6)
+        top.setSpacing(6)
+        top.addLayout(row1)
+        top.addLayout(row2)
 
         # meta line
         self.meta_row = QWidget(self)
@@ -572,9 +583,10 @@ class SchedulePage(QWidget):
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.itemDoubleClicked.connect(lambda *_: self._on_edit())
         self.tbl.setObjectName("scheduleGrid")
+        self.tbl.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         hdr = self.tbl.horizontalHeader()
-        hdr.setStretchLastSection(True)
+        hdr.setStretchLastSection(False)
         hdr.setHighlightSections(False)
         hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -620,7 +632,13 @@ class SchedulePage(QWidget):
         root.setSpacing(10)
         root.addLayout(top)
         root.addWidget(self.meta_row)
-        root.addWidget(self.stack, 1)
+        self.stack_scroll = QScrollArea(self)
+        self.stack_scroll.setWidget(self.stack)
+        self.stack_scroll.setWidgetResizable(True)
+        self.stack_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.stack_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.stack_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        root.addWidget(self.stack_scroll, 1)
 
         QTimer.singleShot(0, self._load_refs)
 
@@ -1303,7 +1321,8 @@ class SchedulePage(QWidget):
         hdr = self.tbl.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for c in range(1, 1 + resource_count):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
+            self.tbl.setColumnWidth(c, 180)
 
         for r, tm in enumerate(times):
             it = QTableWidgetItem(tm.strftime("%H:%M"))
