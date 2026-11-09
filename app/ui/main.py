@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.db import init_pool
 from app.ui.main_window import MainWindow
-from app.ui.theme import DARK_APP_QSS
+from app.ui.theme import DARK_APP_QSS, apply_dark_palette
 
 
 CALENDAR_QSS = """
@@ -56,6 +56,10 @@ QCalendarWidget QAbstractItemView {
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    # тёмная палитра — иначе на macOS остаётся светлая системная,
+    # и полупрозрачные фоны из QSS дают мутно-серый цвет
+    apply_dark_palette(app)
 
     # ОДИН раз задаём весь стиль приложению
     app.setStyleSheet(DARK_APP_QSS + "\n" + CALENDAR_QSS)

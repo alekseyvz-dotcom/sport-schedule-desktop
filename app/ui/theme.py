@@ -1,5 +1,55 @@
 # app/ui/theme.py
 
+
+
+def apply_dark_palette(app) -> None:
+    """
+    Задаёт тёмную палитру приложению.
+
+    Без этого Qt берёт системную палитру: на macOS она светлая
+    (Window #efefef, Base #ffffff). Полупрозрачные фоны из QSS ложатся
+    поверх белого и дают мутно-серый цвет вместо тёмного — таблицы,
+    календарь и всплывающие окна выглядят выцветшими.
+    """
+    from PySide6.QtGui import QColor, QPalette
+
+    def c(hex_str: str) -> QColor:
+        return QColor(hex_str)
+
+    bg = c("#0b1220")
+    bg_alt = c("#0f172a")
+    surface = c("#111c30")
+    text = c("#e2e8f0")
+    text_dim = c("#94a3b8")
+    accent = c("#6366f1")
+
+    pal = QPalette()
+    for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+        pal.setColor(group, QPalette.ColorRole.Window, bg)
+        pal.setColor(group, QPalette.ColorRole.WindowText, text)
+        pal.setColor(group, QPalette.ColorRole.Base, bg_alt)
+        pal.setColor(group, QPalette.ColorRole.AlternateBase, surface)
+        pal.setColor(group, QPalette.ColorRole.Text, text)
+        pal.setColor(group, QPalette.ColorRole.Button, bg_alt)
+        pal.setColor(group, QPalette.ColorRole.ButtonText, text)
+        pal.setColor(group, QPalette.ColorRole.ToolTipBase, surface)
+        pal.setColor(group, QPalette.ColorRole.ToolTipText, text)
+        pal.setColor(group, QPalette.ColorRole.PlaceholderText, text_dim)
+        pal.setColor(group, QPalette.ColorRole.Highlight, accent)
+        pal.setColor(group, QPalette.ColorRole.HighlightedText, c("#ffffff"))
+        pal.setColor(group, QPalette.ColorRole.Link, c("#818cf8"))
+        pal.setColor(group, QPalette.ColorRole.BrightText, c("#ffffff"))
+
+    # отключённые элементы — приглушённые, иначе они «горят» на тёмном
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, text_dim)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, text_dim)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, text_dim)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, bg)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, bg)
+
+    app.setPalette(pal)
+
+
 DARK_APP_QSS = """
 /* ---- Base ---- */
 QMainWindow {
@@ -41,7 +91,7 @@ QTabWidget::pane {
     border: 1px solid rgba(255, 255, 255, 26);
     border-radius: 14px;
     top: -1px;
-    background: rgba(15, 23, 42, 90);
+    background: #0e1728;
 }
 
 QTabBar {
@@ -49,7 +99,7 @@ QTabBar {
 }
 
 QTabBar::tab {
-    background: rgba(255, 255, 255, 15);
+    background: #1a2740;
     color: rgba(226, 232, 240, 204);
     border: 1px solid rgba(255, 255, 255, 26);
     padding: 8px 14px;
@@ -167,12 +217,12 @@ QCheckBox::indicator:checked {
 
 /* ---- Tables ---- */
 QTableWidget, QTableView {
-    background: rgba(15, 23, 42, 0.30);
+    background: #0e1728;
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 12px;
     gridline-color: transparent;
-    alternate-background-color: rgba(255, 255, 255, 0.03);
-    selection-background-color: rgba(99, 102, 241, 0.28);
+    alternate-background-color: #121d33;
+    selection-background-color: rgba(99, 102, 241, 0.45);
     selection-color: rgba(255, 255, 255, 0.92);
 }
 QHeaderView::section {
