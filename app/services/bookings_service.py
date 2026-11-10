@@ -151,6 +151,7 @@ def create_booking(
     starts_at: datetime,
     ends_at: datetime,
     venue_unit_id: int | None = None,
+    rule_id: int | None = None,
 ) -> int:
     title = (title or "").strip()
     kind = (kind or "").strip().upper()
@@ -200,9 +201,9 @@ def create_booking(
             cur.execute(
                 """
                 INSERT INTO public.bookings(
-                    venue_id, venue_unit_id, tenant_id, gz_group_id, title, activity, starts_at, ends_at, status
+                    venue_id, venue_unit_id, tenant_id, gz_group_id, title, activity, starts_at, ends_at, status, rule_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'planned')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'planned', %s)
                 RETURNING id
                 """,
                 (
@@ -214,6 +215,7 @@ def create_booking(
                     kind,
                     starts_at,
                     ends_at,
+                    int(rule_id) if rule_id is not None else None,
                 ),
             )
             new_id = int(cur.fetchone()[0])
@@ -648,6 +650,7 @@ def create_pd_booking(
     title: str,
     starts_at: datetime,
     ends_at: datetime,
+    rule_id: int | None = None,
 ) -> int:
     return create_booking(
         venue_id=int(venue_id),
@@ -658,6 +661,7 @@ def create_pd_booking(
         kind="PD",
         starts_at=starts_at,
         ends_at=ends_at,
+        rule_id=rule_id,
     )
 
 

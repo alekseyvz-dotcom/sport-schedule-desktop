@@ -192,6 +192,116 @@ def delete_rule(*, user_id: int, role_code: str, rule_id: int) -> None:
             put_conn(conn)
 
 
+def end_rule(
+    *,
+    user_id: int,
+    role_code: str,
+    rule_id: int,
+    end_from: date,
+    created_by: int | None = None,
+    reason: str = "",
+) -> dict:
+    """
+    Завершает правило с даты end_from (включительно):
+      • valid_to правила = end_from - 1 день (если valid_to была позже);
+      • все брони этого правила, начиная с end_from, отменяются (status='cancelled');
+      • прошлые брони (до end_from) не трогаются;
+      • пишется запись в tenant_rule_endings.
+    Всё в одной транзакции. Возвращает {"cancelled": N, "valid_to": date}.
+    """
+    _require_rules_edit(user_id=user_id, role_code=role_code)
+
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, valid_from, valid_to, is_active
+                  FROM public.tenant_recurring_rules
+                 WHERE id = %s
+                   FOR UPDATE
+                """,
+                (int(rule_id),),
+            )
+            rule = cur.fetchone()
+            if not rule:
+                raise ValueError("Правило не найдено")
+
+            if end_from < rule["valid_from"]:
+                raise ValueError(
+                    f"Дата завершения не может быть раньше начала правила ({rule['valid_from']:%d.%m.%Y})"
+                )
+
+            new_valid_to = end_from - timedelta(days=1)
+            if new_valid_to < rule["valid_from"]:
+                # правило закончилось бы до старта — значит, оно просто отключается
+                new_valid_to = rule["valid_from"] - timedelta(days=1)
+
+            cur.execute(
+                """
+                UPDATE public.tenant_recurring_rules
+                   SET valid_to = LEAST(valid_to, %s),
+                       is_active = false
+                 WHERE id = %s
+                """,
+                (new_valid_to, int(rule_id)),
+            )
+
+            # отмена будущих броней именно этого правила
+            cur.execute(
+                """
+                UPDATE public.bookings
+                   SET status = 'cancelled'
+                 WHERE rule_id = %s
+                   AND status <> 'cancelled'
+                   AND starts_at >= %s::date
+                """,
+                (int(rule_id), end_from),
+            )
+            cancelled = int(cur.rowcount)
+
+            cur.execute(
+                """
+                INSERT INTO public.tenant_rule_endings
+                       (rule_id, end_from, cancelled_count, reason, created_by)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (int(rule_id), end_from, cancelled, (reason or "").strip() or None, created_by),
+            )
+
+        conn.commit()
+        return {"cancelled": cancelled, "valid_to": new_valid_to}
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+def count_future_rule_bookings(*, rule_id: int, from_day: date) -> int:
+    """Сколько броней по правилу будет отменено (для подтверждения в UI)."""
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM public.bookings
+                 WHERE rule_id = %s
+                   AND status <> 'cancelled'
+                   AND starts_at >= %s::date
+                """,
+                (int(rule_id), from_day),
+            )
+            return int(cur.fetchone()[0])
+    finally:
+        if conn:
+            put_conn(conn)
+
+
 def _iter_rule_dates(valid_from: date, valid_to: date, weekday: int):
     target = int(weekday) - 1  # Mon=0..Sun=6
     d = valid_from
@@ -260,6 +370,7 @@ def generate_bookings_for_rule_soft(*, rule: TenantRule, venue_id: int, tz: time
                 title=(rule.title or "").strip() or fallback_title,
                 starts_at=starts_dt,
                 ends_at=ends_dt,
+                rule_id=int(rule.id),
             )
             created += 1
 
