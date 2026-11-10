@@ -21,9 +21,11 @@ from app.services.tenant_rules_service import (
     list_rules_for_tenant,
     set_rule_active,
     delete_rule,
+    end_rule,
 )
 
 from app.ui.tenant_rule_dialog import TenantRuleDialog
+from app.ui.rule_end_dialog import RuleEndDialog
 
 
 def _weekday_name(w: int) -> str:
@@ -85,18 +87,21 @@ class TenantRulesWidget(QWidget):
         self.btn_add = QPushButton("Добавить")
         self.btn_edit = QPushButton("Изменить")
         self.btn_disable = QPushButton("Отключить")
+        self.btn_end = QPushButton("Завершить…")
         self.btn_delete = QPushButton("Удалить")
         self.btn_delete.setVisible(self._is_admin)
 
         self.btn_add.clicked.connect(self._on_add)
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_disable.clicked.connect(self._on_disable)
+        self.btn_end.clicked.connect(self._on_end)
         self.btn_delete.clicked.connect(self._on_delete)
 
         top = QHBoxLayout()
         top.addWidget(self.btn_add)
         top.addWidget(self.btn_edit)
         top.addWidget(self.btn_disable)
+        top.addWidget(self.btn_end)
         if self._is_admin:
             top.addWidget(self.btn_delete)
         top.addStretch(1)
@@ -327,6 +332,59 @@ class TenantRulesWidget(QWidget):
             )
 
         self._refresh()
+
+    def _on_end(self) -> None:
+        idx = self._selected_index()
+        if idx is None:
+            QMessageBox.information(self, "Правила", "Выберите правило.")
+            return
+        r = self._rules_local[idx]
+        if not r.get("id"):
+            QMessageBox.information(
+                self, "Правила",
+                "Правило ещё не сохранено. Сначала сохраните карточку контрагента.",
+            )
+            return
+        if r.get("op") == "deactivate" or not r.get("is_active", True):
+            QMessageBox.information(self, "Правила", "Правило уже отключено.")
+            return
+
+        unit = self._unit_label(int(r["venue_unit_id"]))
+        title = f"{_weekday_name(r['weekday'])} {r['starts_at']:%H:%M}–{r['ends_at']:%H:%M} · {unit}"
+        dlg = RuleEndDialog(
+            self,
+            rule_id=int(r["id"]),
+            rule_title=title,
+            valid_from=r["valid_from"],
+            valid_to=r["valid_to"],
+            user_id=self._user_id,
+            role_code=self._role_code,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            res = end_rule(
+                user_id=self._user_id,
+                role_code=self._role_code,
+                rule_id=int(r["id"]),
+                end_from=dlg.end_date(),
+                created_by=self._user_id,
+                reason=dlg.reason(),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Правила", f"Не удалось завершить правило:\n{e}")
+            return
+
+        # локально: правило отключено, valid_to обновлён
+        r["is_active"] = False
+        r["valid_to"] = res["valid_to"]
+        r["op"] = "keep"
+        self._refresh()
+        QMessageBox.information(
+            self, "Правила",
+            f"Правило завершено. Отменено броней: {res['cancelled']}.",
+        )
 
     def _on_disable(self) -> None:
         idx = self._selected_index()
