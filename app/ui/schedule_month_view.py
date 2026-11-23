@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.default_venue import get_default_venue
 from app.services import bookings_service, ref_service
 from app.services.venue_units_service import list_venue_units
 from app.services.users_service import AuthUser
@@ -919,6 +920,11 @@ class ScheduleMonthView(QWidget):
             self._venues = []
         for v in self._venues:
             self.cmb_venue.addItem(v.name, int(v.id))
+        default = get_default_venue(int(self.user.id))
+        if default is not None and default[0] == int(self._org_id):
+            i = self.cmb_venue.findData(default[1])
+            if i >= 0:
+                self.cmb_venue.setCurrentIndex(i)
         self.cmb_venue.blockSignals(False)
         self._apply_empty_state()
 

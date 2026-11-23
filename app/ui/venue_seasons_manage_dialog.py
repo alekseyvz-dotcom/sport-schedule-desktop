@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QSpinBox, QDateEdit, QLineEdit, QDialogButtonBox
 )
 
+from app.ui.schedule_page import _style_calendar_widget
 from app.services.venue_seasons_service import (
     list_season_overrides,
     upsert_season_override,
@@ -37,6 +38,9 @@ class _SeasonEditDialog(QDialog):
         self.dt_to = QDateEdit()
         self.dt_to.setCalendarPopup(True)
         self.dt_to.setDisplayFormat("dd.MM.yyyy")
+
+        _style_calendar_widget(self.dt_from)
+        _style_calendar_widget(self.dt_to)
 
         # дефолт: весь год
         y = int(year)

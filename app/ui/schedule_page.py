@@ -99,6 +99,7 @@ from app.services.bookings_service import (
     cancel_related_booking_parts,
 )
 from app.ui.booking_dialog import BookingDialog
+from app.core.default_venue import get_default_venue
 from app.ui.schedule_month_view import ScheduleMonthView
 from app.ui.schedule_windows_view import ScheduleWindowsView
 from app.ui.client_info_dialog import ClientInfoDialog
@@ -1152,6 +1153,11 @@ class SchedulePage(QWidget):
             self.cmb_org.clear()
             for o in orgs:
                 self.cmb_org.addItem(o.name, o.id)
+            default = get_default_venue(int(self.user.id))
+            if default is not None:
+                i = self.cmb_org.findData(default[0])
+                if i >= 0:
+                    self.cmb_org.setCurrentIndex(i)
             self.cmb_org.blockSignals(False)
 
             self._tenants = [{"id": t.id, "name": t.name} for t in list_active_tenants()]
