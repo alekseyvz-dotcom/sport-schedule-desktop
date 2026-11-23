@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services import bookings_service, ref_service
+from app.services.venue_units_service import list_venue_units
 from app.services.users_service import AuthUser
 
 APP_TZ = timezone(timedelta(hours=3))
@@ -112,28 +113,9 @@ class MonthGeometry:
         return (minutes - self.start_min) * self.px_per_min
 
 
-def assign_lanes(bookings: Sequence) -> List[List[object]]:
-    """
-    Раскладывает занятия одного дня по дорожкам так, чтобы одновременные
-    группы не перекрывали друг друга. Возвращает список дорожек.
-    """
-    lanes: List[List[object]] = []
-    ordered = sorted(bookings, key=lambda b: (b.starts_at, b.ends_at))
-    for b in ordered:
-        placed = False
-        for lane in lanes:
-            if lane[-1].ends_at <= b.starts_at:
-                lane.append(b)
-                placed = True
-                break
-        if not placed:
-            lanes.append([b])
-    return lanes
-
-
 def build_geometry(
     days: Sequence[date],
-    lanes_by_day: Dict[date, List[List[object]]],
+    row_count: int,
     *,
     hour_w: int = HOUR_W,
     start_min: int = 8 * 60,
@@ -147,9 +129,9 @@ def build_geometry(
 
     out: List[DayGeom] = []
     top = 0
+    lane_count = max(1, row_count)
+    height = lane_count * lane_h + 2 * day_pad
     for d in days:
-        lane_count = max(1, len(lanes_by_day.get(d, [])))
-        height = lane_count * lane_h + 2 * day_pad
         out.append(DayGeom(day=d, top=top, height=height, lanes=lane_count))
         top += height + day_gap
 
@@ -306,13 +288,20 @@ class _MonthDateColumn(QWidget):
         super().__init__(parent)
         self._geom: Optional[MonthGeometry] = None
         self._counts: Dict[date, int] = {}
+        self._row_labels: List[str] = []
         self._offset = 0
         self.setFixedWidth(DATE_COL_W)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-    def set_geometry(self, geom: Optional[MonthGeometry], counts: Dict[date, int]) -> None:
+    def set_geometry(
+        self,
+        geom: Optional[MonthGeometry],
+        counts: Dict[date, int],
+        row_labels: Sequence[str] = (),
+    ) -> None:
         self._geom = geom
         self._counts = counts or {}
+        self._row_labels = list(row_labels)
         self.update()
 
     def set_offset(self, offset: int) -> None:
@@ -332,6 +321,9 @@ class _MonthDateColumn(QWidget):
 
         p.setClipRect(self.rect())
         today = date.today()
+        label_font = QFont(self.font())
+        label_font.setPointSizeF(8.0)
+        label_font.setBold(True)
 
         for dg in geom.days:
             y = dg.top - self._offset
@@ -372,6 +364,18 @@ class _MonthDateColumn(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 WEEKDAYS_SHORT[dg.day.weekday()],
             )
+
+            if self._row_labels:
+                p.setFont(label_font)
+                p.setPen(QPen(QColor(226, 232, 240, 150)))
+                fm = QFontMetrics(label_font)
+                for i, text in enumerate(self._row_labels):
+                    row_y = y + geom.day_pad + i * geom.lane_h
+                    p.drawText(
+                        QRectF(DATE_COL_W - 70, row_y, 62, geom.lane_h),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                        fm.elidedText(text, Qt.TextElideMode.ElideRight, 62),
+                    )
 
             count = self._counts.get(dg.day, 0)
             if count:
@@ -451,6 +455,11 @@ class _MonthGrid(QWidget):
                 hour += 1
 
             # дорожки
+            p.setPen(QPen(QColor(255, 255, 255, 16), 1))
+            for i in range(1, dg.lanes):
+                row_line = int(dg.top + geom.day_pad + i * geom.lane_h)
+                p.drawLine(0, row_line, self.width(), row_line)
+
             lanes = self._lanes.get(dg.day, [])
             for lane_index, lane in enumerate(lanes):
                 for b in lane:
@@ -720,6 +729,9 @@ class ScheduleMonthView(QWidget):
         self._venues: List = []
         self._lanes: Dict[date, List[List[object]]] = {}
         self._counts: Dict[date, int] = {}
+        self._bookings: List[object] = []
+        self._row_count = 1
+        self._row_labels: List[str] = []
         self._geom: Optional[MonthGeometry] = None
 
         # ── панель управления ──────────────────────────────────────────────
@@ -887,6 +899,9 @@ class ScheduleMonthView(QWidget):
             self.cmb_venue.blockSignals(False)
             self._lanes = {}
             self._counts = {}
+            self._bookings = []
+            self._row_count = 1
+            self._row_labels = []
             self.rebuild()
             return
 
@@ -926,6 +941,9 @@ class ScheduleMonthView(QWidget):
         if self._org_id is None or venue_id is None:
             self._lanes = {}
             self._counts = {}
+            self._bookings = []
+            self._row_count = 1
+            self._row_labels = []
             self.rebuild()
             return
 
@@ -944,16 +962,30 @@ class ScheduleMonthView(QWidget):
             )
             bookings = []
 
-        lanes_by_day: Dict[date, List[List[object]]] = {}
+        units = list_venue_units(venue_id, include_inactive=False)
+        unit_row = {int(u.id): i for i, u in enumerate(units)}
+
         by_day: Dict[date, List[object]] = {}
         for b in bookings:
             local_day = b.starts_at.astimezone(APP_TZ).date()
             by_day.setdefault(local_day, []).append(b)
 
+        rows_by_day: Dict[date, List[List[object]]] = {}
         for d, items in by_day.items():
-            lanes_by_day[d] = assign_lanes(items)
+            rows: List[List[object]] = [[] for _ in range(max(1, len(units)))]
+            for b in items:
+                uid = getattr(b, "venue_unit_id", None)
+                if uid is None:
+                    for row in rows:
+                        row.append(b)
+                elif int(uid) in unit_row:
+                    rows[unit_row[int(uid)]].append(b)
+            rows_by_day[d] = rows
 
-        self._lanes = lanes_by_day
+        self._lanes = rows_by_day
+        self._bookings = list(bookings)
+        self._row_count = max(1, len(units))
+        self._row_labels = [str(u.name) for u in units] if len(units) > 1 else []
         self._counts = {d: len(items) for d, items in by_day.items()}
         self.rebuild()
 
@@ -983,7 +1015,7 @@ class ScheduleMonthView(QWidget):
 
         geom = build_geometry(
             days,
-            self._lanes,
+            self._row_count,
             hour_w=hour_w,
             start_min=start_min,
             end_min=end_min,
@@ -993,19 +1025,17 @@ class ScheduleMonthView(QWidget):
         self.grid.set_data(geom, self._lanes, self._free_gz_ids)
         self.time_header.set_geometry(geom)
         self.time_header.set_offset(self.scroll.horizontalScrollBar().value())
-        self.date_col.set_geometry(geom, self._counts)
+        self.date_col.set_geometry(geom, self._counts, self._row_labels)
         self.date_col.set_offset(self.scroll.verticalScrollBar().value())
 
         total = sum(self._counts.values())
         pd_count = 0
         gz_count = 0
-        for items in self._lanes.values():
-            for lane in items:
-                for b in lane:
-                    if (getattr(b, "kind", "") or "").upper() == "GZ":
-                        gz_count += 1
-                    else:
-                        pd_count += 1
+        for b in self._bookings:
+            if (getattr(b, "kind", "") or "").upper() == "GZ":
+                gz_count += 1
+            else:
+                pd_count += 1
         self.lbl_summary.setText(f"ПД: {pd_count} · ГЗ: {gz_count} · всего: {total}")
 
     def resizeEvent(self, event) -> None:
