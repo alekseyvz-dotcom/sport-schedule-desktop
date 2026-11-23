@@ -1,6 +1,9 @@
 # app/ui/main_window.py
 import os, tempfile, traceback
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QTabWidget, QWidget,
+)
 from datetime import date
 from app.services.users_service import AuthUser
 from app.ui.tenants_page import TenantsPage
@@ -12,6 +15,9 @@ from app.ui.settings_page import SettingsPage
 from app.ui.gz_page import GzPage
 from app.ui.load_page import LoadPage
 from app.ui.security_page import SecurityPage
+from app.core.default_venue import get_default_venue, set_default_venue
+from app.services.access_service import list_allowed_org_ids
+from app.services.ref_service import list_active_orgs_by_ids, list_active_venues_by_org_ids
 
 
 class MainWindow(QMainWindow):
@@ -56,6 +62,7 @@ class MainWindow(QMainWindow):
             if self._can_tab("tab.settings"):
                 self.tabs.addTab(SettingsPage(user), "Настройки")
     
+            self._build_default_venue_bar()
             self.setCentralWidget(self.tabs)
     
         except Exception as e:
@@ -68,6 +75,53 @@ class MainWindow(QMainWindow):
                 "Ошибка после входа",
                 f"{type(e).__name__}: {e}\n\nЛог: {path}",
             )
+
+    def _build_default_venue_bar(self) -> None:
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 6, 0)
+        row.setSpacing(6)
+        row.addWidget(QLabel("Площадка по умолчанию:"))
+        self.cmb_default_venue = QComboBox()
+        self.cmb_default_venue.setMinimumWidth(260)
+        self.btn_default_venue = QPushButton("Сохранить")
+        self.btn_default_venue.clicked.connect(self._save_default_venue)
+        row.addWidget(self.cmb_default_venue)
+        row.addWidget(self.btn_default_venue)
+        self._fill_default_venues()
+        self.tabs.setCornerWidget(bar, Qt.Corner.TopRightCorner)
+
+    def _fill_default_venues(self) -> None:
+        org_ids = list_allowed_org_ids(int(self.user.id), str(self.user.role_code))
+        orgs = {int(o.id): o.name for o in list_active_orgs_by_ids(org_ids)}
+        self.cmb_default_venue.clear()
+        if not orgs:
+            return
+        for v in list_active_venues_by_org_ids(list(orgs)):
+            self.cmb_default_venue.addItem(f"{orgs[int(v.org_id)]} — {v.name}", (int(v.org_id), int(v.id)))
+        default = get_default_venue(int(self.user.id))
+        for i in range(self.cmb_default_venue.count()):
+            if self.cmb_default_venue.itemData(i) == default:
+                self.cmb_default_venue.setCurrentIndex(i)
+                break
+
+    def _save_default_venue(self) -> None:
+        data = self.cmb_default_venue.currentData()
+        if data is None:
+            return
+        org_id, venue_id = data
+        set_default_venue(int(self.user.id), org_id, venue_id)
+        page = self.page_schedule
+        if page is None:
+            return
+        if page.cmb_org.currentData() != org_id:
+            i = page.cmb_org.findData(org_id)
+            if i >= 0:
+                page.cmb_org.setCurrentIndex(i)
+        else:
+            i = page.month_view.cmb_venue.findData(venue_id)
+            if i >= 0:
+                page.month_view.cmb_venue.setCurrentIndex(i)
 
     def _can_tab(self, code: str) -> bool:
         if not self.user:

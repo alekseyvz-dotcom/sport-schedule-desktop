@@ -40,7 +40,6 @@ from app.services.venues_service import (
     Venue,
 )
 from app.services.venue_units_manage_service import apply_units_scheme
-from app.core.default_venue import set_default_venue
 from app.ui.org_dialog import OrgDialog
 from app.ui.venue_dialog import VenueDialog
 
@@ -195,7 +194,6 @@ class OrgsVenuesPage(QWidget):
         self.btn_venue_archive  = QPushButton("🗄 Архив/Восстановить")
         self.btn_venue_closures = QPushButton("🔒 Закрытия…")
         self.btn_venue_seasons  = QPushButton("🗓 Сезонность…")
-        self.btn_venue_default  = QPushButton("★ По умолчанию")
 
         for b in (
             self.btn_venue_add,
@@ -203,7 +201,6 @@ class OrgsVenuesPage(QWidget):
             self.btn_venue_archive,
             self.btn_venue_closures,
             self.btn_venue_seasons,
-            self.btn_venue_default,
         ):
             b.setMinimumHeight(30)
             b.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -213,7 +210,6 @@ class OrgsVenuesPage(QWidget):
         self.btn_venue_archive.clicked.connect(self._venue_toggle)
         self.btn_venue_closures.clicked.connect(self._venue_closures)
         self.btn_venue_seasons.clicked.connect(self._venue_seasons)
-        self.btn_venue_default.clicked.connect(self._venue_set_default)
 
         venue_row2 = QHBoxLayout()
         venue_row2.setContentsMargins(0, 0, 0, 0)
@@ -223,7 +219,6 @@ class OrgsVenuesPage(QWidget):
         venue_row2.addWidget(self.btn_venue_archive)
         venue_row2.addWidget(self.btn_venue_closures)
         venue_row2.addWidget(self.btn_venue_seasons)
-        venue_row2.addWidget(self.btn_venue_default)
         venue_row2.addStretch(1)  # прижимаем кнопки влево
 
         # Таблица площадок: добавляем колонки "Закрытия" и "Сезонность"
@@ -972,14 +967,6 @@ class OrgsVenuesPage(QWidget):
         dlg.exec()
         # Обновляем таблицу после закрытия диалога
         self.reload_venues()
-
-    def _venue_set_default(self):
-        v = self._selected_venue()
-        if v is None:
-            QMessageBox.information(self, "Площадки", "Выберите площадку в таблице.")
-            return
-        set_default_venue(int(self.user.id), int(v.org_id), int(v.id))
-        QMessageBox.information(self, "Площадки", f"Площадка «{v.name}» выбрана по умолчанию.")
 
     def _venue_seasons(self):
         v = self._selected_venue()
