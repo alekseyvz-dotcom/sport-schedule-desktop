@@ -438,7 +438,7 @@ def load_page(
     end_dt   = datetime.combine(week_end + timedelta(days=1), time(0, 0), tzinfo=TZ)
     bookings = _load_bookings(conn, org_id, start_dt, end_dt, show_cancelled)
 
-    busy = _build_heatmap(resources, bookings, week_start, ws, we)
+    busy = _build_heatmap(resources, bookings, days, ws, we)
 
     grid = []
     for r in resources:
