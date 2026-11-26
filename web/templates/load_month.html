@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Загрузка за месяц — {{ selected_org.name }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/load.css?v=1">
+<link rel="stylesheet" href="/static/css/load_month.css?v=1">
+{% endblock %}
+
+{% block body %}
+<header class="header">
+  <div class="header-top">
+    <h1>▦ Загрузка (месяц)</h1>
+    <div class="header-user">
+      <a href="/schedule?org_id={{ org_id }}&day={{ anchor.isoformat() }}" class="btn-link">📅 Расписание</a>
+      <span class="header-user-name">{{ user.full_name or user.username }}</span>
+      <a href="/logout" class="btn-link">Выход</a>
+    </div>
+  </div>
+
+  <div class="controls">
+    <select onchange="changeOrg(this.value)">
+      {% for o in orgs %}
+      <option value="{{ o.id }}" {% if o.id == org_id %}selected{% endif %}>{{ o.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="load-controls">
+    <div class="week-nav">
+      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ prev_month.isoformat() }}&mode=month&show_cancelled={{ show_cancelled }}">◀</a>
+      <div class="week-title">
+        {{ month_start.strftime('%m.%Y') }}
+        <div class="week-sub">{{ month_start.strftime('%d.%m') }} – {{ month_end.strftime('%d.%m') }}</div>
+      </div>
+      <a class="btn-icon" href="/load?org_id={{ org_id }}&day={{ next_month.isoformat() }}&mode=month&show_cancelled={{ show_cancelled }}">▶</a>
+    </div>
+
+    <label class="toggle-cancelled">
+      <input type="checkbox" {% if show_cancelled %}checked{% endif %} onchange="toggleCancelled(this.checked)">
+      Отменённые
+    </label>
+  </div>
+</header>
+
+<div class="month-wrap">
+  <div class="month-weekdays">
+    {% for wd in ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"] %}
+    <div class="month-wd">{{ wd }}</div>
+    {% endfor %}
+  </div>
+  <div class="month-grid">
+    {% for week in weeks %}
+      {% for c in week %}
+        {% if c %}
+        <a class="month-cell lvl-{{ 0 if c.pct < 1 else 1 if c.pct < 26 else 2 if c.pct < 51 else 3 if c.pct < 76 else 4 if c.pct < 101 else 5 }}"
+           href="{{ c.link }}"
+           title="{{ c.date.strftime('%d.%m.%Y') }} | {{ c.count }} броней | {{ '%.0f'|format(c.pct) }}%">
+          <span class="m-day">{{ c.date.day }}</span>
+          <span class="m-pct">{{ "%.0f"|format(c.pct) }}%</span>
+          <span class="m-count">{{ c.count }}</span>
+        </a>
+        {% else %}
+        <div class="month-cell month-cell-empty"></div>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="month-hint">Нажмите на день, чтобы открыть расписание на этот день. Число внизу — количество броней.</p>
+</div>
+
+<script>
+function changeOrg(orgId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("org_id", orgId);
+  window.location.href = url.toString();
+}
+
+function toggleCancelled(checked) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("show_cancelled", checked ? "true" : "false");
+  window.location.href = url.toString();
+}
+</script>
+{% endblock %}
