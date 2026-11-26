@@ -63,7 +63,11 @@ def _load_available_venue_ids(
     if not venue_ids:
         return set()
 
-    days = [week_start + timedelta(days=i) for i in range(7)]
+    days = []
+    d = week_start
+    while d <= week_end:
+        days.append(d)
+        d += timedelta(days=1)
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
@@ -277,7 +281,7 @@ def _load_bookings(
 def _build_heatmap(
     resources: list,
     bookings: list,
-    week_start: date,
+    days: list,
     ws: time,
     we: time,
 ) -> Dict[Tuple[int, Optional[int], date], int]:
@@ -285,8 +289,7 @@ def _build_heatmap(
     res_keys = {(r["venue_id"], r["venue_unit_id"]) for r in resources}
 
     for b in bookings:
-        for i in range(7):
-            d  = week_start + timedelta(days=i)
+        for d in days:
             w0 = datetime.combine(d, ws, tzinfo=TZ)
             w1 = datetime.combine(d, we, tzinfo=TZ)
 
@@ -303,12 +306,80 @@ def _build_heatmap(
     return busy
 
 
+def _month_response(request, user, orgs, selected_org, has_analytics, org_id, anchor, show_cancelled, conn):
+    month_start = anchor.replace(day=1)
+    month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+    days = []
+    d = month_start
+    while d <= month_end:
+        days.append(d)
+        d += timedelta(days=1)
+
+    ws = time(0, 0)       if selected_org["is_24h"] else selected_org["work_start"]
+    we = time(23, 59, 59) if selected_org["is_24h"] else selected_org["work_end"]
+    cap_day = _sec_between(ws, we)
+
+    resources = _load_resources(conn, org_id, month_start, month_end)
+    start_dt = datetime.combine(month_start, time(0, 0), tzinfo=TZ)
+    end_dt = datetime.combine(month_end + timedelta(days=1), time(0, 0), tzinfo=TZ)
+    bookings = _load_bookings(conn, org_id, start_dt, end_dt, show_cancelled)
+
+    busy = _build_heatmap(resources, bookings, days, ws, we)
+
+    day_busy: Dict[date, int] = defaultdict(int)
+    for (_, _, dd), sec in busy.items():
+        day_busy[dd] += sec
+
+    day_count: Dict[date, int] = defaultdict(int)
+    for b in bookings:
+        day_count[b["starts_at"].astimezone(TZ).date()] += 1
+
+    cap_total = cap_day * len(resources)
+    cells: list = [None] * month_start.weekday()
+    for dd in days:
+        pct = 0.0 if cap_total <= 0 else round(100.0 * day_busy[dd] / cap_total, 1)
+        cells.append({
+            "date":  dd,
+            "pct":   pct,
+            "count": day_count[dd],
+            "link": (
+                f"/schedule?org_id={org_id}"
+                f"&day={dd.isoformat()}"
+                f"&view=grid&period=day"
+                f"&show_cancelled={'true' if show_cancelled else 'false'}"
+            ),
+        })
+    cells += [None] * (-len(cells) % 7)
+    weeks = [cells[i:i + 7] for i in range(0, len(cells), 7)]
+
+    return templates.TemplateResponse(
+        "load_month.html",
+        {
+            "request":        request,
+            "user":           user,
+            "orgs":           orgs,
+            "selected_org":   selected_org,
+            "org_id":         org_id,
+            "anchor":         anchor,
+            "month_start":    month_start,
+            "month_end":      month_end,
+            "prev_month":     (month_start - timedelta(days=1)).replace(day=1),
+            "next_month":     month_end + timedelta(days=1),
+            "weeks":          weeks,
+            "show_cancelled": show_cancelled,
+            "has_analytics":  has_analytics,
+        },
+    )
+
+
 @router.get("/load", response_class=HTMLResponse)
 def load_page(
     request: Request,
     org_id: Optional[int] = Query(None),
     day: Optional[str] = Query(None),
     show_cancelled: bool = Query(False),
+    mode: str = Query("week"),
     user=Depends(get_current_user),
     conn=Depends(get_db),
 ):
@@ -345,6 +416,9 @@ def load_page(
         anchor = date.fromisoformat(day) if day else date.today()
     except ValueError:
         anchor = date.today()
+
+    if mode == "month":
+        return _month_response(request, user, orgs, selected_org, has_analytics, org_id, anchor, show_cancelled, conn)
 
     week_start, week_end = _week_range(anchor)
     prev_week = week_start - timedelta(days=7)
